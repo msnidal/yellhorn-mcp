@@ -37,7 +37,10 @@ The server also requires the GitHub CLI (`gh`) to be installed and authenticated
 ### Running the server
 
 ```bash
-# Using the MCP CLI (recommended)
+# As a standalone server
+yellhorn-mcp --repo-path /path/to/repo --host 127.0.0.1 --port 8000
+
+# Using the MCP CLI
 mcp dev yellhorn_mcp.server
 
 # Install as a permanent MCP server for Claude Desktop

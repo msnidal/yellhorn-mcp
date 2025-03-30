@@ -53,9 +53,24 @@ export YELLHORN_MCP_MODEL=gemini-2.5-pro-exp-03-25
 
 ## Running the Server
 
+### Standalone Mode
+
+The simplest way to run the server is as a standalone HTTP server:
+
+```bash
+# Run as a standalone HTTP server
+yellhorn-mcp --repo-path /path/to/repo --host 127.0.0.1 --port 8000
+```
+
+Available command-line options:
+- `--repo-path`: Path to the Git repository (defaults to current directory or REPO_PATH env var)
+- `--model`: Gemini model to use (defaults to "gemini-2.5-pro-exp-03-25" or YELLHORN_MCP_MODEL env var)
+- `--host`: Host to bind the server to (defaults to 127.0.0.1)
+- `--port`: Port to bind the server to (defaults to 8000)
+
 ### Development Mode
 
-The quickest way to test the server is with the MCP Inspector:
+The quickest way to test the server interactively is with the MCP Inspector:
 
 ```bash
 # Run the server in development mode
@@ -127,7 +142,38 @@ Reviews a GitHub pull request against the original work plan and posts feedback 
 
 - None (posts review asynchronously to the PR)
 
-## Example Client
+## Integration with Other Programs
+
+### HTTP API
+
+When running in standalone mode, Yellhorn MCP exposes a standard HTTP API that can be accessed by any HTTP client:
+
+```bash
+# Run the server
+yellhorn-mcp --host 127.0.0.1 --port 8000
+```
+
+You can then make requests to the server's API endpoints:
+
+```bash
+# Get the OpenAPI schema
+curl http://127.0.0.1:8000/openapi.json
+
+# List available tools
+curl http://127.0.0.1:8000/tools
+
+# Call a tool (generate_work_plan)
+curl -X POST http://127.0.0.1:8000/tools/generate_work_plan \
+  -H "Content-Type: application/json" \
+  -d '{"task_description": "Implement user authentication"}'
+
+# Call a tool (review_work_plan)
+curl -X POST http://127.0.0.1:8000/tools/review_work_plan \
+  -H "Content-Type: application/json" \
+  -d '{"work_plan_issue_url": "https://github.com/user/repo/issues/1", "pull_request_url": "https://github.com/user/repo/pull/2"}'
+```
+
+### Example Client
 
 The package includes an example client that demonstrates how to interact with the server programmatically:
 
@@ -142,7 +188,7 @@ python -m examples.client_example plan "Implement user authentication"
 python -m examples.client_example review --work-plan-url https://github.com/user/repo/issues/1 --pr-url https://github.com/user/repo/pull/2
 ```
 
-The example client uses the MCP client API to interact with the server through the stdio transport, which is the same approach Claude Code uses.
+The example client uses the MCP client API to interact with the server through stdio transport, which is the same approach Claude Code uses.
 
 ## Debugging and Troubleshooting
 
