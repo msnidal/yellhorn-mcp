@@ -366,6 +366,7 @@ async def process_work_plan_async(
     task_description: str,
     issue_number: str,
     ctx: Context,
+    detailed_description: str = "",
 ) -> None:
     """
     Process work plan generation asynchronously and update the GitHub issue.
@@ -377,11 +378,21 @@ async def process_work_plan_async(
         task_description: Task description.
         issue_number: GitHub issue number to update.
         ctx: Server context.
+        detailed_description: Detailed description for the workplan (optional).
     """
     try:
         # Get codebase snapshot
         file_paths, file_contents = await get_codebase_snapshot(repo_path)
         codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
+
+        # Include detailed description in the prompt if provided
+        details_section = ""
+        if detailed_description:
+            details_section = f"""
+<detailed_description>
+{detailed_description}
+</detailed_description>
+"""
 
         # Construct prompt
         prompt = f"""You are an expert software developer tasked with creating a detailed work plan that will be published as a GitHub issue.
@@ -391,6 +402,7 @@ async def process_work_plan_async(
 <task_description>
 {task_description}
 </task_description>
+{details_section}
 
 Please provide a highly detailed work plan for implementing this task, considering the existing codebase.
 Include specific files to modify, new files to create, and detailed implementation steps.
@@ -440,7 +452,12 @@ The work plan should be comprehensive enough that a developer could implement it
     name="generate_work_plan",
     description="Generate a detailed work plan for implementing a task based on the current codebase. Creates a GitHub issue and returns the issue URL.",
 )
-async def generate_work_plan(task_description: str, ctx: Context) -> str:
+async def generate_work_plan(
+    task_description: str, 
+    ctx: Context,
+    title: str = "",
+    detailed_description: str = "",
+) -> str:
     """
     Generate a work plan based on the task description and codebase.
     Creates a GitHub issue and processes the work plan generation asynchronously.
@@ -448,6 +465,8 @@ async def generate_work_plan(task_description: str, ctx: Context) -> str:
     Args:
         task_description: Full description of the task to implement.
         ctx: Server context with repository path and Gemini model.
+        title: Title for the GitHub issue (optional).
+        detailed_description: Detailed description for the workplan (optional).
 
     Returns:
         Dictionary containing the GitHub issue URL.
@@ -460,16 +479,19 @@ async def generate_work_plan(task_description: str, ctx: Context) -> str:
     model: str = ctx.request_context.lifespan_context["model"]
 
     try:
-        # Create a GitHub issue
-        title = f"Work Plan: {task_description[:60]}{'...' if len(task_description) > 60 else ''}"
-        initial_body = f"# Work Plan for: {task_description}\n\n*Generating detailed work plan, please wait...*"
+        # Use provided title or generate one from task description
+        issue_title = title if title else f"Work Plan: {task_description[:60]}{'...' if len(task_description) > 60 else ''}"
+        
+        # Prepare initial body with detailed description if provided
+        description_section = f"\n\n## Description\n{detailed_description}" if detailed_description else ""
+        initial_body = f"# {issue_title}{description_section}\n\n*Generating detailed work plan, please wait...*"
 
+        # Create a GitHub issue with the yellhorn-mcp label
         issue_url = await run_github_command(
-            repo_path, ["issue", "create", "--title", title, "--body", initial_body]
+            repo_path, ["issue", "create", "--title", issue_title, "--body", initial_body, "--label", "yellhorn-mcp"]
         )
 
         # Extract issue number and URL
-        # Assuming format: "#123: Issue title\nhttps://github.com/user/repo/issues/123"
         await ctx.log(
             level="info",
             message=f"GitHub issue created: {issue_url}",
@@ -478,7 +500,15 @@ async def generate_work_plan(task_description: str, ctx: Context) -> str:
 
         # Start async processing
         asyncio.create_task(
-            process_work_plan_async(repo_path, client, model, task_description, issue_number, ctx)
+            process_work_plan_async(
+                repo_path, 
+                client, 
+                model, 
+                task_description, 
+                issue_number, 
+                ctx, 
+                detailed_description=detailed_description
+            )
         )
 
         return issue_url
@@ -494,6 +524,7 @@ async def process_review_async(
     work_plan: str,
     diff: str,
     pr_url: str | None,
+    work_plan_issue_url: str | None,
     ctx: Context,
 ) -> str:
     """
@@ -506,14 +537,21 @@ async def process_review_async(
         work_plan: The original work plan.
         diff: The code diff to review.
         pr_url: Optional URL to the GitHub PR where the review should be posted.
+        work_plan_issue_url: Optional URL to the GitHub issue with the original work plan.
         ctx: Server context.
 
     Returns:
         The review content.
     """
     try:
+        # Get codebase snapshot for better context
+        file_paths, file_contents = await get_codebase_snapshot(repo_path)
+        codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
+
         # Construct prompt
         prompt = f"""You are an expert code reviewer evaluating if a code diff correctly implements a work plan.
+
+{codebase_info}
 
 Original Work Plan:
 {work_plan}
@@ -541,6 +579,11 @@ Format your response as a clear, structured review with specific recommendations
         review = response.text
         if not review:
             raise YellhornMCPError("Received an empty response from Gemini API.")
+
+        # Add reference to the original issue if provided
+        if work_plan_issue_url:
+            issue_reference = f"\n\n---\n*Review for work plan: {work_plan_issue_url}*"
+            review = review + issue_reference
 
         # Post to GitHub PR if URL provided
         if pr_url:
@@ -584,7 +627,7 @@ async def review_work_plan(
 
     Fetches the work plan content from the provided GitHub issue URL and the code diff
     from the GitHub PR URL. It then processes the review asynchronously and posts the
-    feedback directly to the PR as a comment.
+    feedback directly to the PR as a comment, including a reference to the original issue.
 
     Args:
         work_plan_issue_url: GitHub issue URL containing the work plan.
@@ -608,7 +651,16 @@ async def review_work_plan(
 
         # Process the review asynchronously
         review_task = asyncio.create_task(
-            process_review_async(repo_path, client, model, work_plan, diff, pull_request_url, ctx)
+            process_review_async(
+                repo_path, 
+                client, 
+                model, 
+                work_plan, 
+                diff, 
+                pull_request_url, 
+                work_plan_issue_url, 
+                ctx
+            )
         )
         return None
 
