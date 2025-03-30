@@ -118,15 +118,16 @@ This will use the `review_work_plan` tool to retrieve the work plan from the iss
 
 ### generate_work_plan
 
-Creates a GitHub issue with a detailed work plan based on the task description and your codebase. The plan is generated asynchronously, and the issue is updated once it's ready.
+Creates a GitHub issue with a detailed work plan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously, with the issue being updated once it's ready.
 
 **Input**:
 
-- `task_description`: Description of the task to implement
+- `title`: Title for the GitHub issue (will be used as issue title and header)
+- `detailed_description`: Detailed description for the workplan
 
 **Output**:
 
-- `issue_url`: URL to the created GitHub issue
+- URL to the created GitHub issue
 
 ### review_work_plan
 
@@ -165,7 +166,7 @@ curl http://127.0.0.1:8000/tools
 # Call a tool (generate_work_plan)
 curl -X POST http://127.0.0.1:8000/tools/generate_work_plan \
   -H "Content-Type: application/json" \
-  -d '{"task_description": "Implement user authentication"}'
+  -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"}'
 
 # Call a tool (review_work_plan)
 curl -X POST http://127.0.0.1:8000/tools/review_work_plan \
@@ -182,7 +183,7 @@ The package includes an example client that demonstrates how to interact with th
 python -m examples.client_example list
 
 # Generate a work plan
-python -m examples.client_example plan "Implement user authentication"
+python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"
 
 # Review using GitHub issue and PR URLs
 python -m examples.client_example review --work-plan-url https://github.com/user/repo/issues/1 --pr-url https://github.com/user/repo/pull/2

@@ -125,45 +125,36 @@ async def test_generate_work_plan(mock_request_context, mock_genai_client):
         mock_gh.return_value = "https://github.com/user/repo/issues/123"
 
         with patch("asyncio.create_task") as mock_create_task:
-            # Test with just task description
-            response = await generate_work_plan("Implement feature X", mock_request_context)
+            # Test with required title and detailed description
+            response = await generate_work_plan(
+                title="Feature Implementation Plan",
+                detailed_description="Create a new feature to support X",
+                ctx=mock_request_context
+            )
 
             assert response == "https://github.com/user/repo/issues/123"
             mock_gh.assert_called_once()
             mock_create_task.assert_called_once()
 
-            # Check that the GitHub issue is created with the task in the title and yellhorn-mcp label
+            # Check that the GitHub issue is created with the provided title and yellhorn-mcp label
             args, kwargs = mock_gh.call_args
             assert "issue" in args[1]
             assert "create" in args[1]
-            assert "Work Plan: Implement feature X" in args[1]
+            assert "Feature Implementation Plan" in args[1]
             assert "--label" in args[1]
             assert "yellhorn-mcp" in args[1]
             
-            # Reset mocks for next test
-            mock_gh.reset_mock()
-            mock_create_task.reset_mock()
-            
-            # Test with custom title and detailed description
-            response = await generate_work_plan(
-                task_description="Implement feature X",
-                ctx=mock_request_context,
-                title="Custom Title",
-                detailed_description="Detailed implementation notes"
-            )
-            
-            assert response == "https://github.com/user/repo/issues/123"
-            mock_gh.assert_called_once()
-            mock_create_task.assert_called_once()
-            
-            # Check that the GitHub issue is created with the custom title
-            args, kwargs = mock_gh.call_args
-            assert "Custom Title" in args[1]
             # Get the body argument which is '--body' followed by the content
             body_index = args[1].index("--body") + 1
             body_content = args[1][body_index]
+            assert "# Feature Implementation Plan" in body_content
             assert "## Description" in body_content
-            assert "Detailed implementation notes" in body_content
+            assert "Create a new feature to support X" in body_content
+            
+            # Check that the process_work_plan_async task is created with the correct parameters
+            args, kwargs = mock_create_task.call_args
+            coroutine = args[0]
+            assert coroutine.__name__ == 'process_work_plan_async'
 
 
 @pytest.mark.asyncio
@@ -280,50 +271,32 @@ async def test_process_work_plan_async(mock_request_context, mock_genai_client):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
 
-        # Test without detailed description
+        # Test with required parameters
         await process_work_plan_async(
             Path("/mock/repo"),
             mock_genai_client,
             "gemini-model",
-            "Test task",
+            "Feature Implementation Plan",
             "123",
             mock_request_context,
+            detailed_description="Create a new feature to support X"
         )
 
-        # Check that the API was called with the right model
+        # Check that the API was called with the right model and parameters
         mock_genai_client.aio.models.generate_content.assert_called_once()
         args, kwargs = mock_genai_client.aio.models.generate_content.call_args
         assert kwargs.get("model") == "gemini-model"
-        assert "Test task" in kwargs.get("contents", "")
-        assert "<detailed_description>" not in kwargs.get("contents", "")
+        assert "<title>" in kwargs.get("contents", "")
+        assert "Feature Implementation Plan" in kwargs.get("contents", "")
+        assert "<detailed_description>" in kwargs.get("contents", "")
+        assert "Create a new feature to support X" in kwargs.get("contents", "")
 
-        # Check that the issue was updated with the work plan
+        # Check that the issue was updated with the work plan including the title
         mock_update.assert_called_once()
         args, kwargs = mock_update.call_args
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
-        assert args[2] == "Mock response text"
-
-        # Reset mocks for next test
-        mock_genai_client.aio.models.generate_content.reset_mock()
-        mock_update.reset_mock()
-
-        # Test with detailed description
-        await process_work_plan_async(
-            Path("/mock/repo"),
-            mock_genai_client,
-            "gemini-model",
-            "Test task",
-            "123",
-            mock_request_context,
-            detailed_description="This is a detailed description"
-        )
-
-        # Check that the API was called with the detailed description included
-        mock_genai_client.aio.models.generate_content.assert_called_once()
-        args, kwargs = mock_genai_client.aio.models.generate_content.call_args
-        assert "<detailed_description>" in kwargs.get("contents", "")
-        assert "This is a detailed description" in kwargs.get("contents", "")
+        assert args[2] == "# Feature Implementation Plan\n\nMock response text"
 
 
 @pytest.mark.asyncio
@@ -409,7 +382,7 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
         )
 
         # Check that the review contains the right content
-        assert response == "Mock response text\n\n---\n*Review for work plan: https://github.com/user/repo/issues/2*"
+        assert response == f"Review based on work plan: {issue_url}\n\nMock response text"
         
         # Check that the API was called with codebase included in prompt
         mock_genai_client.aio.models.generate_content.assert_called_once()

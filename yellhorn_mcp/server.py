@@ -363,10 +363,10 @@ async def process_work_plan_async(
     repo_path: Path,
     client: genai.Client,
     model: str,
-    task_description: str,
+    title: str,
     issue_number: str,
     ctx: Context,
-    detailed_description: str = "",
+    detailed_description: str,
 ) -> None:
     """
     Process work plan generation asynchronously and update the GitHub issue.
@@ -375,34 +375,28 @@ async def process_work_plan_async(
         repo_path: Path to the repository.
         client: Gemini API client.
         model: Gemini model name.
-        task_description: Task description.
+        title: Title for the work plan.
         issue_number: GitHub issue number to update.
         ctx: Server context.
-        detailed_description: Detailed description for the workplan (optional).
+        detailed_description: Detailed description for the workplan.
     """
     try:
         # Get codebase snapshot
         file_paths, file_contents = await get_codebase_snapshot(repo_path)
         codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
-        # Include detailed description in the prompt if provided
-        details_section = ""
-        if detailed_description:
-            details_section = f"""
-<detailed_description>
-{detailed_description}
-</detailed_description>
-"""
-
         # Construct prompt
         prompt = f"""You are an expert software developer tasked with creating a detailed work plan that will be published as a GitHub issue.
         
 {codebase_info}
 
-<task_description>
-{task_description}
-</task_description>
-{details_section}
+<title>
+{title}
+</title>
+
+<detailed_description>
+{detailed_description}
+</detailed_description>
 
 Please provide a highly detailed work plan for implementing this task, considering the existing codebase.
 Include specific files to modify, new files to create, and detailed implementation steps.
@@ -417,11 +411,11 @@ The work plan should be comprehensive enough that a developer could implement it
 """
         await ctx.log(
             level="info",
-            message=f"Generating work plan with Gemini API for task: {task_description} with model {model} at file paths: {file_paths}",
+            message=f"Generating work plan with Gemini API for title: {title} with model {model}",
         )
         response = await client.aio.models.generate_content(model=model, contents=prompt)
-        work_plan = response.text
-        if not work_plan:
+        work_plan_content = response.text
+        if not work_plan_content:
             await update_github_issue(
                 repo_path,
                 issue_number,
@@ -429,8 +423,11 @@ The work plan should be comprehensive enough that a developer could implement it
             )
             return
 
+        # Add the title as header to the final body
+        full_body = f"# {title}\n\n{work_plan_content}"
+        
         # Update the GitHub issue with the generated work plan
-        await update_github_issue(repo_path, issue_number, work_plan)
+        await update_github_issue(repo_path, issue_number, full_body)
         await ctx.log(
             level="info",
             message=f"Successfully updated GitHub issue #{issue_number} with generated work plan",
@@ -450,26 +447,24 @@ The work plan should be comprehensive enough that a developer could implement it
 
 @mcp.tool(
     name="generate_work_plan",
-    description="Generate a detailed work plan for implementing a task based on the current codebase. Creates a GitHub issue and returns the issue URL.",
+    description="Generate a detailed work plan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'.",
 )
 async def generate_work_plan(
-    task_description: str, 
+    title: str,
+    detailed_description: str,
     ctx: Context,
-    title: str = "",
-    detailed_description: str = "",
 ) -> str:
     """
-    Generate a work plan based on the task description and codebase.
+    Generate a work plan based on the provided title and detailed description.
     Creates a GitHub issue and processes the work plan generation asynchronously.
 
     Args:
-        task_description: Full description of the task to implement.
+        title: Title for the GitHub issue (will be used as issue title and header).
+        detailed_description: Detailed description for the workplan.
         ctx: Server context with repository path and Gemini model.
-        title: Title for the GitHub issue (optional).
-        detailed_description: Detailed description for the workplan (optional).
 
     Returns:
-        Dictionary containing the GitHub issue URL.
+        GitHub issue URL where the work plan will be posted.
 
     Raises:
         YellhornMCPError: If there's an error generating the work plan.
@@ -479,16 +474,12 @@ async def generate_work_plan(
     model: str = ctx.request_context.lifespan_context["model"]
 
     try:
-        # Use provided title or generate one from task description
-        issue_title = title if title else f"Work Plan: {task_description[:60]}{'...' if len(task_description) > 60 else ''}"
-        
-        # Prepare initial body with detailed description if provided
-        description_section = f"\n\n## Description\n{detailed_description}" if detailed_description else ""
-        initial_body = f"# {issue_title}{description_section}\n\n*Generating detailed work plan, please wait...*"
+        # Prepare initial body with the title and detailed description
+        initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed work plan, please wait...*"
 
         # Create a GitHub issue with the yellhorn-mcp label
         issue_url = await run_github_command(
-            repo_path, ["issue", "create", "--title", issue_title, "--body", initial_body, "--label", "yellhorn-mcp"]
+            repo_path, ["issue", "create", "--title", title, "--body", initial_body, "--label", "yellhorn-mcp"]
         )
 
         # Extract issue number and URL
@@ -504,7 +495,7 @@ async def generate_work_plan(
                 repo_path, 
                 client, 
                 model, 
-                task_description, 
+                title, 
                 issue_number, 
                 ctx, 
                 detailed_description=detailed_description
@@ -576,14 +567,15 @@ Format your response as a clear, structured review with specific recommendations
         response = await client.aio.models.generate_content(model=model, contents=prompt)
 
         # Extract review
-        review = response.text
-        if not review:
+        review_content = response.text
+        if not review_content:
             raise YellhornMCPError("Received an empty response from Gemini API.")
 
         # Add reference to the original issue if provided
         if work_plan_issue_url:
-            issue_reference = f"\n\n---\n*Review for work plan: {work_plan_issue_url}*"
-            review = review + issue_reference
+            review = f"Review based on work plan: {work_plan_issue_url}\n\n{review_content}"
+        else:
+            review = review_content
 
         # Post to GitHub PR if URL provided
         if pr_url:
