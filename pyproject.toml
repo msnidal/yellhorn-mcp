@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yellhorn-mcp"
-version = "0.1.0"
+version = "0.1.1"
 authors = [{ name = "Author" }]
 description = "Yellhorn MCP server uses Gemini 2.5 pro to generate detailed work plans and review pull requests."
 readme = "README.md"
