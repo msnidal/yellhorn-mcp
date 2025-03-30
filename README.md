@@ -76,12 +76,13 @@ Generates a detailed work plan based on the task description and your codebase.
 
 ### review_work_plan
 
-Reviews a code diff against the original work plan and provides feedback.
+Reviews a code diff against the original work plan and provides feedback. Can work with GitHub URLs for both the work plan and diff.
 
 **Input**:
 
-- `work_plan`: The original work plan
-- `diff`: The code diff to review
+- `url_or_content`: Either a GitHub issue/PR URL containing the work plan, or the raw work plan text
+- `diff_or_pr_url`: (Optional) Either a GitHub PR URL containing the diff to review, raw diff content, or None to use local git diff
+- `post_to_pr`: (Optional) Whether to post the review as a comment on the PR
 
 **Output**:
 

@@ -117,12 +117,13 @@ Creates a GitHub issue with a detailed work plan based on the task description a
 
 ### review_work_plan
 
-Reviews a code diff against the original work plan and provides feedback.
+Reviews a code diff against the original work plan and provides feedback. Can accept GitHub issue/PR URLs for both the work plan and the diff.
 
 **Input**:
 
-- `work_plan`: The original work plan
-- `diff`: The code diff to review
+- `url_or_content`: Either a GitHub issue/PR URL containing the work plan, or the raw work plan text
+- `diff_or_pr_url`: (Optional) Either a GitHub PR URL containing the diff to review, raw diff content, or None to use local git diff
+- `post_to_pr`: (Optional) Whether to post the review as a comment on the PR (only applicable if `diff_or_pr_url` is a PR URL)
 
 **Output**:
 
@@ -139,11 +140,17 @@ python -m examples.client_example list
 # Generate a work plan
 python -m examples.client_example plan "Implement user authentication"
 
-# Review a diff against a work plan
-python -m examples.client_example review work_plan.md
+# Review a diff against a work plan (from local file)
+python -m examples.client_example review --work-plan work_plan.md
 
-# Review a specific diff file
-python -m examples.client_example review work_plan.md --diff-file changes.diff
+# Review a specific diff file against a work plan
+python -m examples.client_example review --work-plan work_plan.md --diff-file changes.diff
+
+# Review using GitHub issue and PR URLs
+python -m examples.client_example review --work-plan-url https://github.com/user/repo/issues/1 --pr-url https://github.com/user/repo/pull/2
+
+# Review and post the result as a comment to the PR
+python -m examples.client_example review --work-plan-url https://github.com/user/repo/issues/1 --pr-url https://github.com/user/repo/pull/2 --post-to-pr
 ```
 
 The example client uses the MCP client API to interact with the server through the stdio transport, which is the same approach Claude Code uses.
