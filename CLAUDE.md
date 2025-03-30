@@ -1,5 +1,9 @@
 # CLAUDE.md - Guidelines for AI Assistants
 
+## Testing
+
+- **Unit Tests**: All code must be covered by unit tests. Use `pytest` for writing and running tests.
+
 ## Code Style Guidelines
 
 - **Python Version**: 3.10+ (use modern typing with `|` operator)

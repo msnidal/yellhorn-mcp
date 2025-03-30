@@ -1,37 +1,44 @@
 """Tests for the Yellhorn MCP server."""
 
-import os
-import pytest
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from google import genai
+from mcp.server.fastmcp import Context
 
 from yellhorn_mcp.server import (
+    ReviewDiffRequest,
+    WorkPlanRequest,
+    YellhornMCPError,
+    format_codebase_for_prompt,
     generate_work_plan,
+    get_codebase_snapshot,
     review_diff,
     run_git_command,
-    get_codebase_snapshot,
-    format_codebase_for_prompt,
-    WorkPlanRequest,
-    ReviewDiffRequest,
 )
 
 
 @pytest.fixture
-def mock_context():
-    """Fixture for mock server context."""
-    return {
+def mock_request_context():
+    """Fixture for mock request context."""
+    mock_ctx = MagicMock(spec=Context)
+    mock_ctx.request_context.lifespan_context = {
         "repo_path": Path("/mock/repo"),
-        "model": MagicMock(),
+        "client": MagicMock(spec=genai.Client),
+        "model": "gemini-2.5-pro-exp-03-25",
     }
+    return mock_ctx
 
 
 @pytest.fixture
-def mock_gemini_response():
-    """Fixture for mock Gemini API response."""
+def mock_genai_client():
+    """Fixture for mock Gemini API client."""
+    client = MagicMock(spec=genai.Client)
     response = MagicMock()
     response.text = "Mock response text"
-    return response
+    client.aio.models.generate_content = AsyncMock(return_value=response)
+    return client
 
 
 @pytest.mark.asyncio
@@ -47,6 +54,19 @@ async def test_run_git_command_success():
         
         assert result == "output"
         mock_exec.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_git_command_failure():
+    """Test failed Git command execution."""
+    with patch("asyncio.create_subprocess_exec") as mock_exec:
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"", b"error message")
+        mock_process.returncode = 1
+        mock_exec.return_value = mock_process
+        
+        with pytest.raises(YellhornMCPError, match="Git command failed: error message"):
+            await run_git_command(Path("/mock/repo"), ["status"])
 
 
 @pytest.mark.asyncio
@@ -90,9 +110,10 @@ async def test_format_codebase_for_prompt():
 
 
 @pytest.mark.asyncio
-async def test_generate_work_plan(mock_context, mock_gemini_response):
+async def test_generate_work_plan(mock_request_context, mock_genai_client):
     """Test generating a work plan."""
-    mock_context["model"].generate_content.return_value = mock_gemini_response
+    # Set the mock client in the context
+    mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
     
     with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -100,27 +121,38 @@ async def test_generate_work_plan(mock_context, mock_gemini_response):
         with patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format:
             mock_format.return_value = "Formatted codebase"
             
+            # The generate_work_plan function is already imported at the top
+            
             request = WorkPlanRequest(task_description="Implement feature X")
-            response = await generate_work_plan(request, mock_context)
+            response = await generate_work_plan(request, mock_request_context)
             
             assert response.work_plan == "Mock response text"
-            mock_context["model"].generate_content.assert_called_once()
-            assert "Implement feature X" in mock_context["model"].generate_content.call_args[0][0]
+            mock_genai_client.aio.models.generate_content.assert_called_once()
+            
+            # Check that the task description is included in the prompt
+            args, kwargs = mock_genai_client.aio.models.generate_content.call_args
+            assert "Implement feature X" in kwargs.get("contents", "")
 
 
 @pytest.mark.asyncio
-async def test_review_diff(mock_context, mock_gemini_response):
+async def test_review_diff(mock_request_context, mock_genai_client):
     """Test reviewing a diff."""
-    mock_context["model"].generate_content.return_value = mock_gemini_response
+    # Set the mock client in the context
+    mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
+    
+    # The review_diff function is already imported at the top
     
     request = ReviewDiffRequest(
         work_plan="1. Implement X\n2. Test X",
         diff="diff --git a/file.py b/file.py\n+def x(): pass",
     )
     
-    response = await review_diff(request, mock_context)
+    response = await review_diff(request, mock_request_context)
     
     assert response.review == "Mock response text"
-    mock_context["model"].generate_content.assert_called_once()
-    assert "1. Implement X" in mock_context["model"].generate_content.call_args[0][0]
-    assert "diff --git" in mock_context["model"].generate_content.call_args[0][0]
+    mock_genai_client.aio.models.generate_content.assert_called_once()
+    
+    # Check that the work plan and diff are included in the prompt
+    args, kwargs = mock_genai_client.aio.models.generate_content.call_args
+    assert "1. Implement X" in kwargs.get("contents", "")
+    assert "diff --git" in kwargs.get("contents", "")
