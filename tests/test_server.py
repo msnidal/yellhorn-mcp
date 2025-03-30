@@ -125,19 +125,36 @@ async def test_generate_work_plan(mock_request_context, mock_genai_client):
         mock_gh.return_value = "https://github.com/user/repo/issues/123"
 
         with patch("asyncio.create_task") as mock_create_task:
-            # The generate_work_plan function is already imported at the top
-
-            response = await generate_work_plan("Implement feature X", mock_request_context)
+            # Test with required title and detailed description
+            response = await generate_work_plan(
+                title="Feature Implementation Plan",
+                detailed_description="Create a new feature to support X",
+                ctx=mock_request_context
+            )
 
             assert response == "https://github.com/user/repo/issues/123"
             mock_gh.assert_called_once()
             mock_create_task.assert_called_once()
 
-            # Check that the GitHub issue is created with the task in the title
+            # Check that the GitHub issue is created with the provided title and yellhorn-mcp label
             args, kwargs = mock_gh.call_args
             assert "issue" in args[1]
             assert "create" in args[1]
-            assert "Work Plan: Implement feature X" in args[1]
+            assert "Feature Implementation Plan" in args[1]
+            assert "--label" in args[1]
+            assert "yellhorn-mcp" in args[1]
+            
+            # Get the body argument which is '--body' followed by the content
+            body_index = args[1].index("--body") + 1
+            body_content = args[1][body_index]
+            assert "# Feature Implementation Plan" in body_content
+            assert "## Description" in body_content
+            assert "Create a new feature to support X" in body_content
+            
+            # Check that the process_work_plan_async task is created with the correct parameters
+            args, kwargs = mock_create_task.call_args
+            coroutine = args[0]
+            assert coroutine.__name__ == 'process_work_plan_async'
 
 
 @pytest.mark.asyncio
@@ -254,27 +271,32 @@ async def test_process_work_plan_async(mock_request_context, mock_genai_client):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
 
+        # Test with required parameters
         await process_work_plan_async(
             Path("/mock/repo"),
             mock_genai_client,
             "gemini-model",
-            "Test task",
+            "Feature Implementation Plan",
             "123",
             mock_request_context,
+            detailed_description="Create a new feature to support X"
         )
 
-        # Check that the API was called with the right model
+        # Check that the API was called with the right model and parameters
         mock_genai_client.aio.models.generate_content.assert_called_once()
         args, kwargs = mock_genai_client.aio.models.generate_content.call_args
         assert kwargs.get("model") == "gemini-model"
-        assert "Test task" in kwargs.get("contents", "")
+        assert "<title>" in kwargs.get("contents", "")
+        assert "Feature Implementation Plan" in kwargs.get("contents", "")
+        assert "<detailed_description>" in kwargs.get("contents", "")
+        assert "Create a new feature to support X" in kwargs.get("contents", "")
 
-        # Check that the issue was updated with the work plan
+        # Check that the issue was updated with the work plan including the title
         mock_update.assert_called_once()
         args, kwargs = mock_update.call_args
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
-        assert args[2] == "Mock response text"
+        assert args[2] == "# Feature Implementation Plan\n\nMock response text"
 
 
 @pytest.mark.asyncio
@@ -310,9 +332,22 @@ async def test_review_work_plan_with_github_urls(mock_request_context, mock_gena
                 mock_request_context.request_context.lifespan_context["repo_path"], pr_url
             )
             
-            # Now instead of checking if post_github_pr_review was called directly,
-            # we check that a task was created to process the review asynchronously
+            # Since we can't directly inspect the coroutine's arguments,
+            # we'll verify that create_task was called with a coroutine
+            # created by process_review_async
             mock_create_task.assert_called_once()
+            
+            # Check that the coroutine function is correct
+            coroutine = mock_create_task.call_args[0][0]
+            assert coroutine.__name__ == 'process_review_async'
+            
+            # We can check that all the necessary functions were called
+            mock_get_issue.assert_called_once_with(
+                mock_request_context.request_context.lifespan_context["repo_path"], issue_url
+            )
+            mock_get_diff.assert_called_once_with(
+                mock_request_context.request_context.lifespan_context["repo_path"], pr_url
+            )
 
 
 @pytest.mark.asyncio
@@ -321,12 +356,20 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
-    with patch("yellhorn_mcp.server.post_github_pr_review") as mock_post_review:
+    with (
+        patch("yellhorn_mcp.server.post_github_pr_review") as mock_post_review,
+        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+    ):
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+        
         work_plan = "1. Implement X\n2. Test X"
         diff = "diff --git a/file.py b/file.py\n+def x(): pass"
         pr_url = "https://github.com/user/repo/pull/1"
+        issue_url = "https://github.com/user/repo/issues/2"
 
-        # With PR URL (should post review)
+        # With PR URL and issue URL (should post review with issue reference)
         response = await process_review_async(
             mock_request_context.request_context.lifespan_context["repo_path"],
             mock_genai_client,
@@ -334,16 +377,44 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
             work_plan,
             diff,
             pr_url,
+            issue_url,
+            mock_request_context,
+        )
+
+        # Check that the review contains the right content
+        assert response == f"Review based on work plan: {issue_url}\n\nMock response text"
+        
+        # Check that the API was called with codebase included in prompt
+        mock_genai_client.aio.models.generate_content.assert_called_once()
+        args, kwargs = mock_genai_client.aio.models.generate_content.call_args
+        assert "Formatted codebase" in kwargs.get("contents", "")
+        
+        # Check that the review was posted to PR
+        mock_post_review.assert_called_once()
+        args, kwargs = mock_post_review.call_args
+        assert args[1] == pr_url
+        assert issue_url in args[2]  # Check that issue reference is in review content
+
+        # Reset mocks
+        mock_genai_client.aio.models.generate_content.reset_mock()
+        mock_post_review.reset_mock()
+
+        # Without issue URL (should not include issue reference)
+        response = await process_review_async(
+            mock_request_context.request_context.lifespan_context["repo_path"],
+            mock_genai_client,
+            "gemini-model",
+            work_plan,
+            diff,
+            pr_url,
+            None,
             mock_request_context,
         )
 
         assert response == "Mock response text"
         mock_genai_client.aio.models.generate_content.assert_called_once()
-        mock_post_review.assert_called_once_with(
-            mock_request_context.request_context.lifespan_context["repo_path"],
-            pr_url,
-            "Mock response text",
-        )
+        args, kwargs = mock_post_review.call_args
+        assert "Review for work plan" not in args[2]
 
         # Reset mocks
         mock_genai_client.aio.models.generate_content.reset_mock()
@@ -357,9 +428,11 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
             work_plan,
             diff,
             None,
+            issue_url,
             mock_request_context,
         )
 
-        assert response == "Mock response text"
+        assert "Mock response text" in response
+        assert issue_url in response
         mock_genai_client.aio.models.generate_content.assert_called_once()
         mock_post_review.assert_not_called()

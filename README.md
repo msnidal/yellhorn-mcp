@@ -6,9 +6,9 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities t
 
 ## Features
 
-- **Generate Work Plans**: Creates GitHub issues with detailed implementation plans based on your codebase
-- **Review Code Diffs**: Evaluates pull requests against the original work plan and provides feedback
-- **Seamless GitHub Integration**: Automatically creates issues, posts reviews as PR comments, and handles asynchronous processing
+- **Generate Work Plans**: Creates GitHub issues with detailed implementation plans based on your codebase, with customizable title and detailed description
+- **Review Code Diffs**: Evaluates pull requests against the original work plan with full codebase context and provides detailed feedback
+- **Seamless GitHub Integration**: Automatically creates labeled issues, posts reviews as PR comments with references to original issues, and handles asynchronous processing
 
 ## Installation
 
@@ -57,32 +57,33 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
 1. Starting a project task:
 
    ```
-   Please generate a work plan for implementing [your task description]
+   Please generate a work plan with title "[Your Title]" and detailed description "[Your detailed requirements]"
    ```
 
 2. Reviewing your implementation:
 
    ```
-   Please review my changes against the work plan from [GitHub issue URL]
+   Please review my changes in PR [PR URL] against the work plan from [GitHub issue URL]
    ```
 
 ## Tools
 
 ### generate_work_plan
 
-Creates a GitHub issue with a detailed work plan based on the task description and your codebase.
+Creates a GitHub issue with a detailed work plan based on the title and detailed description, labeled with 'yellhorn-mcp'.
 
 **Input**:
 
-- `task_description`: Description of the task to implement
+- `title`: Title for the GitHub issue (will be used as issue title and header)
+- `detailed_description`: Detailed description for the workplan
 
 **Output**:
 
-- `issue_url`: URL to the created GitHub issue
+- URL to the created GitHub issue
 
 ### review_work_plan
 
-Reviews a pull request against the original work plan and provides feedback. Works with GitHub URLs for both the work plan issue and the PR.
+Reviews a pull request against the original work plan and provides feedback. Includes the full codebase as context for better analysis and adds a reference to the original work plan in the review comment.
 
 **Input**:
 
@@ -92,7 +93,7 @@ Reviews a pull request against the original work plan and provides feedback. Wor
 
 **Output**:
 
-- Asynchronously posts a review directly to the PR
+- Asynchronously posts a review directly to the PR with a reference to the original work plan issue
 
 ## Development
 

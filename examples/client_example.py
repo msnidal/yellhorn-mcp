@@ -22,14 +22,19 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-async def generate_work_plan(session: ClientSession, task_description: str) -> str:
+async def generate_work_plan(
+    session: ClientSession, 
+    title: str, 
+    detailed_description: str
+) -> str:
     """
     Generate a work plan using the Yellhorn MCP server.
     Creates a GitHub issue and returns the issue URL.
 
     Args:
         session: MCP client session.
-        task_description: Description of the task to implement.
+        title: Title for the GitHub issue (will be used as issue title and header).
+        detailed_description: Detailed description for the workplan.
 
     Returns:
         GitHub issue URL for the work plan.
@@ -37,11 +42,14 @@ async def generate_work_plan(session: ClientSession, task_description: str) -> s
     # Call the generate_work_plan tool
     result = await session.call_tool(
         "generate_work_plan",
-        arguments={"task_description": task_description},
+        arguments={
+            "title": title,
+            "detailed_description": detailed_description
+        },
     )
 
     # Extract the issue URL from the response
-    return result["issue_url"]
+    return result
 
 
 async def review_work_plan(
@@ -150,8 +158,13 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
 
             elif command == "plan":
                 # Generate work plan
-                print(f"Generating work plan for: {args.task}")
-                issue_url = await generate_work_plan(session, args.task)
+                print(f"Generating work plan with title: {args.title}")
+                print(f"Detailed description: {args.description}")
+                issue_url = await generate_work_plan(
+                    session, 
+                    args.title, 
+                    args.description
+                )
                 print("\nGitHub Issue Created:")
                 print(issue_url)
                 print(
@@ -203,7 +216,12 @@ def main():
     # Generate work plan command
     plan_parser = subparsers.add_parser("plan", help="Generate a work plan")
     plan_parser.add_argument(
-        "task", help="Task description (e.g., 'Implement user authentication')"
+        "--title", dest="title", required=True,
+        help="Title for the work plan (e.g., 'Implement User Authentication')"
+    )
+    plan_parser.add_argument(
+        "--description", dest="description", required=True,
+        help="Detailed description for the work plan"
     )
 
     # Review PR command
