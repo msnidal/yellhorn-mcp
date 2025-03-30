@@ -4,7 +4,7 @@
 
 Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro API for software development tasks. It provides two main tools:
 
-1. **Generate Work Plan**: Creates a detailed implementation plan based on your codebase and a task description.
+1. **Generate Work Plan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and a task description.
 2. **Review Diff**: Evaluates code changes against the original work plan and provides feedback.
 
 ## Installation
@@ -26,6 +26,23 @@ The server requires the following environment variables:
 - `GEMINI_API_KEY` (required): Your Gemini API key
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL` (optional): Gemini model to use (defaults to "gemini-2.5-pro-exp-03-25")
+
+Additionally, the server requires GitHub CLI (`gh`) to be installed and authenticated:
+
+```bash
+# Install GitHub CLI (if not already installed)
+# For macOS:
+brew install gh
+
+# For Ubuntu/Debian:
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt update
+sudo apt install gh
+
+# Authenticate with GitHub
+gh auth login
+```
 
 ```bash
 # Set environment variables
@@ -70,7 +87,7 @@ Once the server is running, Claude Code can utilize the tools it exposes. Here a
 Please generate a work plan for implementing a user authentication system in my application.
 ```
 
-This will use the `generate_work_plan` tool to analyze your codebase and create a detailed implementation plan.
+This will use the `generate_work_plan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. The tool will return a URL to the created issue, which will initially show a placeholder message and will be updated asynchronously once the plan is generated.
 
 ### Reviewing Implementation
 
@@ -82,13 +99,13 @@ Please review my changes against the work plan. The work plan was:
 [Include the work plan here]
 ```
 
-This will use the `review_diff` tool to evaluate your implementation against the original plan.
+This will use the `review_work_plan` tool to evaluate your implementation against the original plan.
 
 ## MCP Tools
 
 ### generate_work_plan
 
-Generates a detailed work plan based on the task description and your codebase.
+Creates a GitHub issue with a detailed work plan based on the task description and your codebase. The plan is generated asynchronously, and the issue is updated once it's ready.
 
 **Input**:
 
@@ -96,9 +113,9 @@ Generates a detailed work plan based on the task description and your codebase.
 
 **Output**:
 
-- `work_plan`: A detailed implementation plan
+- `issue_url`: URL to the created GitHub issue
 
-### review_diff
+### review_work_plan
 
 Reviews a code diff against the original work plan and provides feedback.
 
@@ -144,13 +161,16 @@ The example client uses the MCP client API to interact with the server through t
 - `GEMINI_API_KEY is required`: Set your Gemini API key as an environment variable.
 - `Not a Git repository`: The specified path is not a Git repository.
 - `Git executable not found`: Ensure Git is installed and accessible in your PATH.
+- `GitHub CLI not found`: Ensure GitHub CLI (`gh`) is installed and accessible in your PATH.
+- `GitHub CLI command failed`: Check that GitHub CLI is authenticated and has appropriate permissions.
 - `Failed to generate work plan`: Check the Gemini API key and model name.
+- `Failed to create GitHub issue`: Check GitHub CLI authentication and permissions.
 
 ## Advanced Configuration
 
 For advanced use cases, you can modify the server's behavior by editing the source code:
 
-- Adjust the prompt templates in `generate_work_plan` and `review_diff` functions
+- Adjust the prompt templates in `generate_work_plan` and `review_work_plan` functions
 - Modify the codebase preprocessing in `get_codebase_snapshot` and `format_codebase_for_prompt`
 - Change the Gemini model version with the `YELLHORN_MCP_MODEL` environment variable
 

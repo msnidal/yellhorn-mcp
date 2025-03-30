@@ -74,7 +74,7 @@ Generates a detailed work plan based on the task description and your codebase.
 
 - `work_plan`: A detailed implementation plan
 
-### review_diff
+### review_work_plan
 
 Reviews a code diff against the original work plan and provides feedback.
 
