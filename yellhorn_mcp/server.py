@@ -2,12 +2,22 @@
 Yellhorn MCP server implementation.
 
 This module provides a Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro
-capabilities to Claude Code for software development tasks.
+capabilities to Claude Code for software development tasks. It offers two primary tools:
+
+1. generate_work_plan: Creates GitHub issues with detailed implementation plans based on
+   your codebase and task description. The work plan is generated asynchronously and the
+   issue is updated once it's ready.
+
+2. review_work_plan: Reviews a GitHub pull request against the original work plan from a
+   GitHub issue and posts feedback directly as a PR comment.
+
+The server requires GitHub CLI to be installed and authenticated for GitHub operations.
 """
 
 import asyncio
+import json
 import os
-import subprocess
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -242,6 +252,107 @@ async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> 
         raise YellhornMCPError(f"Failed to update GitHub issue: {str(e)}")
 
 
+async def get_github_issue_body(repo_path: Path, issue_url: str) -> str:
+    """
+    Get the body content of a GitHub issue or PR.
+
+    Args:
+        repo_path: Path to the repository.
+        issue_url: URL of the GitHub issue or PR.
+
+    Returns:
+        The body content of the issue or PR.
+
+    Raises:
+        YellhornMCPError: If there's an error fetching the issue or PR.
+    """
+    try:
+        # Extract issue or PR number from URL
+        # GitHub issue/PR URLs are in the format: https://github.com/owner/repo/issues/number
+        # or https://github.com/owner/repo/pull/number
+        issue_number = issue_url.split("/")[-1]
+        
+        if "/pull/" in issue_url:
+            # For pull requests
+            result = await run_github_command(repo_path, ["pr", "view", issue_number, "--json", "body"])
+            # Parse JSON response to extract the body
+            import json
+            pr_data = json.loads(result)
+            return pr_data.get("body", "")
+        else:
+            # For issues
+            result = await run_github_command(repo_path, ["issue", "view", issue_number, "--json", "body"])
+            # Parse JSON response to extract the body
+            import json
+            issue_data = json.loads(result)
+            return issue_data.get("body", "")
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to fetch GitHub issue/PR content: {str(e)}")
+
+
+async def get_github_pr_diff(repo_path: Path, pr_url: str) -> str:
+    """
+    Get the diff content of a GitHub PR.
+
+    Args:
+        repo_path: Path to the repository.
+        pr_url: URL of the GitHub PR.
+
+    Returns:
+        The diff content of the PR.
+
+    Raises:
+        YellhornMCPError: If there's an error fetching the PR diff.
+    """
+    try:
+        # Extract PR number from URL
+        pr_number = pr_url.split("/")[-1]
+        
+        # Fetch PR diff using GitHub CLI
+        result = await run_github_command(repo_path, ["pr", "diff", pr_number])
+        return result
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to fetch GitHub PR diff: {str(e)}")
+
+
+async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: str) -> str:
+    """
+    Post a review comment on a GitHub PR.
+
+    Args:
+        repo_path: Path to the repository.
+        pr_url: URL of the GitHub PR.
+        review_content: The content of the review to post.
+
+    Returns:
+        The URL of the posted review.
+
+    Raises:
+        YellhornMCPError: If there's an error posting the review.
+    """
+    try:
+        # Extract PR number from URL
+        pr_number = pr_url.split("/")[-1]
+        
+        # Create a temporary file to hold the review content
+        temp_file = repo_path / f"pr_{pr_number}_review.md"
+        with open(temp_file, "w", encoding="utf-8") as f:
+            f.write(review_content)
+
+        try:
+            # Post the review using GitHub CLI
+            result = await run_github_command(
+                repo_path, ["pr", "review", pr_number, "--comment", "--body-file", str(temp_file)]
+            )
+            return f"Review posted successfully on PR {pr_url}"
+        finally:
+            # Clean up the temp file
+            if temp_file.exists():
+                temp_file.unlink()
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to post GitHub PR review: {str(e)}")
+
+
 async def process_work_plan_async(
     repo_path: Path,
     client: genai.Client,
@@ -370,28 +481,30 @@ async def generate_work_plan(task_description: str, ctx: Context) -> str:
         raise YellhornMCPError(f"Failed to create GitHub issue: {str(e)}")
 
 
-@mcp.tool(
-    name="review_work_plan",
-    description="Review a code diff against the original work plan and provide feedback.",
-)
-async def review_work_plan(work_plan: str, diff: str, ctx: Context) -> str:
+async def process_review_async(
+    repo_path: Path,
+    client: genai.Client,
+    model: str,
+    work_plan: str,
+    diff: str,
+    pr_url: str | None,
+    ctx: Context,
+) -> str:
     """
-    Review a code diff against the original work plan.
+    Process the review of a work plan and diff asynchronously, optionally posting to a GitHub PR.
 
     Args:
-        work_plan: The original work plan to evaluate against.
-        diff: The code diff to review (e.g., output from `git diff`).
-        ctx: Server context with Gemini model.
+        repo_path: Path to the repository.
+        client: Gemini API client.
+        model: Gemini model name.
+        work_plan: The original work plan.
+        diff: The code diff to review.
+        pr_url: Optional URL to the GitHub PR where the review should be posted.
+        ctx: Server context.
 
     Returns:
-        Review response.
-
-    Raises:
-        YellhornMCPError: If there's an error reviewing the diff.
+        The review content.
     """
-    client: genai.Client = ctx.request_context.lifespan_context["client"]
-    model: str = ctx.request_context.lifespan_context["model"]
-
     try:
         # Construct prompt
         prompt = f"""You are an expert code reviewer evaluating if a code diff correctly implements a work plan.
@@ -410,16 +523,88 @@ Consider:
 
 Format your response as a clear, structured review with specific recommendations.
 """
-
+        await ctx.log(
+            level="info",
+            message=f"Generating review with Gemini API model {model}",
+        )
+        
         # Call Gemini API
         response = await client.aio.models.generate_content(model=model, contents=prompt)
 
-        # Extract and return review
+        # Extract review
         review = response.text
         if not review:
             raise YellhornMCPError("Received an empty response from Gemini API.")
 
+        # Post to GitHub PR if URL provided
+        if pr_url:
+            await ctx.log(
+                level="info",
+                message=f"Posting review to GitHub PR: {pr_url}",
+            )
+            await post_github_pr_review(repo_path, pr_url, review)
+
         return review
 
     except Exception as e:
-        raise YellhornMCPError(f"Failed to review diff: {str(e)}")
+        error_message = f"Failed to generate review: {str(e)}"
+        await ctx.log(level="error", message=error_message)
+        
+        if pr_url:
+            # If there was an error but we have a PR URL, try to post the error message
+            try:
+                error_content = f"Error generating review: {str(e)}"
+                await post_github_pr_review(repo_path, pr_url, error_content)
+            except Exception as post_error:
+                await ctx.log(
+                    level="error",
+                    message=f"Failed to post error to PR: {str(post_error)}",
+                )
+        
+        raise YellhornMCPError(error_message)
+
+
+@mcp.tool(
+    name="review_work_plan",
+    description="Review a pull request against the original work plan issue and provide feedback.",
+)
+async def review_work_plan(
+    work_plan_issue_url: str, 
+    pull_request_url: str, 
+    ctx: Context,
+) -> None:
+    """
+    Review a GitHub pull request against a work plan from a GitHub issue.
+    
+    Fetches the work plan content from the provided GitHub issue URL and the code diff
+    from the GitHub PR URL. It then processes the review asynchronously and posts the
+    feedback directly to the PR as a comment.
+
+    Args:
+        work_plan_issue_url: GitHub issue URL containing the work plan.
+        pull_request_url: GitHub PR URL containing the changes to review.
+        ctx: Server context with repository path and Gemini model.
+
+    Returns:
+        None (posts review asynchronously to the PR).
+
+    Raises:
+        YellhornMCPError: If there's an error fetching the issue/PR content or posting the review.
+    """
+    repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+    client: genai.Client = ctx.request_context.lifespan_context["client"]
+    model: str = ctx.request_context.lifespan_context["model"]
+
+    try:
+        # Determine if work plan is a URL or raw content
+        work_plan = await get_github_issue_body(repo_path, work_plan_issue_url)
+        diff = await get_github_pr_diff(repo_path, pull_request_url)
+        
+        # Process the review asynchronously
+        review_task = asyncio.create_task(
+            process_review_async(repo_path, client, model, work_plan, diff, pull_request_url, ctx)
+        )
+        return None
+
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to review work plan: {str(e)}")

@@ -6,8 +6,9 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities t
 
 ## Features
 
-- **Generate Work Plans**: Takes a task description and generates a detailed implementation plan based on your codebase
-- **Review Code Diffs**: Evaluates code changes against the original work plan and provides feedback
+- **Generate Work Plans**: Creates GitHub issues with detailed implementation plans based on your codebase
+- **Review Code Diffs**: Evaluates pull requests against the original work plan and provides feedback
+- **Seamless GitHub Integration**: Automatically creates issues, posts reviews as PR comments, and handles asynchronous processing
 
 ## Installation
 
@@ -28,6 +29,8 @@ The server requires the following environment variables:
 - `GEMINI_API_KEY`: Your Gemini API key (required)
 - `REPO_PATH`: Path to your repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL`: Gemini model to use (defaults to "gemini-2.5-pro-exp-03-25")
+
+The server also requires the GitHub CLI (`gh`) to be installed and authenticated.
 
 ## Usage
 
@@ -57,14 +60,14 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
 2. Reviewing your implementation:
 
    ```
-   Please review my changes against the work plan
+   Please review my changes against the work plan from [GitHub issue URL]
    ```
 
 ## Tools
 
 ### generate_work_plan
 
-Generates a detailed work plan based on the task description and your codebase.
+Creates a GitHub issue with a detailed work plan based on the task description and your codebase.
 
 **Input**:
 
@@ -72,20 +75,21 @@ Generates a detailed work plan based on the task description and your codebase.
 
 **Output**:
 
-- `work_plan`: A detailed implementation plan
+- `issue_url`: URL to the created GitHub issue
 
 ### review_work_plan
 
-Reviews a code diff against the original work plan and provides feedback.
+Reviews a pull request against the original work plan and provides feedback. Works with GitHub URLs for both the work plan issue and the PR.
 
 **Input**:
 
-- `work_plan`: The original work plan
-- `diff`: The code diff to review
+- `work_plan_issue_url`: GitHub issue URL containing the work plan
+- `pull_request_url`: GitHub PR URL containing the changes to review
+- `ctx`: Server context
 
 **Output**:
 
-- `review`: Detailed feedback on the implementation
+- Asynchronously posts a review directly to the PR
 
 ## Development
 
@@ -96,6 +100,8 @@ pip install -e ".[dev]"
 # Run tests
 pytest
 ```
+
+For more detailed instructions, see the [Usage Guide](docs/USAGE.md).
 
 ## License
 

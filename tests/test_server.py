@@ -13,6 +13,10 @@ from yellhorn_mcp.server import (
     format_codebase_for_prompt,
     generate_work_plan,
     get_codebase_snapshot,
+    get_github_issue_body,
+    get_github_pr_diff,
+    post_github_pr_review,
+    process_review_async,
     process_work_plan_async,
     review_work_plan,
     run_git_command,
@@ -155,6 +159,70 @@ async def test_run_github_command_success():
 
 
 @pytest.mark.asyncio
+async def test_get_github_issue_body():
+    """Test fetching GitHub issue body."""
+    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+        # Test fetching issue content
+        mock_gh.return_value = '{"body": "Issue content"}'
+        issue_url = "https://github.com/user/repo/issues/123"
+
+        result = await get_github_issue_body(Path("/mock/repo"), issue_url)
+
+        assert result == "Issue content"
+        mock_gh.assert_called_once_with(
+            Path("/mock/repo"), ["issue", "view", "123", "--json", "body"]
+        )
+
+        # Reset mock
+        mock_gh.reset_mock()
+
+        # Test fetching PR content
+        mock_gh.return_value = '{"body": "PR content"}'
+        pr_url = "https://github.com/user/repo/pull/456"
+
+        result = await get_github_issue_body(Path("/mock/repo"), pr_url)
+
+        assert result == "PR content"
+        mock_gh.assert_called_once_with(Path("/mock/repo"), ["pr", "view", "456", "--json", "body"])
+
+
+@pytest.mark.asyncio
+async def test_get_github_pr_diff():
+    """Test fetching GitHub PR diff."""
+    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+        mock_gh.return_value = "diff content"
+        pr_url = "https://github.com/user/repo/pull/123"
+
+        result = await get_github_pr_diff(Path("/mock/repo"), pr_url)
+
+        assert result == "diff content"
+        mock_gh.assert_called_once_with(Path("/mock/repo"), ["pr", "diff", "123"])
+
+
+@pytest.mark.asyncio
+async def test_post_github_pr_review():
+    """Test posting GitHub PR review."""
+    with (
+        patch("pathlib.Path.exists", return_value=True),
+        patch("pathlib.Path.unlink") as mock_unlink,
+        patch("builtins.open", create=True),
+        patch("yellhorn_mcp.server.run_github_command") as mock_gh,
+    ):
+        mock_gh.return_value = "Review posted"
+        pr_url = "https://github.com/user/repo/pull/123"
+
+        result = await post_github_pr_review(Path("/mock/repo"), pr_url, "Review content")
+
+        assert "Review posted successfully" in result
+        mock_gh.assert_called_once()
+        # Verify the PR number is extracted correctly
+        args, kwargs = mock_gh.call_args
+        assert "123" in args[1]
+        # Verify temp file is cleaned up
+        mock_unlink.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_update_github_issue():
     """Test updating a GitHub issue."""
     with (
@@ -210,22 +278,82 @@ async def test_process_work_plan_async(mock_request_context, mock_genai_client):
 
 
 @pytest.mark.asyncio
-async def test_review_work_plan(mock_request_context, mock_genai_client):
-    """Test reviewing a diff."""
+async def test_review_work_plan_with_github_urls(mock_request_context, mock_genai_client):
+    """Test reviewing a diff with GitHub URLs."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
-    # The review_work_plan function is already imported at the top
+    # Mock the GitHub functions
+    with (
+        patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue,
+        patch("yellhorn_mcp.server.get_github_pr_diff") as mock_get_diff,
+        patch("yellhorn_mcp.server.post_github_pr_review") as mock_post_review,
+    ):
+        mock_get_issue.return_value = "1. Implement X\n2. Test X"
+        mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-    work_plan = ("1. Implement X\n2. Test X",)
-    diff = ("diff --git a/file.py b/file.py\n+def x(): pass",)
+        # Test with issue URL for work plan and PR URL for diff
+        issue_url = "https://github.com/user/repo/issues/1"
+        pr_url = "https://github.com/user/repo/pull/2"
 
-    response = await review_work_plan(work_plan, diff, mock_request_context)
+        # With posting to PR
+        response = await review_work_plan(issue_url, pr_url, mock_request_context)
 
-    assert response == "Mock response text"
-    mock_genai_client.aio.models.generate_content.assert_called_once()
+        assert response == "Mock response text"
+        mock_get_issue.assert_called_once_with(
+            mock_request_context.request_context.lifespan_context["repo_path"], issue_url
+        )
+        mock_get_diff.assert_called_once_with(
+            mock_request_context.request_context.lifespan_context["repo_path"], pr_url
+        )
+        mock_post_review.assert_called_once()
 
-    # Check that the work plan and diff are included in the prompt
-    args, kwargs = mock_genai_client.aio.models.generate_content.call_args
-    assert "1. Implement X" in kwargs.get("contents", "")
-    assert "diff --git" in kwargs.get("contents", "")
+
+@pytest.mark.asyncio
+async def test_process_review_async(mock_request_context, mock_genai_client):
+    """Test processing review asynchronously."""
+    # Set the mock client in the context
+    mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
+
+    with patch("yellhorn_mcp.server.post_github_pr_review") as mock_post_review:
+        work_plan = "1. Implement X\n2. Test X"
+        diff = "diff --git a/file.py b/file.py\n+def x(): pass"
+        pr_url = "https://github.com/user/repo/pull/1"
+
+        # With PR URL (should post review)
+        response = await process_review_async(
+            mock_request_context.request_context.lifespan_context["repo_path"],
+            mock_genai_client,
+            "gemini-model",
+            work_plan,
+            diff,
+            pr_url,
+            mock_request_context,
+        )
+
+        assert response == "Mock response text"
+        mock_genai_client.aio.models.generate_content.assert_called_once()
+        mock_post_review.assert_called_once_with(
+            mock_request_context.request_context.lifespan_context["repo_path"],
+            pr_url,
+            "Mock response text",
+        )
+
+        # Reset mocks
+        mock_genai_client.aio.models.generate_content.reset_mock()
+        mock_post_review.reset_mock()
+
+        # Without PR URL (should not post review)
+        response = await process_review_async(
+            mock_request_context.request_context.lifespan_context["repo_path"],
+            mock_genai_client,
+            "gemini-model",
+            work_plan,
+            diff,
+            None,
+            mock_request_context,
+        )
+
+        assert response == "Mock response text"
+        mock_genai_client.aio.models.generate_content.assert_called_once()
+        mock_post_review.assert_not_called()

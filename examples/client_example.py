@@ -1,14 +1,20 @@
 """
 Example client for the Yellhorn MCP server.
 
-This is a demonstration of how Claude Code would interact with the Yellhorn MCP server.
-In practice, Claude Code would directly call the MCP tools.
+This module demonstrates how to interact with the Yellhorn MCP server programmatically,
+similar to how Claude Code would call the MCP tools. It provides command-line interfaces for:
+
+1. Listing available tools
+2. Generating work plans (creates GitHub issues)
+3. Reviewing PRs against work plans (posts reviews as PR comments)
+
+This client uses the MCP client API to interact with the server through stdio transport,
+which is the same approach Claude Code uses.
 """
 
 import argparse
 import asyncio
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -38,37 +44,61 @@ async def generate_work_plan(session: ClientSession, task_description: str) -> s
     return result["issue_url"]
 
 
-async def review_work_plan(session: ClientSession, work_plan: str, diff: str) -> str:
+async def review_work_plan(
+    session: ClientSession, 
+    work_plan: str | None = None, 
+    diff: str | None = None,
+    work_plan_url: str | None = None,
+    pr_url: str | None = None,
+    post_to_pr: bool = False
+) -> str:
     """
-    Review a diff using the Yellhorn MCP server.
+    Review a diff against a work plan using the Yellhorn MCP server.
+
+    This function calls the review_work_plan tool to analyze a diff against a work plan.
+    It can work with both raw content and GitHub URLs for both the work plan and diff.
+    When given a PR URL, it can optionally post the review directly to the PR.
 
     Args:
         session: MCP client session.
-        work_plan: Original work plan.
-        diff: Code diff to review.
+        work_plan: Original work plan text (if not using URL).
+        diff: Code diff to review (if not using PR URL or local diff).
+        work_plan_url: GitHub issue URL containing the work plan.
+        pr_url: GitHub PR URL to fetch diff from and post review to.
+        post_to_pr: Whether to post the review to the PR.
 
     Returns:
-        Review feedback.
+        Review feedback or confirmation message.
+        
+    Raises:
+        ValueError: If neither work_plan nor work_plan_url is provided.
     """
+    arguments = {}
+    
+    # Set the arguments according to new server API
+    if work_plan_url:
+        arguments["work_plan_issue_url"] = work_plan_url
+    elif work_plan:
+        # Note: The current server implementation doesn't support raw content,
+        # so we'll raise an error for now
+        raise ValueError("Raw work plan content is not supported. Please provide a work_plan_url")
+    else:
+        raise ValueError("work_plan_url must be provided")
+    
+    if pr_url:
+        arguments["pull_request_url"] = pr_url
+    else:
+        # Note: The current server implementation requires a pull_request_url
+        raise ValueError("pull_request_url must be provided")
+    
     # Call the review_work_plan tool
-    result = await session.call_tool(
+    await session.call_tool(
         "review_work_plan",
-        arguments={"work_plan": work_plan, "diff": diff},
+        arguments=arguments,
     )
 
-    # Extract the review from the response
-    return result["review"]
-
-
-def get_diff() -> str:
-    """
-    Get the current Git diff.
-
-    Returns:
-        Git diff as a string.
-    """
-    result = subprocess.run(["git", "diff"], capture_output=True, text=True, check=True)
-    return result.stdout
+    # The tool now posts reviews asynchronously to the PR, so there's no immediate result
+    return f"Review initiated for PR {pr_url}. The review will be posted as a comment on the PR."
 
 
 async def list_tools(session: ClientSession) -> None:
@@ -129,26 +159,37 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 )
 
             elif command == "review":
-                # Read work plan
-                work_plan_path = Path(args.work_plan)
-                work_plan = work_plan_path.read_text()
-
-                # Get diff
-                if args.diff_file:
-                    diff_path = Path(args.diff_file)
-                    diff = diff_path.read_text()
+                # Review options
+                work_plan = None
+                work_plan_url = None
+                diff = None
+                pr_url = None
+                
+                # Determine work plan source
+                if args.work_plan_url:
+                    work_plan_url = args.work_plan_url
+                    print(f"Using work plan from GitHub URL: {work_plan_url}")
                 else:
-                    diff = get_diff()
-
-                if not diff.strip():
-                    print("Error: No diff found. Make some changes before reviewing.")
+                    print("Error: --work-plan-url must be specified")
                     sys.exit(1)
-
-                # Review diff
-                print("Reviewing diff against work plan...")
-                review = await review_work_plan(session, work_plan, diff)
-                print("\nReview:")
-                print(review)
+                
+                # Determine PR URL (required)
+                if args.pr_url:
+                    pr_url = args.pr_url
+                    print(f"Using GitHub PR: {pr_url}")
+                else:
+                    print("Error: --pr-url must be specified")
+                    sys.exit(1)
+                
+                # Review PR
+                print("Initiating review...")
+                result = await review_work_plan(
+                    session,
+                    work_plan_url=work_plan_url,
+                    pr_url=pr_url
+                )
+                print("\nResult:")
+                print(result)
 
 
 def main():
@@ -165,11 +206,19 @@ def main():
         "task", help="Task description (e.g., 'Implement user authentication')"
     )
 
-    # Review diff command
-    review_parser = subparsers.add_parser("review", help="Review a diff")
-    review_parser.add_argument("work_plan", help="Path to the work plan file")
+    # Review PR command
+    review_parser = subparsers.add_parser("review", help="Review a GitHub PR against a work plan")
+    
+    # Work plan source (GitHub issue URL required)
     review_parser.add_argument(
-        "--diff-file", help="Path to diff file (optional, uses git diff by default)"
+        "--work-plan-url", dest="work_plan_url", required=True,
+        help="GitHub issue URL containing the work plan"
+    )
+    
+    # PR URL (required)
+    review_parser.add_argument(
+        "--pr-url", dest="pr_url", required=True,
+        help="GitHub PR URL to review and post comments to"
     )
 
     args = parser.parse_args()
