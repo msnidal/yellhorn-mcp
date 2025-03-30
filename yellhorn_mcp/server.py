@@ -220,6 +220,31 @@ async def run_github_command(repo_path: Path, command: list[str]) -> str:
         )
 
 
+async def ensure_label_exists(repo_path: Path, label: str, description: str = "") -> None:
+    """
+    Ensure a GitHub label exists, creating it if necessary.
+
+    Args:
+        repo_path: Path to the repository.
+        label: Name of the label to create or ensure exists.
+        description: Optional description for the label.
+
+    Raises:
+        YellhornMCPError: If there's an error creating the label.
+    """
+    try:
+        command = ["label", "create", label, "-f"]
+        if description:
+            command.extend(["--description", description])
+
+        await run_github_command(repo_path, command)
+    except Exception as e:
+        # Don't fail the main operation if label creation fails
+        # Just log the error and continue
+        print(f"Warning: Failed to create label '{label}': {str(e)}")
+        # This is non-critical, so we don't raise an exception
+
+
 async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> None:
     """
     Update a GitHub issue with new content.
@@ -446,7 +471,7 @@ The work plan should be comprehensive enough that a developer could implement it
 
 @mcp.tool(
     name="generate_work_plan",
-    description="Generate a detailed work plan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'.",
+    description="Generate a detailed work plan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'.Note: You should generally just pass the full user task request task verbatim to detailed_description.",
 )
 async def generate_work_plan(
     title: str,
@@ -473,6 +498,9 @@ async def generate_work_plan(
     model: str = ctx.request_context.lifespan_context["model"]
 
     try:
+        # Ensure the yellhorn-mcp label exists
+        await ensure_label_exists(repo_path, "yellhorn-mcp", "Issues created by yellhorn-mcp")
+
         # Prepare initial body with the title and detailed description
         initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed work plan, please wait...*"
 

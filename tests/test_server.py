@@ -10,6 +10,7 @@ from mcp.server.fastmcp import Context
 
 from yellhorn_mcp.server import (
     YellhornMCPError,
+    ensure_label_exists,
     format_codebase_for_prompt,
     generate_work_plan,
     get_codebase_snapshot,
@@ -121,40 +122,44 @@ async def test_generate_work_plan(mock_request_context, mock_genai_client):
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
-    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
-        mock_gh.return_value = "https://github.com/user/repo/issues/123"
+    with patch("yellhorn_mcp.server.ensure_label_exists") as mock_ensure_label:
+        with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+            mock_gh.return_value = "https://github.com/user/repo/issues/123"
 
-        with patch("asyncio.create_task") as mock_create_task:
-            # Test with required title and detailed description
-            response = await generate_work_plan(
-                title="Feature Implementation Plan",
-                detailed_description="Create a new feature to support X",
-                ctx=mock_request_context,
-            )
+            with patch("asyncio.create_task") as mock_create_task:
+                # Test with required title and detailed description
+                response = await generate_work_plan(
+                    title="Feature Implementation Plan",
+                    detailed_description="Create a new feature to support X",
+                    ctx=mock_request_context,
+                )
 
-            assert response == "https://github.com/user/repo/issues/123"
-            mock_gh.assert_called_once()
-            mock_create_task.assert_called_once()
+                assert response == "https://github.com/user/repo/issues/123"
+                mock_ensure_label.assert_called_once_with(
+                    Path("/mock/repo"), "yellhorn-mcp", "Issues created by yellhorn-mcp"
+                )
+                mock_gh.assert_called_once()
+                mock_create_task.assert_called_once()
 
-            # Check that the GitHub issue is created with the provided title and yellhorn-mcp label
-            args, kwargs = mock_gh.call_args
-            assert "issue" in args[1]
-            assert "create" in args[1]
-            assert "Feature Implementation Plan" in args[1]
-            assert "--label" in args[1]
-            assert "yellhorn-mcp" in args[1]
+                # Check that the GitHub issue is created with the provided title and yellhorn-mcp label
+                args, kwargs = mock_gh.call_args
+                assert "issue" in args[1]
+                assert "create" in args[1]
+                assert "Feature Implementation Plan" in args[1]
+                assert "--label" in args[1]
+                assert "yellhorn-mcp" in args[1]
 
-            # Get the body argument which is '--body' followed by the content
-            body_index = args[1].index("--body") + 1
-            body_content = args[1][body_index]
-            assert "# Feature Implementation Plan" in body_content
-            assert "## Description" in body_content
-            assert "Create a new feature to support X" in body_content
+                # Get the body argument which is '--body' followed by the content
+                body_index = args[1].index("--body") + 1
+                body_content = args[1][body_index]
+                assert "# Feature Implementation Plan" in body_content
+                assert "## Description" in body_content
+                assert "Create a new feature to support X" in body_content
 
-            # Check that the process_work_plan_async task is created with the correct parameters
-            args, kwargs = mock_create_task.call_args
-            coroutine = args[0]
-            assert coroutine.__name__ == "process_work_plan_async"
+                # Check that the process_work_plan_async task is created with the correct parameters
+                args, kwargs = mock_create_task.call_args
+                coroutine = args[0]
+                assert coroutine.__name__ == "process_work_plan_async"
 
 
 @pytest.mark.asyncio
@@ -173,6 +178,33 @@ async def test_run_github_command_success():
 
     # Ensure no coroutines are left behind
     await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_ensure_label_exists():
+    """Test ensuring a GitHub label exists."""
+    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+        # Test with label name only
+        await ensure_label_exists(Path("/mock/repo"), "test-label")
+        mock_gh.assert_called_once_with(Path("/mock/repo"), ["label", "create", "test-label", "-f"])
+
+        # Reset mock
+        mock_gh.reset_mock()
+
+        # Test with label name and description
+        await ensure_label_exists(Path("/mock/repo"), "test-label", "Test label description")
+        mock_gh.assert_called_once_with(
+            Path("/mock/repo"),
+            ["label", "create", "test-label", "-f", "--description", "Test label description"],
+        )
+
+        # Reset mock
+        mock_gh.reset_mock()
+
+        # Test with error handling (should not raise exception)
+        mock_gh.side_effect = Exception("Label creation failed")
+        # This should not raise an exception
+        await ensure_label_exists(Path("/mock/repo"), "test-label")
 
 
 @pytest.mark.asyncio
