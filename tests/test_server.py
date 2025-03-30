@@ -8,8 +8,6 @@ from google import genai
 from mcp.server.fastmcp import Context
 
 from yellhorn_mcp.server import (
-    ReviewDiffRequest,
-    WorkPlanRequest,
     YellhornMCPError,
     format_codebase_for_prompt,
     generate_work_plan,
@@ -123,8 +121,7 @@ async def test_generate_work_plan(mock_request_context, mock_genai_client):
             
             # The generate_work_plan function is already imported at the top
             
-            request = WorkPlanRequest(task_description="Implement feature X")
-            response = await generate_work_plan(request, mock_request_context)
+            response = await generate_work_plan("Implement feature X", mock_request_context)
             
             assert response.work_plan == "Mock response text"
             mock_genai_client.aio.models.generate_content.assert_called_once()
@@ -139,19 +136,17 @@ async def test_review_diff(mock_request_context, mock_genai_client):
     """Test reviewing a diff."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
-    
+
     # The review_diff function is already imported at the top
-    
-    request = ReviewDiffRequest(
-        work_plan="1. Implement X\n2. Test X",
-        diff="diff --git a/file.py b/file.py\n+def x(): pass",
-    )
-    
-    response = await review_diff(request, mock_request_context)
-    
+
+    work_plan="1. Implement X\n2. Test X",
+    diff="diff --git a/file.py b/file.py\n+def x(): pass",
+
+    response = await review_diff(work_plan, diff, mock_request_context)
+
     assert response.review == "Mock response text"
     mock_genai_client.aio.models.generate_content.assert_called_once()
-    
+
     # Check that the work plan and diff are included in the prompt
     args, kwargs = mock_genai_client.aio.models.generate_content.call_args
     assert "1. Implement X" in kwargs.get("contents", "")

@@ -14,36 +14,10 @@ from typing import Any
 
 from google import genai
 from mcp.server.fastmcp import Context, FastMCP
-from pydantic import BaseModel
 
 
 class YellhornMCPError(Exception):
     """Custom exception for Yellhorn MCP server."""
-
-
-class WorkPlanRequest(BaseModel):
-    """Request model for generating a work plan."""
-
-    task_description: str
-
-
-class WorkPlanResponse(BaseModel):
-    """Response model for the generated work plan."""
-
-    work_plan: str
-
-
-class ReviewDiffRequest(BaseModel):
-    """Request model for reviewing a code diff."""
-
-    work_plan: str
-    diff: str
-
-
-class ReviewDiffResponse(BaseModel):
-    """Response model for the diff review."""
-
-    review: str
 
 
 @asynccontextmanager
@@ -64,6 +38,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     repo_path = os.getenv("REPO_PATH", ".")
     api_key = os.getenv("GEMINI_API_KEY")
     gemini_model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-exp-03-25")
+    #gemini_model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.0-flash")
 
     if not api_key:
         raise ValueError("GEMINI_API_KEY is required")
@@ -202,13 +177,13 @@ Contents:
     name="generate_work_plan",
     description="Generate a detailed work plan for implementing a task based on the current codebase.",
 )
-async def generate_work_plan(request: WorkPlanRequest, ctx: Context) -> WorkPlanResponse:
+async def generate_work_plan(task_description: str, ctx: Context) -> str:
     """
     Generate a work plan based on the task description and codebase.
 
     Args:
-        request: Work plan request with task description.
-        context: Server context with repository path and Gemini model.
+        task_description: Full description of the task to implement.
+        ctx: Server context with repository path and Gemini model.
 
     Returns:
         Work plan response.
@@ -230,19 +205,22 @@ async def generate_work_plan(request: WorkPlanRequest, ctx: Context) -> WorkPlan
         
 {codebase_info}
 
-Task: {request.task_description}
+Task: {task_description}
 
 Please provide a detailed work plan for implementing this task, considering the existing codebase.
 Include specific files to modify, new files to create, and detailed implementation steps.
 Format your response as a clear, structured work plan with numbered steps and explanations.
 """
-
+        await ctx.log(
+            level="info",
+            message=f"Generating work plan with Gemini API for task: {task_description} with model {model} at file paths: {file_paths}",
+        )
         response = await client.aio.models.generate_content(model=model, contents=prompt)
         work_plan = response.text
         if not work_plan:
             raise YellhornMCPError("Received an empty response from Gemini API.")
 
-        return WorkPlanResponse(work_plan=work_plan)
+        return work_plan
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to generate work plan: {str(e)}")
@@ -252,13 +230,14 @@ Format your response as a clear, structured work plan with numbered steps and ex
     name="review_diff",
     description="Review a code diff against the original work plan and provide feedback.",
 )
-async def review_diff(request: ReviewDiffRequest, ctx: Context) -> ReviewDiffResponse:
+async def review_diff(work_plan: str, diff: str, ctx: Context) -> str:
     """
     Review a code diff against the original work plan.
 
     Args:
-        request: Review diff request with work plan and diff.
-        context: Server context with Gemini model.
+        work_plan: The original work plan to evaluate against.
+        diff: The code diff to review (e.g., output from `git diff`).
+        ctx: Server context with Gemini model.
 
     Returns:
         Review response.
@@ -274,10 +253,10 @@ async def review_diff(request: ReviewDiffRequest, ctx: Context) -> ReviewDiffRes
         prompt = f"""You are an expert code reviewer evaluating if a code diff correctly implements a work plan.
 
 Original Work Plan:
-{request.work_plan}
+{work_plan}
 
 Code Diff:
-{request.diff}
+{diff}
 
 Please review if this code diff correctly implements the work plan and provide detailed feedback.
 Consider:
@@ -289,7 +268,6 @@ Format your response as a clear, structured review with specific recommendations
 """
 
         # Call Gemini API
-
         response = await client.aio.models.generate_content(model=model, contents=prompt)
 
         # Extract and return review
@@ -297,7 +275,7 @@ Format your response as a clear, structured review with specific recommendations
         if not review:
             raise YellhornMCPError("Received an empty response from Gemini API.")
 
-        return ReviewDiffResponse(review=review)
+        return review
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to review diff: {str(e)}")
