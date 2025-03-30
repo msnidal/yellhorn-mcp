@@ -4,8 +4,8 @@
 
 Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro API for software development tasks. It provides two main tools:
 
-1. **Generate Work Plan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and a task description.
-2. **Review Diff**: Evaluates code changes against the original work plan and provides feedback.
+1. **Generate Work Plan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
+2. **Review Pull Request**: Evaluates code changes in a GitHub PR against the original work plan and provides feedback directly on the PR.
 
 ## Installation
 
@@ -48,7 +48,7 @@ gh auth login
 # Set environment variables
 export GEMINI_API_KEY=your_api_key_here
 export REPO_PATH=/path/to/your/repo
-export YELLHORN_MCP_MODEL=gemini-2.5-pro-latest
+export YELLHORN_MCP_MODEL=gemini-2.5-pro-exp-03-25
 ```
 
 ## Running the Server
@@ -89,17 +89,15 @@ Please generate a work plan for implementing a user authentication system in my 
 
 This will use the `generate_work_plan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. The tool will return a URL to the created issue, which will initially show a placeholder message and will be updated asynchronously once the plan is generated.
 
-### Reviewing Implementation
+### Reviewing a Pull Request
 
-After making changes based on the work plan:
+After creating a pull request based on the work plan:
 
 ```
-Please review my changes against the work plan. The work plan was:
-
-[Include the work plan here]
+Please review my changes against the work plan from https://github.com/user/repo/issues/123 in my pull request https://github.com/user/repo/pull/456
 ```
 
-This will use the `review_work_plan` tool to evaluate your implementation against the original plan.
+This will use the `review_work_plan` tool to retrieve the work plan from the issue, fetch the diff from the PR, analyze the implementation, and post a review directly to the PR.
 
 ## MCP Tools
 
@@ -117,17 +115,17 @@ Creates a GitHub issue with a detailed work plan based on the task description a
 
 ### review_work_plan
 
-Reviews a code diff against the original work plan and provides feedback. Can accept GitHub issue/PR URLs for both the work plan and the diff.
+Reviews a GitHub pull request against the original work plan and posts feedback directly as a PR comment.
 
 **Input**:
 
-- `url_or_content`: Either a GitHub issue/PR URL containing the work plan, or the raw work plan text
-- `diff_or_pr_url`: (Optional) Either a GitHub PR URL containing the diff to review, raw diff content, or None to use local git diff
-- `post_to_pr`: (Optional) Whether to post the review as a comment on the PR (only applicable if `diff_or_pr_url` is a PR URL)
+- `work_plan_issue_url`: GitHub issue URL containing the work plan
+- `pull_request_url`: GitHub PR URL containing the changes to review
+- `ctx`: Server context
 
 **Output**:
 
-- `review`: Detailed feedback on the implementation
+- None (posts review asynchronously to the PR)
 
 ## Example Client
 
@@ -140,17 +138,8 @@ python -m examples.client_example list
 # Generate a work plan
 python -m examples.client_example plan "Implement user authentication"
 
-# Review a diff against a work plan (from local file)
-python -m examples.client_example review --work-plan work_plan.md
-
-# Review a specific diff file against a work plan
-python -m examples.client_example review --work-plan work_plan.md --diff-file changes.diff
-
 # Review using GitHub issue and PR URLs
 python -m examples.client_example review --work-plan-url https://github.com/user/repo/issues/1 --pr-url https://github.com/user/repo/pull/2
-
-# Review and post the result as a comment to the PR
-python -m examples.client_example review --work-plan-url https://github.com/user/repo/issues/1 --pr-url https://github.com/user/repo/pull/2 --post-to-pr
 ```
 
 The example client uses the MCP client API to interact with the server through the stdio transport, which is the same approach Claude Code uses.
@@ -161,7 +150,8 @@ The example client uses the MCP client API to interact with the server through t
 
 1. **API Key Not Set**: Make sure your `GEMINI_API_KEY` environment variable is set.
 2. **Not a Git Repository**: Ensure that `REPO_PATH` points to a valid Git repository.
-3. **MCP Connection Issues**: If you have trouble connecting to the server, check that you're using the latest version of the MCP SDK.
+3. **GitHub CLI Issues**: Ensure GitHub CLI (`gh`) is installed, accessible in your PATH, and authenticated.
+4. **MCP Connection Issues**: If you have trouble connecting to the server, check that you're using the latest version of the MCP SDK.
 
 ### Error Messages
 
@@ -172,12 +162,15 @@ The example client uses the MCP client API to interact with the server through t
 - `GitHub CLI command failed`: Check that GitHub CLI is authenticated and has appropriate permissions.
 - `Failed to generate work plan`: Check the Gemini API key and model name.
 - `Failed to create GitHub issue`: Check GitHub CLI authentication and permissions.
+- `Failed to fetch GitHub issue/PR content`: The issue or PR URL may be invalid or inaccessible.
+- `Failed to fetch GitHub PR diff`: The PR URL may be invalid or inaccessible.
+- `Failed to post GitHub PR review`: Check GitHub CLI permissions for posting PR comments.
 
 ## Advanced Configuration
 
 For advanced use cases, you can modify the server's behavior by editing the source code:
 
-- Adjust the prompt templates in `generate_work_plan` and `review_work_plan` functions
+- Adjust the prompt templates in `process_work_plan_async` and `process_review_async` functions
 - Modify the codebase preprocessing in `get_codebase_snapshot` and `format_codebase_for_prompt`
 - Change the Gemini model version with the `YELLHORN_MCP_MODEL` environment variable
 

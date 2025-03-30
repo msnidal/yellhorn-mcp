@@ -2,7 +2,16 @@
 Yellhorn MCP server implementation.
 
 This module provides a Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro
-capabilities to Claude Code for software development tasks.
+capabilities to Claude Code for software development tasks. It offers two primary tools:
+
+1. generate_work_plan: Creates GitHub issues with detailed implementation plans based on
+   your codebase and task description. The work plan is generated asynchronously and the
+   issue is updated once it's ready.
+
+2. review_work_plan: Reviews a GitHub pull request against the original work plan from a
+   GitHub issue and posts feedback directly as a PR comment.
+
+The server requires GitHub CLI to be installed and authenticated for GitHub operations.
 """
 
 import asyncio
@@ -565,22 +574,22 @@ async def review_work_plan(
     ctx: Context,
 ) -> None:
     """
-    Review a code diff against the original work plan.
+    Review a GitHub pull request against a work plan from a GitHub issue.
     
-    This function can accept GitHub URLs for both the work plan and diff, or raw content.
-    If provided with a GitHub PR URL for the diff, it can optionally post the review directly to the PR.
+    Fetches the work plan content from the provided GitHub issue URL and the code diff
+    from the GitHub PR URL. It then processes the review asynchronously and posts the
+    feedback directly to the PR as a comment.
 
     Args:
-        url_or_content: Either a GitHub issue/PR URL containing the work plan, or the raw work plan text.
-        diff_or_pr_url: Either a GitHub PR URL containing the diff to review, raw diff content, or None to use local git diff.
-        post_to_pr: Whether to post the review as a comment on the PR (only applicable if diff_or_pr_url is a PR URL).
+        work_plan_issue_url: GitHub issue URL containing the work plan.
+        pull_request_url: GitHub PR URL containing the changes to review.
         ctx: Server context with repository path and Gemini model.
 
     Returns:
-        Review response.
+        None (posts review asynchronously to the PR).
 
     Raises:
-        YellhornMCPError: If there's an error reviewing the diff.
+        YellhornMCPError: If there's an error fetching the issue/PR content or posting the review.
     """
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
     client: genai.Client = ctx.request_context.lifespan_context["client"]
