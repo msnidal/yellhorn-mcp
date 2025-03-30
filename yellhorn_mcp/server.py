@@ -424,7 +424,7 @@ The work plan should be comprehensive enough that a developer could implement it
 
         # Add the title as header to the final body
         full_body = f"# {title}\n\n{work_plan_content}"
-        
+
         # Update the GitHub issue with the generated work plan
         await update_github_issue(repo_path, issue_number, full_body)
         await ctx.log(
@@ -478,7 +478,17 @@ async def generate_work_plan(
 
         # Create a GitHub issue with the yellhorn-mcp label
         issue_url = await run_github_command(
-            repo_path, ["issue", "create", "--title", title, "--body", initial_body, "--label", "yellhorn-mcp"]
+            repo_path,
+            [
+                "issue",
+                "create",
+                "--title",
+                title,
+                "--body",
+                initial_body,
+                "--label",
+                "yellhorn-mcp",
+            ],
         )
 
         # Extract issue number and URL
@@ -491,13 +501,13 @@ async def generate_work_plan(
         # Start async processing
         asyncio.create_task(
             process_work_plan_async(
-                repo_path, 
-                client, 
-                model, 
-                title, 
-                issue_number, 
-                ctx, 
-                detailed_description=detailed_description
+                repo_path,
+                client,
+                model,
+                title,
+                issue_number,
+                ctx,
+                detailed_description=detailed_description,
             )
         )
 
@@ -643,14 +653,14 @@ async def review_work_plan(
         # Process the review asynchronously
         review_task = asyncio.create_task(
             process_review_async(
-                repo_path, 
-                client, 
-                model, 
-                work_plan, 
-                diff, 
-                pull_request_url, 
-                work_plan_issue_url, 
-                ctx
+                repo_path,
+                client,
+                model,
+                work_plan,
+                diff,
+                pull_request_url,
+                work_plan_issue_url,
+                ctx,
             )
         )
         return None
