@@ -608,3 +608,6 @@ async def review_work_plan(
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to review work plan: {str(e)}")
+
+if __name__ == "__main__":
+    mcp.run(transport='stdio')
