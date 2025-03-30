@@ -82,13 +82,7 @@ def main():
     print(f"Repository path: {repo_path}")
     print(f"Using model: {args.model}")
 
-    # Run the server using uvicorn
-    uvicorn.run(
-        "yellhorn_mcp.server:mcp",
-        host=args.host,
-        port=args.port,
-        log_level="info",
-    )
+    mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":

@@ -296,17 +296,23 @@ async def test_review_work_plan_with_github_urls(mock_request_context, mock_gena
         issue_url = "https://github.com/user/repo/issues/1"
         pr_url = "https://github.com/user/repo/pull/2"
 
-        # With posting to PR
-        response = await review_work_plan(issue_url, pr_url, mock_request_context)
+        # With the new async implementation, we also need to mock the asyncio.create_task function
+        with patch("asyncio.create_task") as mock_create_task:
+            # With posting to PR
+            response = await review_work_plan(issue_url, pr_url, mock_request_context)
 
-        assert response == "Mock response text"
-        mock_get_issue.assert_called_once_with(
-            mock_request_context.request_context.lifespan_context["repo_path"], issue_url
-        )
-        mock_get_diff.assert_called_once_with(
-            mock_request_context.request_context.lifespan_context["repo_path"], pr_url
-        )
-        mock_post_review.assert_called_once()
+            # Since review_work_plan now returns None instead of the review text, we just check that it's None
+            assert response is None
+            mock_get_issue.assert_called_once_with(
+                mock_request_context.request_context.lifespan_context["repo_path"], issue_url
+            )
+            mock_get_diff.assert_called_once_with(
+                mock_request_context.request_context.lifespan_context["repo_path"], pr_url
+            )
+            
+            # Now instead of checking if post_github_pr_review was called directly,
+            # we check that a task was created to process the review asynchronously
+            mock_create_task.assert_called_once()
 
 
 @pytest.mark.asyncio

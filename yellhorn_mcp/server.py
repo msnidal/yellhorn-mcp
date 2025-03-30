@@ -271,19 +271,25 @@ async def get_github_issue_body(repo_path: Path, issue_url: str) -> str:
         # GitHub issue/PR URLs are in the format: https://github.com/owner/repo/issues/number
         # or https://github.com/owner/repo/pull/number
         issue_number = issue_url.split("/")[-1]
-        
+
         if "/pull/" in issue_url:
             # For pull requests
-            result = await run_github_command(repo_path, ["pr", "view", issue_number, "--json", "body"])
+            result = await run_github_command(
+                repo_path, ["pr", "view", issue_number, "--json", "body"]
+            )
             # Parse JSON response to extract the body
             import json
+
             pr_data = json.loads(result)
             return pr_data.get("body", "")
         else:
             # For issues
-            result = await run_github_command(repo_path, ["issue", "view", issue_number, "--json", "body"])
+            result = await run_github_command(
+                repo_path, ["issue", "view", issue_number, "--json", "body"]
+            )
             # Parse JSON response to extract the body
             import json
+
             issue_data = json.loads(result)
             return issue_data.get("body", "")
     except Exception as e:
@@ -307,7 +313,7 @@ async def get_github_pr_diff(repo_path: Path, pr_url: str) -> str:
     try:
         # Extract PR number from URL
         pr_number = pr_url.split("/")[-1]
-        
+
         # Fetch PR diff using GitHub CLI
         result = await run_github_command(repo_path, ["pr", "diff", pr_number])
         return result
@@ -333,7 +339,7 @@ async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: st
     try:
         # Extract PR number from URL
         pr_number = pr_url.split("/")[-1]
-        
+
         # Create a temporary file to hold the review content
         temp_file = repo_path / f"pr_{pr_number}_review.md"
         with open(temp_file, "w", encoding="utf-8") as f:
@@ -527,7 +533,7 @@ Format your response as a clear, structured review with specific recommendations
             level="info",
             message=f"Generating review with Gemini API model {model}",
         )
-        
+
         # Call Gemini API
         response = await client.aio.models.generate_content(model=model, contents=prompt)
 
@@ -549,7 +555,7 @@ Format your response as a clear, structured review with specific recommendations
     except Exception as e:
         error_message = f"Failed to generate review: {str(e)}"
         await ctx.log(level="error", message=error_message)
-        
+
         if pr_url:
             # If there was an error but we have a PR URL, try to post the error message
             try:
@@ -560,7 +566,7 @@ Format your response as a clear, structured review with specific recommendations
                     level="error",
                     message=f"Failed to post error to PR: {str(post_error)}",
                 )
-        
+
         raise YellhornMCPError(error_message)
 
 
@@ -569,13 +575,13 @@ Format your response as a clear, structured review with specific recommendations
     description="Review a pull request against the original work plan issue and provide feedback.",
 )
 async def review_work_plan(
-    work_plan_issue_url: str, 
-    pull_request_url: str, 
+    work_plan_issue_url: str,
+    pull_request_url: str,
     ctx: Context,
 ) -> None:
     """
     Review a GitHub pull request against a work plan from a GitHub issue.
-    
+
     Fetches the work plan content from the provided GitHub issue URL and the code diff
     from the GitHub PR URL. It then processes the review asynchronously and posts the
     feedback directly to the PR as a comment.
@@ -599,7 +605,7 @@ async def review_work_plan(
         # Determine if work plan is a URL or raw content
         work_plan = await get_github_issue_body(repo_path, work_plan_issue_url)
         diff = await get_github_pr_diff(repo_path, pull_request_url)
-        
+
         # Process the review asynchronously
         review_task = asyncio.create_task(
             process_review_async(repo_path, client, model, work_plan, diff, pull_request_url, ctx)
@@ -608,6 +614,3 @@ async def review_work_plan(
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to review work plan: {str(e)}")
-
-if __name__ == "__main__":
-    mcp.run(transport='stdio')

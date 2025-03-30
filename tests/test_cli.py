@@ -1,11 +1,7 @@
 """Tests for the Yellhorn MCP CLI module."""
 
-import os
 import sys
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from yellhorn_mcp.cli import main
 
@@ -14,9 +10,9 @@ from yellhorn_mcp.cli import main
 @patch("os.getenv")
 @patch("pathlib.Path.exists")
 @patch("pathlib.Path.is_dir")
-@patch("uvicorn.run")
+@patch("yellhorn_mcp.server.mcp.run")
 def test_main_success(
-    mock_uvicorn_run,
+    mock_mcp_run,
     mock_is_dir,
     mock_exists,
     mock_getenv,
@@ -44,16 +40,10 @@ def test_main_success(
         main()
 
         # Check that the server was started with the correct arguments
-        mock_uvicorn_run.assert_called_once_with(
-            "yellhorn_mcp.server:mcp",
-            host="0.0.0.0",
-            port=8888,
-            log_level="info",
-        )
+        mock_mcp_run.assert_called_once_with(transport="stdio")
 
         # Check that a message was printed to stdout
         captured = capsys.readouterr()
-        assert "Starting Yellhorn MCP server at http://0.0.0.0:8888" in captured.out
         assert "Repository path: /mock/repo" in captured.out
         assert "Using model: mock-model" in captured.out
 
@@ -65,31 +55,48 @@ def test_main_success(
         sys.argv = sys_argv_original
 
 
+@patch("sys.argv", ["yellhorn-mcp"])
 @patch("sys.exit")
 @patch("os.getenv")
-def test_main_missing_api_key(mock_getenv, mock_exit, capsys):
+@patch("yellhorn_mcp.server.mcp.run")
+def test_main_missing_api_key(mock_mcp_run, mock_getenv, mock_exit, capsys):
     """Test execution with missing API key."""
+    # Set up sys.exit to actually exit the function
+    mock_exit.side_effect = SystemExit
+
     # Mock environment variables without API key
     mock_getenv.side_effect = lambda x, default=None: {
         "REPO_PATH": "/mock/repo",
     }.get(x, default)
 
-    # Run the main function
-    main()
+    # Run the main function, expecting it to exit
+    try:
+        main()
+    except SystemExit:
+        pass  # Expected behavior
 
     # Check that the error message was printed
     captured = capsys.readouterr()
-    assert "Error: GEMINI_API_KEY environment variable is not set" in captured.out
+    error_msg = "Error: GEMINI_API_KEY environment variable is not set"
+    assert error_msg in captured.out
 
     # Check that sys.exit was called with exit code 1
-    mock_exit.assert_called_once_with(1)
+    mock_exit.assert_any_call(1)
+
+    # Ensure mcp.run was not called
+    mock_mcp_run.assert_not_called()
 
 
+@patch("sys.argv", ["yellhorn-mcp"])
 @patch("sys.exit")
 @patch("os.getenv")
 @patch("pathlib.Path.exists")
-def test_main_invalid_repo_path(mock_exists, mock_getenv, mock_exit, capsys):
+@patch("yellhorn_mcp.server.mcp.run")
+def test_main_invalid_repo_path(mock_mcp_run, mock_exists, mock_getenv, mock_exit, capsys):
     """Test execution with invalid repository path."""
+    # Set up sys.exit to actually exit the function
+    mock_exit.side_effect = SystemExit
+
     # Mock environment variables
     mock_getenv.side_effect = lambda x, default=None: {
         "GEMINI_API_KEY": "mock-api-key",
@@ -99,8 +106,11 @@ def test_main_invalid_repo_path(mock_exists, mock_getenv, mock_exit, capsys):
     # Mock path check to indicate the path doesn't exist
     mock_exists.return_value = False
 
-    # Run the main function
-    main()
+    # Run the main function, expecting it to exit
+    try:
+        main()
+    except SystemExit:
+        pass  # Expected behavior
 
     # Check that the error message was printed
     captured = capsys.readouterr()
@@ -108,15 +118,23 @@ def test_main_invalid_repo_path(mock_exists, mock_getenv, mock_exit, capsys):
     assert "does not exist" in captured.out
 
     # Check that sys.exit was called with exit code 1
-    mock_exit.assert_called_once_with(1)
+    mock_exit.assert_any_call(1)
+
+    # Ensure mcp.run was not called
+    mock_mcp_run.assert_not_called()
 
 
+@patch("sys.argv", ["yellhorn-mcp"])
 @patch("sys.exit")
 @patch("os.getenv")
 @patch("pathlib.Path.exists")
 @patch("pathlib.Path.is_dir")
-def test_main_not_git_repo(mock_is_dir, mock_exists, mock_getenv, mock_exit, capsys):
+@patch("yellhorn_mcp.server.mcp.run")
+def test_main_not_git_repo(mock_mcp_run, mock_is_dir, mock_exists, mock_getenv, mock_exit, capsys):
     """Test execution with a path that is not a Git repository."""
+    # Set up sys.exit to actually exit the function
+    mock_exit.side_effect = SystemExit
+
     # Mock environment variables
     mock_getenv.side_effect = lambda x, default=None: {
         "GEMINI_API_KEY": "mock-api-key",
@@ -127,12 +145,19 @@ def test_main_not_git_repo(mock_is_dir, mock_exists, mock_getenv, mock_exit, cap
     mock_exists.return_value = True
     mock_is_dir.return_value = False
 
-    # Run the main function
-    main()
+    # Run the main function, expecting it to exit
+    try:
+        main()
+    except SystemExit:
+        pass  # Expected behavior
 
     # Check that the error message was printed
     captured = capsys.readouterr()
-    assert "Error: /mock/repo is not a Git repository" in captured.out
+    error_msg = "Error: /mock/repo is not a Git repository"
+    assert error_msg in captured.out
 
     # Check that sys.exit was called with exit code 1
-    mock_exit.assert_called_once_with(1)
+    mock_exit.assert_any_call(1)
+
+    # Ensure mcp.run was not called
+    mock_mcp_run.assert_not_called()
