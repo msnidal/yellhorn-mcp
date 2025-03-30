@@ -333,7 +333,7 @@ async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: st
         try:
             # Post the review using GitHub CLI
             result = await run_github_command(
-                repo_path, ["pr", "review", pr_number, "--body-file", str(temp_file)]
+                repo_path, ["pr", "review", pr_number, "--comment", "--body-file", str(temp_file)]
             )
             return f"Review posted successfully on PR {pr_url}"
         finally:
@@ -563,7 +563,7 @@ async def review_work_plan(
     work_plan_issue_url: str, 
     pull_request_url: str, 
     ctx: Context,
-) -> str:
+) -> None:
     """
     Review a code diff against the original work plan.
     
@@ -595,10 +595,7 @@ async def review_work_plan(
         review_task = asyncio.create_task(
             process_review_async(repo_path, client, model, work_plan, diff, pull_request_url, ctx)
         )
-        
-        # Wait for the review to be generated
-        review = await review_task
-        return review
+        return None
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to review work plan: {str(e)}")
