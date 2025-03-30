@@ -105,6 +105,26 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### CI/CD
+
+The project uses GitHub Actions for continuous integration and deployment:
+
+- **Testing**: Runs automatically on pull requests and pushes to the main branch
+  - Linting with flake8
+  - Format checking with black
+  - Testing with pytest
+
+- **Publishing**: Automatically publishes to PyPI when a version tag is pushed
+  - Tag must match the version in pyproject.toml (e.g., v0.1.3)
+  - Requires a PyPI API token stored as a GitHub repository secret (PYPI_API_TOKEN)
+
+To release a new version:
+
+1. Update version in pyproject.toml
+2. Commit changes: `git commit -am "Bump version to X.Y.Z"`
+3. Tag the commit: `git tag vX.Y.Z`
+4. Push changes and tag: `git push && git push --tags`
+
 For more detailed instructions, see the [Usage Guide](docs/USAGE.md).
 
 ## License

@@ -49,7 +49,6 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     repo_path = os.getenv("REPO_PATH", ".")
     api_key = os.getenv("GEMINI_API_KEY")
     gemini_model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-exp-03-25")
-    # gemini_model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.0-flash")
 
     if not api_key:
         raise ValueError("GEMINI_API_KEY is required")

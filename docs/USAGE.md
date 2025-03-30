@@ -213,6 +213,70 @@ The example client uses the MCP client API to interact with the server through s
 - `Failed to fetch GitHub PR diff`: The PR URL may be invalid or inaccessible.
 - `Failed to post GitHub PR review`: Check GitHub CLI permissions for posting PR comments.
 
+## CI/CD
+
+The project includes GitHub Actions workflows for automated testing and deployment.
+
+### Testing Workflow
+
+The testing workflow automatically runs when:
+- Pull requests are opened against the main branch
+- Pushes are made to the main branch
+
+It performs the following steps:
+1. Sets up Python environments (3.10 and 3.11)
+2. Installs dependencies
+3. Runs linting with flake8
+4. Checks formatting with black
+5. Runs tests with pytest
+
+The workflow configuration is in `.github/workflows/tests.yml`.
+
+### Publishing Workflow
+
+The publishing workflow automatically runs when:
+- A version tag (v*) is pushed to the repository
+
+It performs the following steps:
+1. Sets up Python 3.10
+2. Verifies that the tag version matches the version in pyproject.toml
+3. Builds the package
+4. Publishes the package to PyPI
+
+The workflow configuration is in `.github/workflows/publish.yml`.
+
+#### Publishing Requirements
+
+To publish to PyPI, you need to:
+1. Create a PyPI API token
+2. Store it as a repository secret in GitHub named `PYPI_API_TOKEN`
+
+#### Creating a PyPI API Token
+
+1. Log in to your PyPI account
+2. Go to Account Settings > API tokens
+3. Create a new token with scope "Entire account" or specific to the yellhorn-mcp project
+4. Copy the token value
+
+#### Adding the Secret to GitHub
+
+1. Go to your GitHub repository
+2. Navigate to Settings > Secrets and variables > Actions
+3. Click "New repository secret"
+4. Set the name to `PYPI_API_TOKEN`
+5. Paste the token value
+6. Click "Add secret"
+
+#### Releasing a New Version
+
+1. Update the version in pyproject.toml
+2. Update the version in yellhorn_mcp/__init__.py (if needed)
+3. Commit changes: `git commit -am "Bump version to X.Y.Z"`
+4. Tag the commit: `git tag vX.Y.Z`
+5. Push changes and tag: `git push && git push --tags`
+
+The publishing workflow will automatically run when the tag is pushed, building and publishing the package to PyPI.
+
 ## Advanced Configuration
 
 For advanced use cases, you can modify the server's behavior by editing the source code:
