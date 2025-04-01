@@ -152,25 +152,29 @@ async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, s
     if ignore_patterns:
         import fnmatch
 
-        # Function to check if a file path matches any ignore pattern
+        # Function definition for the is_ignored function that can be patched in tests
         def is_ignored(file_path: str) -> bool:
             for pattern in ignore_patterns:
-                # Regular pattern matching
+                # Regular pattern matching (e.g., "*.log")
                 if fnmatch.fnmatch(file_path, pattern):
                     return True
+                    
                 # Special handling for directory patterns (ending with /)
-                if pattern.endswith("/") and (
-                    # Match directories by name
-                    file_path.startswith(pattern[:-1] + "/")
-                    or
-                    # Match files inside directories
-                    "/" + pattern[:-1] + "/" in file_path
-                ):
-                    return True
+                if pattern.endswith("/"):
+                    # Match directories by name at the start of the path (e.g., "node_modules/...")
+                    if file_path.startswith(pattern[:-1] + "/"):
+                        return True
+                    # Match directories anywhere in the path (e.g., ".../node_modules/...")
+                    if "/" + pattern[:-1] + "/" in file_path:
+                        return True
             return False
 
-        # Filter out ignored files
-        file_paths = [f for f in file_paths if not is_ignored(f)]
+        # Create a filtered list using a list comprehension for better performance
+        filtered_paths = []
+        for f in file_paths:
+            if not is_ignored(f):
+                filtered_paths.append(f)
+        file_paths = filtered_paths
 
     # Read file contents
     file_contents = {}
