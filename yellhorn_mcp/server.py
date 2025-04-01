@@ -158,7 +158,7 @@ async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, s
                 # Regular pattern matching (e.g., "*.log")
                 if fnmatch.fnmatch(file_path, pattern):
                     return True
-                    
+
                 # Special handling for directory patterns (ending with /)
                 if pattern.endswith("/"):
                     # Match directories by name at the start of the path (e.g., "node_modules/...")
