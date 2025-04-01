@@ -115,6 +115,10 @@ async def run_git_command(repo_path: Path, command: list[str]) -> str:
 async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
     """
     Get a snapshot of the codebase, including file list and contents.
+    
+    Respects both .gitignore and .yellhornignore files. The .yellhornignore file
+    uses the same pattern syntax as .gitignore and allows excluding additional files
+    from the codebase snapshot provided to the AI.
 
     Args:
         repo_path: Path to the repository.
@@ -128,6 +132,44 @@ async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, s
     # Get list of all tracked and untracked files
     files_output = await run_git_command(repo_path, ["ls-files", "-c", "-o", "--exclude-standard"])
     file_paths = [f for f in files_output.split("\n") if f]
+    
+    # Check for .yellhornignore file
+    yellhornignore_path = repo_path / ".yellhornignore"
+    ignore_patterns = []
+    if yellhornignore_path.exists() and yellhornignore_path.is_file():
+        try:
+            with open(yellhornignore_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip empty lines and comments
+                    if line and not line.startswith("#"):
+                        ignore_patterns.append(line)
+        except Exception as e:
+            # Log but continue if there's an error reading .yellhornignore
+            print(f"Warning: Error reading .yellhornignore file: {str(e)}")
+    
+    # Filter files based on .yellhornignore patterns
+    if ignore_patterns:
+        import fnmatch
+        
+        # Function to check if a file path matches any ignore pattern
+        def is_ignored(file_path: str) -> bool:
+            for pattern in ignore_patterns:
+                # Regular pattern matching
+                if fnmatch.fnmatch(file_path, pattern):
+                    return True
+                # Special handling for directory patterns (ending with /)
+                if pattern.endswith('/') and (
+                    # Match directories by name
+                    file_path.startswith(pattern[:-1] + '/') or
+                    # Match files inside directories
+                    '/' + pattern[:-1] + '/' in file_path
+                ):
+                    return True
+            return False
+        
+        # Filter out ignored files
+        file_paths = [f for f in file_paths if not is_ignored(f)]
 
     # Read file contents
     file_contents = {}
@@ -276,13 +318,13 @@ async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> 
         raise YellhornMCPError(f"Failed to update GitHub issue: {str(e)}")
 
 
-async def get_github_issue_body(repo_path: Path, issue_url: str) -> str:
+async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
     """
     Get the body content of a GitHub issue or PR.
 
     Args:
         repo_path: Path to the repository.
-        issue_url: URL of the GitHub issue or PR.
+        issue_identifier: Either a URL of the GitHub issue/PR or just the issue number.
 
     Returns:
         The body content of the issue or PR.
@@ -291,29 +333,36 @@ async def get_github_issue_body(repo_path: Path, issue_url: str) -> str:
         YellhornMCPError: If there's an error fetching the issue or PR.
     """
     try:
-        # Extract issue or PR number from URL
-        # GitHub issue/PR URLs are in the format: https://github.com/owner/repo/issues/number
-        # or https://github.com/owner/repo/pull/number
-        issue_number = issue_url.split("/")[-1]
-
-        if "/pull/" in issue_url:
-            # For pull requests
-            result = await run_github_command(
-                repo_path, ["pr", "view", issue_number, "--json", "body"]
-            )
-            # Parse JSON response to extract the body
-            import json
-
-            pr_data = json.loads(result)
-            return pr_data.get("body", "")
+        # Determine if it's a URL or just an issue number
+        if issue_identifier.startswith("http"):
+            # It's a URL, extract the number and determine if it's an issue or PR
+            issue_number = issue_identifier.split("/")[-1]
+            
+            if "/pull/" in issue_identifier:
+                # For pull requests
+                result = await run_github_command(
+                    repo_path, ["pr", "view", issue_number, "--json", "body"]
+                )
+                # Parse JSON response to extract the body
+                import json
+                pr_data = json.loads(result)
+                return pr_data.get("body", "")
+            else:
+                # For issues
+                result = await run_github_command(
+                    repo_path, ["issue", "view", issue_number, "--json", "body"]
+                )
+                # Parse JSON response to extract the body
+                import json
+                issue_data = json.loads(result)
+                return issue_data.get("body", "")
         else:
-            # For issues
+            # It's just an issue number
             result = await run_github_command(
-                repo_path, ["issue", "view", issue_number, "--json", "body"]
+                repo_path, ["issue", "view", issue_identifier, "--json", "body"]
             )
             # Parse JSON response to extract the body
             import json
-
             issue_data = json.loads(result)
             return issue_data.get("body", "")
     except Exception as e:
@@ -469,6 +518,38 @@ The work plan should be comprehensive enough that a developer could implement it
             )
 
 
+async def generate_branch_name(title: str, issue_number: str) -> str:
+    """
+    Generate a suitable branch name from an issue title and number.
+    
+    Args:
+        title: The title of the issue.
+        issue_number: The issue number.
+        
+    Returns:
+        A slugified branch name in the format 'issue-{number}-{slugified-title}'.
+    """
+    # Convert title to lowercase
+    slug = title.lower()
+    
+    # Replace spaces and special characters with hyphens
+    import re
+    slug = re.sub(r'[^a-z0-9]+', '-', slug)
+    
+    # Remove leading and trailing hyphens
+    slug = slug.strip('-')
+    
+    # Truncate if too long (leave room for the prefix)
+    max_length = 50 - len(f"issue-{issue_number}-")
+    if len(slug) > max_length:
+        slug = slug[:max_length]
+    
+    # Assemble the branch name
+    branch_name = f"issue-{issue_number}-{slug}"
+    
+    return branch_name
+
+
 @mcp.tool(
     name="generate_work_plan",
     description="Generate a detailed work plan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'.Note: You should generally just pass the full user task request task verbatim to detailed_description.",
@@ -481,6 +562,7 @@ async def generate_work_plan(
     """
     Generate a work plan based on the provided title and detailed description.
     Creates a GitHub issue and processes the work plan generation asynchronously.
+    Also automatically creates a linked branch for the issue.
 
     Args:
         title: Title for the GitHub issue (will be used as issue title and header).
@@ -525,6 +607,36 @@ async def generate_work_plan(
             message=f"GitHub issue created: {issue_url}",
         )
         issue_number = issue_url.split("/")[-1]
+        
+        # Generate a branch name for the issue
+        branch_name = await generate_branch_name(title, issue_number)
+        
+        # Create a branch linked to the issue
+        try:
+            await ctx.log(
+                level="info",
+                message=f"Creating branch '{branch_name}' for issue #{issue_number}",
+            )
+            await run_github_command(
+                repo_path,
+                [
+                    "issue",
+                    "develop",
+                    issue_number,
+                    "--name",
+                    branch_name,
+                ]
+            )
+            await ctx.log(
+                level="info",
+                message=f"Branch '{branch_name}' created and linked to issue #{issue_number}",
+            )
+        except Exception as branch_error:
+            # Log the error but continue with the work plan generation
+            await ctx.log(
+                level="warning",
+                message=f"Failed to create branch for issue #{issue_number}: {str(branch_error)}",
+            )
 
         # Start async processing
         asyncio.create_task(
@@ -552,7 +664,7 @@ async def process_review_async(
     work_plan: str,
     diff: str,
     pr_url: str | None,
-    work_plan_issue_url: str | None,
+    work_plan_issue_number: str | None,
     ctx: Context,
 ) -> str:
     """
@@ -565,7 +677,7 @@ async def process_review_async(
         work_plan: The original work plan.
         diff: The code diff to review.
         pr_url: Optional URL to the GitHub PR where the review should be posted.
-        work_plan_issue_url: Optional URL to the GitHub issue with the original work plan.
+        work_plan_issue_number: Optional GitHub issue number with the original work plan.
         ctx: Server context.
 
     Returns:
@@ -609,8 +721,8 @@ Format your response as a clear, structured review with specific recommendations
             raise YellhornMCPError("Received an empty response from Gemini API.")
 
         # Add reference to the original issue if provided
-        if work_plan_issue_url:
-            review = f"Review based on work plan: {work_plan_issue_url}\n\n{review_content}"
+        if work_plan_issue_number:
+            review = f"Review based on work plan in issue #{work_plan_issue_number}\n\n{review_content}"
         else:
             review = review_content
 
@@ -647,19 +759,19 @@ Format your response as a clear, structured review with specific recommendations
     description="Review a pull request against the original work plan issue and provide feedback.",
 )
 async def review_work_plan(
-    work_plan_issue_url: str,
+    work_plan_issue_number: str,
     pull_request_url: str,
     ctx: Context,
 ) -> None:
     """
     Review a GitHub pull request against a work plan from a GitHub issue.
 
-    Fetches the work plan content from the provided GitHub issue URL and the code diff
+    Fetches the work plan content from the provided GitHub issue number and the code diff
     from the GitHub PR URL. It then processes the review asynchronously and posts the
     feedback directly to the PR as a comment, including a reference to the original issue.
 
     Args:
-        work_plan_issue_url: GitHub issue URL containing the work plan.
+        work_plan_issue_number: GitHub issue number containing the work plan.
         pull_request_url: GitHub PR URL containing the changes to review.
         ctx: Server context with repository path and Gemini model.
 
@@ -674,8 +786,8 @@ async def review_work_plan(
     model: str = ctx.request_context.lifespan_context["model"]
 
     try:
-        # Determine if work plan is a URL or raw content
-        work_plan = await get_github_issue_body(repo_path, work_plan_issue_url)
+        # Get work plan and diff content
+        work_plan = await get_github_issue_body(repo_path, work_plan_issue_number)
         diff = await get_github_pr_diff(repo_path, pull_request_url)
 
         # Process the review asynchronously
@@ -687,7 +799,7 @@ async def review_work_plan(
                 work_plan,
                 diff,
                 pull_request_url,
-                work_plan_issue_url,
+                work_plan_issue_number,
                 ctx,
             )
         )

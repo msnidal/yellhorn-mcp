@@ -27,6 +27,33 @@ The server requires the following environment variables:
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL` (optional): Gemini model to use (defaults to "gemini-2.5-pro-exp-03-25")
 
+### Excludes with .yellhornignore
+
+You can create a `.yellhornignore` file in your repository root to exclude specific files from being included in the AI context. This works similar to `.gitignore` but is specific to the Yellhorn MCP server:
+
+```
+# Example .yellhornignore file
+*.log
+node_modules/
+dist/
+*.min.js
+credentials/
+```
+
+The `.yellhornignore` file uses the same pattern syntax as `.gitignore`:
+- Lines starting with `#` are comments
+- Empty lines are ignored
+- Patterns use shell-style wildcards (e.g., `*.js`, `node_modules/`)
+- Patterns ending with `/` will match directories
+- Patterns containing `/` are relative to the repository root
+
+This feature is useful for:
+- Excluding large folders that wouldn't provide useful context (e.g., `node_modules/`)
+- Excluding sensitive or credential-related files
+- Reducing noise in the AI's context to improve focus on relevant code
+
+The codebase snapshot already respects `.gitignore` by default, and `.yellhornignore` provides additional filtering.
+
 Additionally, the server requires GitHub CLI (`gh`) to be installed and authenticated:
 
 ```bash
@@ -109,7 +136,7 @@ This will use the `generate_work_plan` tool to analyze your codebase, create a G
 After creating a pull request based on the work plan:
 
 ```
-Please review my changes against the work plan from https://github.com/user/repo/issues/123 in my pull request https://github.com/user/repo/pull/456
+Please review my changes against the work plan from issue #123 in my pull request https://github.com/user/repo/pull/456
 ```
 
 This will use the `review_work_plan` tool to retrieve the work plan from the issue, fetch the diff from the PR, analyze the implementation, and post a review directly to the PR.
@@ -135,7 +162,7 @@ Reviews a GitHub pull request against the original work plan and posts feedback 
 
 **Input**:
 
-- `work_plan_issue_url`: GitHub issue URL containing the work plan
+- `work_plan_issue_number`: GitHub issue number containing the work plan
 - `pull_request_url`: GitHub PR URL containing the changes to review
 - `ctx`: Server context
 
@@ -171,7 +198,7 @@ curl -X POST http://127.0.0.1:8000/tools/generate_work_plan \
 # Call a tool (review_work_plan)
 curl -X POST http://127.0.0.1:8000/tools/review_work_plan \
   -H "Content-Type: application/json" \
-  -d '{"work_plan_issue_url": "https://github.com/user/repo/issues/1", "pull_request_url": "https://github.com/user/repo/pull/2"}'
+  -d '{"work_plan_issue_number": "1", "pull_request_url": "https://github.com/user/repo/pull/2"}'
 ```
 
 ### Example Client
@@ -185,8 +212,8 @@ python -m examples.client_example list
 # Generate a work plan
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"
 
-# Review using GitHub issue and PR URLs
-python -m examples.client_example review --work-plan-url https://github.com/user/repo/issues/1 --pr-url https://github.com/user/repo/pull/2
+# Review using GitHub issue number and PR URL
+python -m examples.client_example review --work-plan-issue-number 1 --pr-url https://github.com/user/repo/pull/2
 ```
 
 The example client uses the MCP client API to interact with the server through stdio transport, which is the same approach Claude Code uses.
