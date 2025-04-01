@@ -115,7 +115,7 @@ async def run_git_command(repo_path: Path, command: list[str]) -> str:
 async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
     """
     Get a snapshot of the codebase, including file list and contents.
-    
+
     Respects both .gitignore and .yellhornignore files. The .yellhornignore file
     uses the same pattern syntax as .gitignore and allows excluding additional files
     from the codebase snapshot provided to the AI.
@@ -132,7 +132,7 @@ async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, s
     # Get list of all tracked and untracked files
     files_output = await run_git_command(repo_path, ["ls-files", "-c", "-o", "--exclude-standard"])
     file_paths = [f for f in files_output.split("\n") if f]
-    
+
     # Check for .yellhornignore file
     yellhornignore_path = repo_path / ".yellhornignore"
     ignore_patterns = []
@@ -147,11 +147,11 @@ async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, s
         except Exception as e:
             # Log but continue if there's an error reading .yellhornignore
             print(f"Warning: Error reading .yellhornignore file: {str(e)}")
-    
+
     # Filter files based on .yellhornignore patterns
     if ignore_patterns:
         import fnmatch
-        
+
         # Function to check if a file path matches any ignore pattern
         def is_ignored(file_path: str) -> bool:
             for pattern in ignore_patterns:
@@ -159,15 +159,16 @@ async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, s
                 if fnmatch.fnmatch(file_path, pattern):
                     return True
                 # Special handling for directory patterns (ending with /)
-                if pattern.endswith('/') and (
+                if pattern.endswith("/") and (
                     # Match directories by name
-                    file_path.startswith(pattern[:-1] + '/') or
+                    file_path.startswith(pattern[:-1] + "/")
+                    or
                     # Match files inside directories
-                    '/' + pattern[:-1] + '/' in file_path
+                    "/" + pattern[:-1] + "/" in file_path
                 ):
                     return True
             return False
-        
+
         # Filter out ignored files
         file_paths = [f for f in file_paths if not is_ignored(f)]
 
@@ -337,7 +338,7 @@ async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
         if issue_identifier.startswith("http"):
             # It's a URL, extract the number and determine if it's an issue or PR
             issue_number = issue_identifier.split("/")[-1]
-            
+
             if "/pull/" in issue_identifier:
                 # For pull requests
                 result = await run_github_command(
@@ -345,6 +346,7 @@ async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
                 )
                 # Parse JSON response to extract the body
                 import json
+
                 pr_data = json.loads(result)
                 return pr_data.get("body", "")
             else:
@@ -354,6 +356,7 @@ async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
                 )
                 # Parse JSON response to extract the body
                 import json
+
                 issue_data = json.loads(result)
                 return issue_data.get("body", "")
         else:
@@ -363,6 +366,7 @@ async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
             )
             # Parse JSON response to extract the body
             import json
+
             issue_data = json.loads(result)
             return issue_data.get("body", "")
     except Exception as e:
@@ -521,32 +525,33 @@ The work plan should be comprehensive enough that a developer could implement it
 async def generate_branch_name(title: str, issue_number: str) -> str:
     """
     Generate a suitable branch name from an issue title and number.
-    
+
     Args:
         title: The title of the issue.
         issue_number: The issue number.
-        
+
     Returns:
         A slugified branch name in the format 'issue-{number}-{slugified-title}'.
     """
     # Convert title to lowercase
     slug = title.lower()
-    
+
     # Replace spaces and special characters with hyphens
     import re
-    slug = re.sub(r'[^a-z0-9]+', '-', slug)
-    
+
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+
     # Remove leading and trailing hyphens
-    slug = slug.strip('-')
-    
+    slug = slug.strip("-")
+
     # Truncate if too long (leave room for the prefix)
     max_length = 50 - len(f"issue-{issue_number}-")
     if len(slug) > max_length:
         slug = slug[:max_length]
-    
+
     # Assemble the branch name
     branch_name = f"issue-{issue_number}-{slug}"
-    
+
     return branch_name
 
 
@@ -607,10 +612,10 @@ async def generate_work_plan(
             message=f"GitHub issue created: {issue_url}",
         )
         issue_number = issue_url.split("/")[-1]
-        
+
         # Generate a branch name for the issue
         branch_name = await generate_branch_name(title, issue_number)
-        
+
         # Create a branch linked to the issue
         try:
             await ctx.log(
@@ -625,7 +630,7 @@ async def generate_work_plan(
                     issue_number,
                     "--name",
                     branch_name,
-                ]
+                ],
             )
             await ctx.log(
                 level="info",
@@ -722,7 +727,9 @@ Format your response as a clear, structured review with specific recommendations
 
         # Add reference to the original issue if provided
         if work_plan_issue_number:
-            review = f"Review based on work plan in issue #{work_plan_issue_number}\n\n{review_content}"
+            review = (
+                f"Review based on work plan in issue #{work_plan_issue_number}\n\n{review_content}"
+            )
         else:
             review = review_content
 

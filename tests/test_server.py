@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from google import genai
 from mcp.server.fastmcp import Context
-import yellhorn_mcp.server
 
 from yellhorn_mcp.server import (
     YellhornMCPError,
@@ -108,11 +107,11 @@ async def test_get_codebase_snapshot_with_yellhornignore():
     """Test the .yellhornignore file filtering logic directly."""
     # This test verifies the filtering logic works in isolation
     import fnmatch
-    
+
     # Set up test files and ignore patterns
     file_paths = ["file1.py", "file2.py", "test.log", "node_modules/file.js"]
     ignore_patterns = ["*.log", "node_modules/"]
-    
+
     # Define a function that mimics the is_ignored logic in get_codebase_snapshot
     def is_ignored(file_path: str) -> bool:
         for pattern in ignore_patterns:
@@ -120,49 +119,55 @@ async def test_get_codebase_snapshot_with_yellhornignore():
             if fnmatch.fnmatch(file_path, pattern):
                 return True
             # Special handling for directory patterns (ending with /)
-            if pattern.endswith('/') and (
+            if pattern.endswith("/") and (
                 # Match directories by name
-                file_path.startswith(pattern[:-1] + '/') or
+                file_path.startswith(pattern[:-1] + "/")
+                or
                 # Match files inside directories
-                '/' + pattern[:-1] + '/' in file_path
+                "/" + pattern[:-1] + "/" in file_path
             ):
                 return True
         return False
-    
+
     # Apply filtering
     filtered_paths = [f for f in file_paths if not is_ignored(f)]
-    
+
     # Verify filtering - these are what we expect
     assert "file1.py" in filtered_paths, "file1.py should be included"
     assert "file2.py" in filtered_paths, "file2.py should be included"
     assert "test.log" not in filtered_paths, "test.log should be excluded by *.log pattern"
-    assert "node_modules/file.js" not in filtered_paths, "node_modules/file.js should be excluded by node_modules/ pattern"
+    assert (
+        "node_modules/file.js" not in filtered_paths
+    ), "node_modules/file.js should be excluded by node_modules/ pattern"
     assert len(filtered_paths) == 2, "Should only have 2 files after filtering"
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Integration test needs more complex mocking to fully test .yellhornignore functionality")
 async def test_get_codebase_snapshot_integration():
     """Integration test for get_codebase_snapshot with .yellhornignore."""
     # Mock git command to return specific files
     with patch("yellhorn_mcp.server.run_git_command") as mock_git:
         mock_git.return_value = "file1.py\nfile2.py\ntest.log\nnode_modules/file.js"
-        
+
         # Create a temp in-memory .yellhornignore file
         mock_yellhornignore = MagicMock()
         mock_yellhornignore.__enter__.return_value.readlines.return_value = [
-            "# Test patterns\n", "*.log\n", "node_modules/\n"
+            "# Test patterns\n",
+            "*.log\n",
+            "node_modules/\n",
         ]
-        mock_yellhornignore.__enter__.return_value.read.return_value = "# Test patterns\n*.log\nnode_modules/"
-        
+        mock_yellhornignore.__enter__.return_value.read.return_value = (
+            "# Test patterns\n*.log\nnode_modules/"
+        )
+
         # Mock the open function to return our .yellhornignore content
         mock_open = MagicMock()
         mock_open.return_value = mock_yellhornignore
-        
+
         # Create patched version of is_ignored that always excludes test.log and node_modules/
         def patched_is_ignored(file_path):
-            return file_path.endswith('.log') or 'node_modules/' in file_path
-        
+            return file_path.endswith(".log") or "node_modules/" in file_path
+
         # Patch the built-in open and Path methods
         with patch("builtins.open", mock_open):
             with patch.object(Path, "exists", return_value=True):
@@ -170,34 +175,47 @@ async def test_get_codebase_snapshot_integration():
                     with patch.object(Path, "is_dir", return_value=False):
                         # The key patch - override the fnmatch.fnmatch function to control pattern matching
                         with patch("fnmatch.fnmatch") as mock_fnmatch:
+
                             def mock_fnmatch_side_effect(filepath, pattern):
                                 if pattern == "*.log" and filepath.endswith(".log"):
                                     return True
                                 if pattern == "node_modules/" and "node_modules/" in filepath:
                                     return True
                                 return False
-                            
+
                             mock_fnmatch.side_effect = mock_fnmatch_side_effect
-                            
+
                             # Execute the function with our mocks
-                            with patch("yellhorn_mcp.server.is_ignored", patched_is_ignored, create=True):
+                            with patch(
+                                "yellhorn_mcp.server.is_ignored", patched_is_ignored, create=True
+                            ):
                                 # Call the function we're testing
                                 from yellhorn_mcp.server import get_codebase_snapshot
-                                
+
                                 # Monkey patch the internal filter to test just that part
                                 original_filter = filter
-                                
+
                                 # This patch ensures filtering happens as expected
                                 def patched_filter(function, iterable):
                                     # For our specific case, return only file1.py and file2.py
-                                    if any(f.endswith('.log') for f in iterable) or any('node_modules/' in f for f in iterable):
-                                        return iter([f for f in iterable if not (f.endswith('.log') or 'node_modules/' in f)])
+                                    if any(f.endswith(".log") for f in iterable) or any(
+                                        "node_modules/" in f for f in iterable
+                                    ):
+                                        return iter(
+                                            [
+                                                f
+                                                for f in iterable
+                                                if not (f.endswith(".log") or "node_modules/" in f)
+                                            ]
+                                        )
                                     return original_filter(function, iterable)
-                                
+
                                 with patch("builtins.filter", patched_filter):
                                     # Now call the function
-                                    file_paths, file_contents = await get_codebase_snapshot(Path("/mock/repo"))
-                                    
+                                    file_paths, file_contents = await get_codebase_snapshot(
+                                        Path("/mock/repo")
+                                    )
+
                                     # The filtering should result in only the Python files
                                     expected_files = ["file1.py", "file2.py"]
                                     assert sorted(file_paths) == sorted(expected_files)
@@ -230,21 +248,23 @@ async def test_generate_branch_name():
     # Test with a simple title
     branch_name = await generate_branch_name("Feature Implementation Plan", "123")
     assert branch_name == "issue-123-feature-implementation-plan"
-    
+
     # Test with a complex title requiring slugification
-    branch_name = await generate_branch_name("Add support for .yellhornignore & other features", "456")
+    branch_name = await generate_branch_name(
+        "Add support for .yellhornignore & other features", "456"
+    )
     # Instead of an exact match, check for the start of the string and general pattern
     assert branch_name.startswith("issue-456-add-support-for-yellhornignore")
     # Also check that special characters were removed
     assert "&" not in branch_name
     assert branch_name.count("-") >= 5  # Should have several hyphens from slugification
-    
+
     # Test with a very long title that needs truncation
     long_title = "This is an extremely long title that should be truncated because it exceeds the maximum length for a branch name in Git which is typically around 100 characters but we want to be safe"
     branch_name = await generate_branch_name(long_title, "789")
     assert len(branch_name) <= 50
     assert branch_name.startswith("issue-789-")
-    
+
 
 @pytest.mark.asyncio
 async def test_generate_work_plan(mock_request_context, mock_genai_client):
@@ -258,7 +278,7 @@ async def test_generate_work_plan(mock_request_context, mock_genai_client):
 
             with patch("yellhorn_mcp.server.generate_branch_name") as mock_generate_branch:
                 mock_generate_branch.return_value = "issue-123-feature-implementation-plan"
-                
+
                 with patch("asyncio.create_task") as mock_create_task:
                     # Test with required title and detailed description
                     response = await generate_work_plan(
@@ -275,8 +295,10 @@ async def test_generate_work_plan(mock_request_context, mock_genai_client):
                     mock_create_task.assert_called_once()
 
                     # Check that the GitHub issue is created with the provided title and yellhorn-mcp label
-                    assert mock_gh.call_count >= 2  # First for issue creation, second for branch creation
-                    
+                    assert (
+                        mock_gh.call_count >= 2
+                    )  # First for issue creation, second for branch creation
+
                     # Get issue creation call
                     issue_call_args = mock_gh.call_args_list[0][0]
                     assert "issue" in issue_call_args[1]
@@ -291,10 +313,12 @@ async def test_generate_work_plan(mock_request_context, mock_genai_client):
                     assert "# Feature Implementation Plan" in body_content
                     assert "## Description" in body_content
                     assert "Create a new feature to support X" in body_content
-                    
+
                     # Check branch creation
-                    mock_generate_branch.assert_called_once_with("Feature Implementation Plan", "123")
-                    
+                    mock_generate_branch.assert_called_once_with(
+                        "Feature Implementation Plan", "123"
+                    )
+
                     # Get the branch creation call
                     branch_call_args = mock_gh.call_args_list[1][0]
                     assert "issue" in branch_call_args[1]
@@ -380,16 +404,16 @@ async def test_get_github_issue_body():
 
         assert result == "PR content"
         mock_gh.assert_called_once_with(Path("/mock/repo"), ["pr", "view", "456", "--json", "body"])
-        
+
         # Reset mock
         mock_gh.reset_mock()
-        
+
         # Test fetching issue content with just issue number
         mock_gh.return_value = '{"body": "Issue content from number"}'
         issue_number = "789"
-        
+
         result = await get_github_issue_body(Path("/mock/repo"), issue_number)
-        
+
         assert result == "Issue content from number"
         mock_gh.assert_called_once_with(
             Path("/mock/repo"), ["issue", "view", "789", "--json", "body"]
@@ -567,7 +591,9 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
         )
 
         # Check that the review contains the right content
-        assert response == f"Review based on work plan in issue #{issue_number}\n\nMock response text"
+        assert (
+            response == f"Review based on work plan in issue #{issue_number}\n\nMock response text"
+        )
 
         # Check that the API was called with codebase included in prompt
         mock_genai_client.aio.models.generate_content.assert_called_once()
@@ -578,7 +604,9 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
         mock_post_review.assert_called_once()
         args, kwargs = mock_post_review.call_args
         assert args[1] == pr_url
-        assert f"issue #{issue_number}" in args[2]  # Check that issue reference is in review content
+        assert (
+            f"issue #{issue_number}" in args[2]
+        )  # Check that issue reference is in review content
 
         # Reset mocks
         mock_genai_client.aio.models.generate_content.reset_mock()
