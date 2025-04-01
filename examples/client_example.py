@@ -56,7 +56,7 @@ async def review_work_plan(
     session: ClientSession, 
     work_plan: str | None = None, 
     diff: str | None = None,
-    work_plan_url: str | None = None,
+    work_plan_issue_number: str | None = None,
     pr_url: str | None = None,
     post_to_pr: bool = False
 ) -> str:
@@ -64,14 +64,14 @@ async def review_work_plan(
     Review a diff against a work plan using the Yellhorn MCP server.
 
     This function calls the review_work_plan tool to analyze a diff against a work plan.
-    It can work with both raw content and GitHub URLs for both the work plan and diff.
-    When given a PR URL, it can optionally post the review directly to the PR.
+    It can work with both raw content and GitHub issue number for the work plan.
+    When given a PR URL, it can post the review directly to the PR.
 
     Args:
         session: MCP client session.
-        work_plan: Original work plan text (if not using URL).
+        work_plan: Original work plan text (if not using issue number).
         diff: Code diff to review (if not using PR URL or local diff).
-        work_plan_url: GitHub issue URL containing the work plan.
+        work_plan_issue_number: GitHub issue number containing the work plan.
         pr_url: GitHub PR URL to fetch diff from and post review to.
         post_to_pr: Whether to post the review to the PR.
 
@@ -79,19 +79,19 @@ async def review_work_plan(
         Review feedback or confirmation message.
         
     Raises:
-        ValueError: If neither work_plan nor work_plan_url is provided.
+        ValueError: If neither work_plan nor work_plan_issue_number is provided.
     """
     arguments = {}
     
-    # Set the arguments according to new server API
-    if work_plan_url:
-        arguments["work_plan_issue_url"] = work_plan_url
+    # Set the arguments according to server API
+    if work_plan_issue_number:
+        arguments["work_plan_issue_number"] = work_plan_issue_number
     elif work_plan:
         # Note: The current server implementation doesn't support raw content,
         # so we'll raise an error for now
-        raise ValueError("Raw work plan content is not supported. Please provide a work_plan_url")
+        raise ValueError("Raw work plan content is not supported. Please provide a work_plan_issue_number")
     else:
-        raise ValueError("work_plan_url must be provided")
+        raise ValueError("work_plan_issue_number must be provided")
     
     if pr_url:
         arguments["pull_request_url"] = pr_url
@@ -174,16 +174,16 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
             elif command == "review":
                 # Review options
                 work_plan = None
-                work_plan_url = None
+                work_plan_issue_number = None
                 diff = None
                 pr_url = None
                 
                 # Determine work plan source
-                if args.work_plan_url:
-                    work_plan_url = args.work_plan_url
-                    print(f"Using work plan from GitHub URL: {work_plan_url}")
+                if args.work_plan_issue_number:
+                    work_plan_issue_number = args.work_plan_issue_number
+                    print(f"Using work plan from GitHub issue #{work_plan_issue_number}")
                 else:
-                    print("Error: --work-plan-url must be specified")
+                    print("Error: --work-plan-issue-number must be specified")
                     sys.exit(1)
                 
                 # Determine PR URL (required)
@@ -198,7 +198,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 print("Initiating review...")
                 result = await review_work_plan(
                     session,
-                    work_plan_url=work_plan_url,
+                    work_plan_issue_number=work_plan_issue_number,
                     pr_url=pr_url
                 )
                 print("\nResult:")
@@ -227,10 +227,10 @@ def main():
     # Review PR command
     review_parser = subparsers.add_parser("review", help="Review a GitHub PR against a work plan")
     
-    # Work plan source (GitHub issue URL required)
+    # Work plan source (GitHub issue number required)
     review_parser.add_argument(
-        "--work-plan-url", dest="work_plan_url", required=True,
-        help="GitHub issue URL containing the work plan"
+        "--work-plan-issue-number", dest="work_plan_issue_number", required=True,
+        help="GitHub issue number containing the work plan"
     )
     
     # PR URL (required)

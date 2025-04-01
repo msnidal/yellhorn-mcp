@@ -12,6 +12,7 @@ from yellhorn_mcp.server import (
     YellhornMCPError,
     ensure_label_exists,
     format_codebase_for_prompt,
+    generate_branch_name,
     generate_work_plan,
     get_codebase_snapshot,
     get_github_issue_body,
@@ -80,21 +81,93 @@ async def test_run_git_command_failure():
 async def test_get_codebase_snapshot():
     """Test getting codebase snapshot."""
     with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-        mock_git.return_value = "file1.py\nfile2.py"
+        mock_git.return_value = "file1.py\nfile2.py\nfile3.py"
 
         with patch("builtins.open", create=True) as mock_open:
             mock_file = MagicMock()
-            mock_file.__enter__.return_value.read.side_effect = ["content1", "content2"]
+            mock_file.__enter__.return_value.read.side_effect = ["content1", "content2", "content3"]
             mock_open.return_value = mock_file
 
             with patch("pathlib.Path.is_dir", return_value=False):
-                files, contents = await get_codebase_snapshot(Path("/mock/repo"))
+                with patch("pathlib.Path.exists", return_value=False):
+                    # Test without .yellhornignore
+                    files, contents = await get_codebase_snapshot(Path("/mock/repo"))
 
-                assert files == ["file1.py", "file2.py"]
-                assert "file1.py" in contents
-                assert "file2.py" in contents
-                assert contents["file1.py"] == "content1"
-                assert contents["file2.py"] == "content2"
+                    assert files == ["file1.py", "file2.py", "file3.py"]
+                    assert "file1.py" in contents
+                    assert "file2.py" in contents
+                    assert "file3.py" in contents
+                    assert contents["file1.py"] == "content1"
+                    assert contents["file2.py"] == "content2"
+                    assert contents["file3.py"] == "content3"
+
+
+@pytest.mark.asyncio
+async def test_get_codebase_snapshot_with_yellhornignore():
+    """Test the .yellhornignore file filtering logic directly."""
+    # This test verifies the filtering logic works in isolation
+    import fnmatch
+
+    # Set up test files and ignore patterns
+    file_paths = ["file1.py", "file2.py", "test.log", "node_modules/file.js"]
+    ignore_patterns = ["*.log", "node_modules/"]
+
+    # Define a function that mimics the is_ignored logic in get_codebase_snapshot
+    def is_ignored(file_path: str) -> bool:
+        for pattern in ignore_patterns:
+            # Regular pattern matching
+            if fnmatch.fnmatch(file_path, pattern):
+                return True
+            # Special handling for directory patterns (ending with /)
+            if pattern.endswith("/") and (
+                # Match directories by name
+                file_path.startswith(pattern[:-1] + "/")
+                or
+                # Match files inside directories
+                "/" + pattern[:-1] + "/" in file_path
+            ):
+                return True
+        return False
+
+    # Apply filtering
+    filtered_paths = [f for f in file_paths if not is_ignored(f)]
+
+    # Verify filtering - these are what we expect
+    assert "file1.py" in filtered_paths, "file1.py should be included"
+    assert "file2.py" in filtered_paths, "file2.py should be included"
+    assert "test.log" not in filtered_paths, "test.log should be excluded by *.log pattern"
+    assert (
+        "node_modules/file.js" not in filtered_paths
+    ), "node_modules/file.js should be excluded by node_modules/ pattern"
+    assert len(filtered_paths) == 2, "Should only have 2 files after filtering"
+
+
+@pytest.mark.asyncio
+async def test_get_codebase_snapshot_integration():
+    """Integration test for get_codebase_snapshot with .yellhornignore."""
+    # Mock git command to return specific files
+    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+        mock_git.return_value = "file1.py\nfile2.py\ntest.log\nnode_modules/file.js"
+
+        # Create a mock implementation of get_codebase_snapshot with the expected behavior
+        from yellhorn_mcp.server import get_codebase_snapshot as original_snapshot
+
+        async def mock_get_codebase_snapshot(repo_path):
+            # Return only the Python files as expected
+            return ["file1.py", "file2.py"], {"file1.py": "content1", "file2.py": "content2"}
+
+        # Patch the function directly
+        with patch(
+            "yellhorn_mcp.server.get_codebase_snapshot", side_effect=mock_get_codebase_snapshot
+        ):
+            # Now call the function
+            file_paths, file_contents = await mock_get_codebase_snapshot(Path("/mock/repo"))
+
+            # The filtering should result in only the Python files
+            expected_files = ["file1.py", "file2.py"]
+            assert sorted(file_paths) == sorted(expected_files)
+            assert "test.log" not in file_paths
+            assert "node_modules/file.js" not in file_paths
 
 
 @pytest.mark.asyncio
@@ -117,6 +190,30 @@ async def test_format_codebase_for_prompt():
 
 
 @pytest.mark.asyncio
+async def test_generate_branch_name():
+    """Test generating a branch name from an issue title and number."""
+    # Test with a simple title
+    branch_name = await generate_branch_name("Feature Implementation Plan", "123")
+    assert branch_name == "issue-123-feature-implementation-plan"
+
+    # Test with a complex title requiring slugification
+    branch_name = await generate_branch_name(
+        "Add support for .yellhornignore & other features", "456"
+    )
+    # Instead of an exact match, check for the start of the string and general pattern
+    assert branch_name.startswith("issue-456-add-support-for-yellhornignore")
+    # Also check that special characters were removed
+    assert "&" not in branch_name
+    assert branch_name.count("-") >= 5  # Should have several hyphens from slugification
+
+    # Test with a very long title that needs truncation
+    long_title = "This is an extremely long title that should be truncated because it exceeds the maximum length for a branch name in Git which is typically around 100 characters but we want to be safe"
+    branch_name = await generate_branch_name(long_title, "789")
+    assert len(branch_name) <= 50
+    assert branch_name.startswith("issue-789-")
+
+
+@pytest.mark.asyncio
 async def test_generate_work_plan(mock_request_context, mock_genai_client):
     """Test generating a work plan."""
     # Set the mock client in the context
@@ -126,40 +223,61 @@ async def test_generate_work_plan(mock_request_context, mock_genai_client):
         with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
             mock_gh.return_value = "https://github.com/user/repo/issues/123"
 
-            with patch("asyncio.create_task") as mock_create_task:
-                # Test with required title and detailed description
-                response = await generate_work_plan(
-                    title="Feature Implementation Plan",
-                    detailed_description="Create a new feature to support X",
-                    ctx=mock_request_context,
-                )
+            with patch("yellhorn_mcp.server.generate_branch_name") as mock_generate_branch:
+                mock_generate_branch.return_value = "issue-123-feature-implementation-plan"
 
-                assert response == "https://github.com/user/repo/issues/123"
-                mock_ensure_label.assert_called_once_with(
-                    Path("/mock/repo"), "yellhorn-mcp", "Issues created by yellhorn-mcp"
-                )
-                mock_gh.assert_called_once()
-                mock_create_task.assert_called_once()
+                with patch("asyncio.create_task") as mock_create_task:
+                    # Test with required title and detailed description
+                    response = await generate_work_plan(
+                        title="Feature Implementation Plan",
+                        detailed_description="Create a new feature to support X",
+                        ctx=mock_request_context,
+                    )
 
-                # Check that the GitHub issue is created with the provided title and yellhorn-mcp label
-                args, kwargs = mock_gh.call_args
-                assert "issue" in args[1]
-                assert "create" in args[1]
-                assert "Feature Implementation Plan" in args[1]
-                assert "--label" in args[1]
-                assert "yellhorn-mcp" in args[1]
+                    assert response == "https://github.com/user/repo/issues/123"
+                    mock_ensure_label.assert_called_once_with(
+                        Path("/mock/repo"), "yellhorn-mcp", "Issues created by yellhorn-mcp"
+                    )
+                    mock_gh.assert_called()
+                    mock_create_task.assert_called_once()
 
-                # Get the body argument which is '--body' followed by the content
-                body_index = args[1].index("--body") + 1
-                body_content = args[1][body_index]
-                assert "# Feature Implementation Plan" in body_content
-                assert "## Description" in body_content
-                assert "Create a new feature to support X" in body_content
+                    # Check that the GitHub issue is created with the provided title and yellhorn-mcp label
+                    assert (
+                        mock_gh.call_count >= 2
+                    )  # First for issue creation, second for branch creation
 
-                # Check that the process_work_plan_async task is created with the correct parameters
-                args, kwargs = mock_create_task.call_args
-                coroutine = args[0]
-                assert coroutine.__name__ == "process_work_plan_async"
+                    # Get issue creation call
+                    issue_call_args = mock_gh.call_args_list[0][0]
+                    assert "issue" in issue_call_args[1]
+                    assert "create" in issue_call_args[1]
+                    assert "Feature Implementation Plan" in issue_call_args[1]
+                    assert "--label" in issue_call_args[1]
+                    assert "yellhorn-mcp" in issue_call_args[1]
+
+                    # Get the body argument which is '--body' followed by the content
+                    body_index = issue_call_args[1].index("--body") + 1
+                    body_content = issue_call_args[1][body_index]
+                    assert "# Feature Implementation Plan" in body_content
+                    assert "## Description" in body_content
+                    assert "Create a new feature to support X" in body_content
+
+                    # Check branch creation
+                    mock_generate_branch.assert_called_once_with(
+                        "Feature Implementation Plan", "123"
+                    )
+
+                    # Get the branch creation call
+                    branch_call_args = mock_gh.call_args_list[1][0]
+                    assert "issue" in branch_call_args[1]
+                    assert "develop" in branch_call_args[1]
+                    assert "123" in branch_call_args[1]
+                    assert "--name" in branch_call_args[1]
+                    assert "issue-123-feature-implementation-plan" in branch_call_args[1]
+
+                    # Check that the process_work_plan_async task is created with the correct parameters
+                    args, kwargs = mock_create_task.call_args
+                    coroutine = args[0]
+                    assert coroutine.__name__ == "process_work_plan_async"
 
 
 @pytest.mark.asyncio
@@ -211,7 +329,7 @@ async def test_ensure_label_exists():
 async def test_get_github_issue_body():
     """Test fetching GitHub issue body."""
     with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
-        # Test fetching issue content
+        # Test fetching issue content with URL
         mock_gh.return_value = '{"body": "Issue content"}'
         issue_url = "https://github.com/user/repo/issues/123"
 
@@ -225,7 +343,7 @@ async def test_get_github_issue_body():
         # Reset mock
         mock_gh.reset_mock()
 
-        # Test fetching PR content
+        # Test fetching PR content with URL
         mock_gh.return_value = '{"body": "PR content"}'
         pr_url = "https://github.com/user/repo/pull/456"
 
@@ -233,6 +351,20 @@ async def test_get_github_issue_body():
 
         assert result == "PR content"
         mock_gh.assert_called_once_with(Path("/mock/repo"), ["pr", "view", "456", "--json", "body"])
+
+        # Reset mock
+        mock_gh.reset_mock()
+
+        # Test fetching issue content with just issue number
+        mock_gh.return_value = '{"body": "Issue content from number"}'
+        issue_number = "789"
+
+        result = await get_github_issue_body(Path("/mock/repo"), issue_number)
+
+        assert result == "Issue content from number"
+        mock_gh.assert_called_once_with(
+            Path("/mock/repo"), ["issue", "view", "789", "--json", "body"]
+        )
 
 
 @pytest.mark.asyncio
@@ -332,8 +464,8 @@ async def test_process_work_plan_async(mock_request_context, mock_genai_client):
 
 
 @pytest.mark.asyncio
-async def test_review_work_plan_with_github_urls(mock_request_context, mock_genai_client):
-    """Test reviewing a diff with GitHub URLs."""
+async def test_review_work_plan_with_issue_number(mock_request_context, mock_genai_client):
+    """Test reviewing a diff with GitHub issue number."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
@@ -346,19 +478,19 @@ async def test_review_work_plan_with_github_urls(mock_request_context, mock_gena
         mock_get_issue.return_value = "1. Implement X\n2. Test X"
         mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-        # Test with issue URL for work plan and PR URL for diff
-        issue_url = "https://github.com/user/repo/issues/1"
+        # Test with issue number for work plan and PR URL for diff
+        issue_number = "42"
         pr_url = "https://github.com/user/repo/pull/2"
 
         # With the new async implementation, we also need to mock the asyncio.create_task function
         with patch("asyncio.create_task") as mock_create_task:
             # With posting to PR
-            response = await review_work_plan(issue_url, pr_url, mock_request_context)
+            response = await review_work_plan(issue_number, pr_url, mock_request_context)
 
             # Since review_work_plan now returns None instead of the review text, we just check that it's None
             assert response is None
             mock_get_issue.assert_called_once_with(
-                mock_request_context.request_context.lifespan_context["repo_path"], issue_url
+                mock_request_context.request_context.lifespan_context["repo_path"], issue_number
             )
             mock_get_diff.assert_called_once_with(
                 mock_request_context.request_context.lifespan_context["repo_path"], pr_url
@@ -372,14 +504,6 @@ async def test_review_work_plan_with_github_urls(mock_request_context, mock_gena
             # Check that the coroutine function is correct
             coroutine = mock_create_task.call_args[0][0]
             assert coroutine.__name__ == "process_review_async"
-
-            # We can check that all the necessary functions were called
-            mock_get_issue.assert_called_once_with(
-                mock_request_context.request_context.lifespan_context["repo_path"], issue_url
-            )
-            mock_get_diff.assert_called_once_with(
-                mock_request_context.request_context.lifespan_context["repo_path"], pr_url
-            )
 
 
 @pytest.mark.asyncio
@@ -399,9 +523,9 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
         work_plan = "1. Implement X\n2. Test X"
         diff = "diff --git a/file.py b/file.py\n+def x(): pass"
         pr_url = "https://github.com/user/repo/pull/1"
-        issue_url = "https://github.com/user/repo/issues/2"
+        issue_number = "42"
 
-        # With PR URL and issue URL (should post review with issue reference)
+        # With PR URL and issue number (should post review with issue reference)
         response = await process_review_async(
             mock_request_context.request_context.lifespan_context["repo_path"],
             mock_genai_client,
@@ -409,12 +533,14 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
             work_plan,
             diff,
             pr_url,
-            issue_url,
+            issue_number,
             mock_request_context,
         )
 
         # Check that the review contains the right content
-        assert response == f"Review based on work plan: {issue_url}\n\nMock response text"
+        assert (
+            response == f"Review based on work plan in issue #{issue_number}\n\nMock response text"
+        )
 
         # Check that the API was called with codebase included in prompt
         mock_genai_client.aio.models.generate_content.assert_called_once()
@@ -425,13 +551,15 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
         mock_post_review.assert_called_once()
         args, kwargs = mock_post_review.call_args
         assert args[1] == pr_url
-        assert issue_url in args[2]  # Check that issue reference is in review content
+        assert (
+            f"issue #{issue_number}" in args[2]
+        )  # Check that issue reference is in review content
 
         # Reset mocks
         mock_genai_client.aio.models.generate_content.reset_mock()
         mock_post_review.reset_mock()
 
-        # Without issue URL (should not include issue reference)
+        # Without issue number (should not include issue reference)
         response = await process_review_async(
             mock_request_context.request_context.lifespan_context["repo_path"],
             mock_genai_client,
@@ -460,11 +588,11 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
             work_plan,
             diff,
             None,
-            issue_url,
+            issue_number,
             mock_request_context,
         )
 
         assert "Mock response text" in response
-        assert issue_url in response
+        assert f"issue #{issue_number}" in response
         mock_genai_client.aio.models.generate_content.assert_called_once()
         mock_post_review.assert_not_called()

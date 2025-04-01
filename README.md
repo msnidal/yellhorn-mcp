@@ -7,8 +7,10 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities t
 ## Features
 
 - **Generate Work Plans**: Creates GitHub issues with detailed implementation plans based on your codebase, with customizable title and detailed description
+- **Automatic Branch Creation**: Automatically creates and links branches to work plan issues for streamlined workflow
 - **Review Code Diffs**: Evaluates pull requests against the original work plan with full codebase context and provides detailed feedback
 - **Seamless GitHub Integration**: Automatically creates labeled issues, posts reviews as PR comments with references to original issues, and handles asynchronous processing
+- **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
 
 ## Installation
 
@@ -63,7 +65,7 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
 2. Reviewing your implementation:
 
    ```
-   Please review my changes in PR [PR URL] against the work plan from [GitHub issue URL]
+   Please review my changes in PR [PR URL] against the work plan from issue #[issue number]
    ```
 
 ## Tools
@@ -87,7 +89,7 @@ Reviews a pull request against the original work plan and provides feedback. Inc
 
 **Input**:
 
-- `work_plan_issue_url`: GitHub issue URL containing the work plan
+- `work_plan_issue_number`: GitHub issue number containing the work plan
 - `pull_request_url`: GitHub PR URL containing the changes to review
 - `ctx`: Server context
 
@@ -115,7 +117,7 @@ The project uses GitHub Actions for continuous integration and deployment:
   - Testing with pytest
 
 - **Publishing**: Automatically publishes to PyPI when a version tag is pushed
-  - Tag must match the version in pyproject.toml (e.g., v0.1.4)
+  - Tag must match the version in pyproject.toml (e.g., v0.1.5)
   - Requires a PyPI API token stored as a GitHub repository secret (PYPI_API_TOKEN)
 
 To release a new version:
