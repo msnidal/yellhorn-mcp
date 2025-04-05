@@ -2,10 +2,11 @@
 
 ## Overview
 
-Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro API for software development tasks. It provides two main tools:
+Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro API for software development tasks. It provides these main tools:
 
-1. **Generate Work Plan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
-2. **Review Pull Request**: Evaluates code changes in a GitHub PR against the original work plan and provides feedback directly on the PR.
+1. **Generate Work Plan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description. Creates a git worktree for isolated development.
+2. **Get Work Plan**: Retrieves the work plan content from a worktree's associated GitHub issue.
+3. **Submit Work Plan**: Commits changes, pushes to GitHub, creates a PR, and triggers an asynchronous review against the original work plan.
 
 ## Installation
 
@@ -121,31 +122,47 @@ mcp install yellhorn_mcp.server -f .env
 
 ## Using with Claude Code
 
-Once the server is running, Claude Code can utilize the tools it exposes. Here are some example prompts for Claude Code:
+Once the server is running, Claude Code can utilize the tools it exposes. Here's a typical workflow:
 
-### Generating a Work Plan
+### 1. Generating a Work Plan
 
 ```
 Please generate a work plan for implementing a user authentication system in my application.
 ```
 
-This will use the `generate_work_plan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. The tool will return a URL to the created issue, which will initially show a placeholder message and will be updated asynchronously once the plan is generated.
+This will use the `generate_work_plan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. It also creates a Git worktree for isolated development. The tool will return both the issue URL and worktree path. The issue will initially show a placeholder message and will be updated asynchronously once the plan is generated.
 
-### Reviewing a Pull Request
-
-After creating a pull request based on the work plan:
+### 2. Navigate to the Worktree
 
 ```
-Please review my changes against the work plan from issue #123 in my pull request https://github.com/user/repo/pull/456
+cd /path/to/worktree
 ```
 
-This will use the `review_work_plan` tool to retrieve the work plan from the issue, fetch the diff from the PR, analyze the implementation, and post a review directly to the PR.
+Switch to the worktree directory that was created by `generate_work_plan`.
+
+### 3. View the Work Plan (if needed)
+
+```
+Please retrieve the work plan for this worktree.
+```
+
+This will use the `get_workplan` tool to fetch the latest content of the GitHub issue associated with the current worktree.
+
+### 4. Make Changes and Submit
+
+After making changes to implement the work plan:
+
+```
+Please commit my changes and create a PR with title "Implement User Authentication" and description "This PR adds JWT authentication with bcrypt password hashing."
+```
+
+This will use the `submit_workplan` tool to stage all changes, commit them, push the branch to GitHub, create a Pull Request, and trigger an asynchronous review against the original work plan. The tool returns the URL of the created PR.
 
 ## MCP Tools
 
 ### generate_work_plan
 
-Creates a GitHub issue with a detailed work plan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously, with the issue being updated once it's ready.
+Creates a GitHub issue with a detailed work plan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously, with the issue being updated once it's ready. Also creates a Git worktree with a linked branch for isolated development.
 
 **Input**:
 
@@ -154,21 +171,35 @@ Creates a GitHub issue with a detailed work plan based on the title and detailed
 
 **Output**:
 
-- URL to the created GitHub issue
+- JSON string containing:
+  - `issue_url`: URL to the created GitHub issue
+  - `worktree_path`: Path to the created Git worktree directory
 
-### review_work_plan
+### get_workplan
 
-Reviews a GitHub pull request against the original work plan and posts feedback directly as a PR comment.
+Retrieves the work plan content (GitHub issue body) associated with the current Git worktree. Must be run from within a worktree created by 'generate_work_plan'.
 
 **Input**:
 
-- `work_plan_issue_number`: GitHub issue number containing the work plan
-- `pull_request_url`: GitHub PR URL containing the changes to review
-- `ctx`: Server context
+- No parameters required
 
 **Output**:
 
-- None (posts review asynchronously to the PR)
+- The content of the work plan issue as a string
+
+### submit_workplan
+
+Submits the completed work from the current Git worktree. Stages all changes, commits them, pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated work plan issue. Must be run from within a worktree created by 'generate_work_plan'.
+
+**Input**:
+
+- `pr_title`: Title for the GitHub Pull Request
+- `pr_body`: Body content for the GitHub Pull Request
+- `commit_message`: Optional commit message (defaults to "WIP submission for issue #X")
+
+**Output**:
+
+- The URL of the created GitHub Pull Request
 
 ## Integration with Other Programs
 
@@ -195,10 +226,15 @@ curl -X POST http://127.0.0.1:8000/tools/generate_work_plan \
   -H "Content-Type: application/json" \
   -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"}'
 
-# Call a tool (review_work_plan)
-curl -X POST http://127.0.0.1:8000/tools/review_work_plan \
+# Call a tool (get_workplan) - Note: Must be run from a worktree directory
+curl -X POST http://127.0.0.1:8000/tools/get_workplan \
   -H "Content-Type: application/json" \
-  -d '{"work_plan_issue_number": "1", "pull_request_url": "https://github.com/user/repo/pull/2"}'
+  -d '{}'
+
+# Call a tool (submit_workplan) - Note: Must be run from a worktree directory
+curl -X POST http://127.0.0.1:8000/tools/submit_workplan \
+  -H "Content-Type: application/json" \
+  -d '{"pr_title": "Implement User Authentication", "pr_body": "This PR adds JWT authentication", "commit_message": "Implementation complete"}'
 ```
 
 ### Example Client
@@ -212,8 +248,11 @@ python -m examples.client_example list
 # Generate a work plan
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"
 
-# Review using GitHub issue number and PR URL
-python -m examples.client_example review --work-plan-issue-number 1 --pr-url https://github.com/user/repo/pull/2
+# Get work plan (run from worktree directory)
+python -m examples.client_example getplan
+
+# Submit work (run from worktree directory)
+python -m examples.client_example submit --pr-title "Implement User Authentication" --pr-body "This PR implements user authentication"
 ```
 
 The example client uses the MCP client API to interact with the server through stdio transport, which is the same approach Claude Code uses.

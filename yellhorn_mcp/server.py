@@ -2,14 +2,17 @@
 Yellhorn MCP server implementation.
 
 This module provides a Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro
-capabilities to Claude Code for software development tasks. It offers two primary tools:
+capabilities to Claude Code for software development tasks. It offers these primary tools:
 
 1. generate_work_plan: Creates GitHub issues with detailed implementation plans based on
    your codebase and task description. The work plan is generated asynchronously and the
-   issue is updated once it's ready.
+   issue is updated once it's ready. Creates a git worktree for isolated development.
 
-2. review_work_plan: Reviews a GitHub pull request against the original work plan from a
-   GitHub issue and posts feedback directly as a PR comment.
+2. get_workplan: Retrieves the work plan content (GitHub issue body) associated with the
+   current Git worktree. Must be run from within a worktree created by 'generate_work_plan'.
+
+3. submit_workplan: Submits the completed work from the current worktree by committing
+   changes, pushing to GitHub, creating a PR, and triggering an asynchronous review.
 
 The server requires GitHub CLI to be installed and authenticated for GitHub operations.
 """
@@ -526,6 +529,113 @@ The work plan should be comprehensive enough that a developer could implement it
             )
 
 
+async def get_default_branch(repo_path: Path) -> str:
+    """
+    Determine the default branch name of the repository.
+
+    Args:
+        repo_path: Path to the repository.
+
+    Returns:
+        The name of the default branch (e.g., 'main', 'master').
+
+    Raises:
+        YellhornMCPError: If unable to determine the default branch.
+    """
+    try:
+        # Try to get the default branch using git symbolic-ref
+        result = await run_git_command(repo_path, ["symbolic-ref", "refs/remotes/origin/HEAD"])
+        # The result is typically in the format "refs/remotes/origin/{branch_name}"
+        return result.split("/")[-1]
+    except YellhornMCPError:
+        # Fallback for repositories that don't have origin/HEAD configured
+        try:
+            # Check if main exists
+            await run_git_command(repo_path, ["rev-parse", "--verify", "main"])
+            return "main"
+        except YellhornMCPError:
+            try:
+                # Check if master exists
+                await run_git_command(repo_path, ["rev-parse", "--verify", "master"])
+                return "master"
+            except YellhornMCPError:
+                raise YellhornMCPError(
+                    "Unable to determine default branch. Please ensure the repository has a default branch."
+                )
+
+
+async def get_current_branch_and_issue(worktree_path: Path) -> tuple[str, str]:
+    """
+    Get the current branch name and associated issue number from a worktree.
+
+    Args:
+        worktree_path: Path to the worktree.
+
+    Returns:
+        Tuple of (branch_name, issue_number).
+
+    Raises:
+        YellhornMCPError: If not in a git repository, or branch name doesn't match expected format.
+    """
+    try:
+        # Get the current branch name
+        branch_name = await run_git_command(worktree_path, ["rev-parse", "--abbrev-ref", "HEAD"])
+
+        # Extract issue number from branch name (format: issue-{number}-{title})
+        match = re.match(r"issue-(\d+)-", branch_name)
+        if not match:
+            raise YellhornMCPError(
+                f"Branch name '{branch_name}' does not match expected format 'issue-NUMBER-description'."
+            )
+
+        issue_number = match.group(1)
+        return branch_name, issue_number
+    except YellhornMCPError as e:
+        if "not a git repository" in str(e).lower():
+            raise YellhornMCPError(
+                "Not in a git repository. Please run this command from within a worktree created by generate_work_plan."
+            )
+        raise
+
+
+async def create_git_worktree(repo_path: Path, branch_name: str, issue_number: str) -> Path:
+    """
+    Create a git worktree for the specified branch.
+
+    Args:
+        repo_path: Path to the main repository.
+        branch_name: Name of the branch to create in the worktree.
+        issue_number: Issue number associated with the branch.
+
+    Returns:
+        Path to the created worktree.
+
+    Raises:
+        YellhornMCPError: If there's an error creating the worktree.
+    """
+    try:
+        # Generate a unique worktree path alongside the main repo
+        worktree_path = Path(f"{repo_path}-worktree-{issue_number}")
+
+        # Get the default branch to create the new branch from
+        default_branch = await get_default_branch(repo_path)
+
+        # Create the worktree with a new branch tracking the default branch
+        await run_git_command(
+            repo_path,
+            ["worktree", "add", "--track", "-b", branch_name, str(worktree_path), default_branch],
+        )
+
+        # Link the branch to the issue on GitHub
+        await run_github_command(
+            repo_path, ["issue", "develop", issue_number, "--branch", branch_name]
+        )
+
+        return worktree_path
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to create git worktree: {str(e)}")
+
+
 async def generate_branch_name(title: str, issue_number: str) -> str:
     """
     Generate a suitable branch name from an issue title and number.
@@ -561,7 +671,7 @@ async def generate_branch_name(title: str, issue_number: str) -> str:
 
 @mcp.tool(
     name="generate_work_plan",
-    description="Generate a detailed work plan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'.Note: You should generally just pass the full user task request task verbatim to detailed_description.",
+    description="Generate a detailed work plan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Also creates a git worktree for isolated development.",
 )
 async def generate_work_plan(
     title: str,
@@ -571,7 +681,7 @@ async def generate_work_plan(
     """
     Generate a work plan based on the provided title and detailed description.
     Creates a GitHub issue and processes the work plan generation asynchronously.
-    Also automatically creates a linked branch for the issue.
+    Also automatically creates a linked branch and git worktree for isolated development.
 
     Args:
         title: Title for the GitHub issue (will be used as issue title and header).
@@ -579,7 +689,7 @@ async def generate_work_plan(
         ctx: Server context with repository path and Gemini model.
 
     Returns:
-        GitHub issue URL where the work plan will be posted.
+        JSON string containing the GitHub issue URL and worktree path.
 
     Raises:
         YellhornMCPError: If there's an error generating the work plan.
@@ -620,32 +730,25 @@ async def generate_work_plan(
         # Generate a branch name for the issue
         branch_name = await generate_branch_name(title, issue_number)
 
-        # Create a branch linked to the issue
+        # Create a git worktree with the branch
         try:
             await ctx.log(
                 level="info",
-                message=f"Creating branch '{branch_name}' for issue #{issue_number}",
+                message=f"Creating worktree with branch '{branch_name}' for issue #{issue_number}",
             )
-            await run_github_command(
-                repo_path,
-                [
-                    "issue",
-                    "develop",
-                    issue_number,
-                    "--name",
-                    branch_name,
-                ],
-            )
+            worktree_path = await create_git_worktree(repo_path, branch_name, issue_number)
             await ctx.log(
                 level="info",
-                message=f"Branch '{branch_name}' created and linked to issue #{issue_number}",
+                message=f"Worktree created at '{worktree_path}' with branch '{branch_name}' for issue #{issue_number}",
             )
-        except Exception as branch_error:
+        except Exception as worktree_error:
             # Log the error but continue with the work plan generation
             await ctx.log(
                 level="warning",
-                message=f"Failed to create branch for issue #{issue_number}: {str(branch_error)}",
+                message=f"Failed to create worktree for issue #{issue_number}: {str(worktree_error)}",
             )
+            # Return only the issue URL in case of failure
+            worktree_path = None
 
         # Start async processing
         asyncio.create_task(
@@ -660,10 +763,52 @@ async def generate_work_plan(
             )
         )
 
-        return issue_url
+        # Return both the issue URL and worktree path as JSON
+        result = {
+            "issue_url": issue_url,
+            "worktree_path": str(worktree_path) if worktree_path else None,
+        }
+        return json.dumps(result)
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to create GitHub issue: {str(e)}")
+
+
+@mcp.tool(
+    name="get_workplan",
+    description="Retrieves the work plan content (GitHub issue body) associated with the current Git worktree. Must be run from within a worktree created by 'generate_work_plan'.",
+)
+async def get_workplan(ctx: Context) -> str:
+    """
+    Retrieve the work plan content (GitHub issue body) associated with the current Git worktree.
+
+    This tool must be run from within a worktree directory created by the 'generate_work_plan' tool.
+    It extracts the issue number from the current branch name and fetches the corresponding
+    issue content from GitHub.
+
+    Args:
+        ctx: Server context.
+
+    Returns:
+        The content of the work plan issue as a string.
+
+    Raises:
+        YellhornMCPError: If not in a valid worktree or unable to fetch the issue content.
+    """
+    try:
+        # Get the current working directory
+        worktree_path = Path.cwd()
+
+        # Get the current branch name and extract issue number
+        _, issue_number = await get_current_branch_and_issue(worktree_path)
+
+        # Fetch the issue content
+        work_plan = await get_github_issue_body(worktree_path, issue_number)
+
+        return work_plan
+
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to retrieve work plan: {str(e)}")
 
 
 async def process_review_async(
@@ -766,55 +911,120 @@ Format your response as a clear, structured review with specific recommendations
 
 
 @mcp.tool(
-    name="review_work_plan",
-    description="Review a pull request against the original work plan issue and provide feedback.",
+    name="submit_workplan",
+    description="Submits the work completed in the current Git worktree. Stages all changes, commits them (using provided message or a default), pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated work plan issue.",
 )
-async def review_work_plan(
-    work_plan_issue_number: str,
-    pull_request_url: str,
+async def submit_workplan(
+    pr_title: str,
+    pr_body: str,
     ctx: Context,
-) -> None:
+    commit_message: str | None = None,
+) -> str:
     """
-    Review a GitHub pull request against a work plan from a GitHub issue.
+    Submit the completed work from the current Git worktree.
 
-    Fetches the work plan content from the provided GitHub issue number and the code diff
-    from the GitHub PR URL. It then processes the review asynchronously and posts the
-    feedback directly to the PR as a comment, including a reference to the original issue.
+    This tool must be run from within a worktree directory created by the 'generate_work_plan' tool.
+    It stages all changes, commits them, pushes the branch to GitHub, creates a Pull Request,
+    and triggers an asynchronous review of the changes against the original work plan.
 
     Args:
-        work_plan_issue_number: GitHub issue number containing the work plan.
-        pull_request_url: GitHub PR URL containing the changes to review.
-        ctx: Server context with repository path and Gemini model.
+        pr_title: Title for the GitHub Pull Request.
+        pr_body: Body content for the GitHub Pull Request.
+        commit_message: Optional commit message. If not provided, a default will be used.
+        ctx: Server context.
 
     Returns:
-        None (posts review asynchronously to the PR).
+        The URL of the created GitHub Pull Request.
 
     Raises:
-        YellhornMCPError: If there's an error fetching the issue/PR content or posting the review.
+        YellhornMCPError: If not in a valid worktree or errors occur during submission.
     """
-    repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-    client: genai.Client = ctx.request_context.lifespan_context["client"]
-    model: str = ctx.request_context.lifespan_context["model"]
-
     try:
-        # Get work plan and diff content
-        work_plan = await get_github_issue_body(repo_path, work_plan_issue_number)
-        diff = await get_github_pr_diff(repo_path, pull_request_url)
+        # Get the current working directory
+        worktree_path = Path.cwd()
 
-        # Process the review asynchronously
-        review_task = asyncio.create_task(
+        # Get the current branch name and issue number
+        branch_name, issue_number = await get_current_branch_and_issue(worktree_path)
+
+        # Determine commit message
+        if not commit_message:
+            commit_message = f"WIP submission for issue #{issue_number}"
+
+        # Stage all changes
+        await run_git_command(worktree_path, ["add", "."])
+
+        # Commit changes
+        try:
+            await run_git_command(worktree_path, ["commit", "-m", commit_message])
+        except YellhornMCPError as e:
+            # If there's nothing to commit, proceed anyway
+            if "nothing to commit" in str(e).lower():
+                # Log a warning but continue
+                await ctx.log(
+                    level="warning",
+                    message="No changes to commit. Proceeding with PR creation if the branch exists remotely.",
+                )
+            else:
+                # Re-raise for other errors
+                raise
+
+        # Push the branch to GitHub
+        try:
+            await run_git_command(worktree_path, ["push", "--set-upstream", "origin", branch_name])
+        except YellhornMCPError as e:
+            if "everything up-to-date" in str(e).lower():
+                # Branch is already pushed, proceed with PR creation
+                await ctx.log(
+                    level="info",
+                    message="Branch already pushed. Proceeding with PR creation.",
+                )
+            else:
+                # Re-raise for other errors
+                raise
+
+        # Get the default branch
+        repo_path = ctx.request_context.lifespan_context["repo_path"]
+        default_branch = await get_default_branch(repo_path)
+
+        # Create the Pull Request
+        pr_url = await run_github_command(
+            worktree_path,
+            [
+                "pr",
+                "create",
+                "--title",
+                pr_title,
+                "--body",
+                pr_body,
+                "--head",
+                branch_name,
+                "--base",
+                default_branch,
+            ],
+        )
+
+        # Fetch the work plan and diff for review
+        work_plan = await get_github_issue_body(worktree_path, issue_number)
+        diff = await get_github_pr_diff(worktree_path, pr_url)
+
+        # Trigger the review asynchronously
+        client = ctx.request_context.lifespan_context["client"]
+        model = ctx.request_context.lifespan_context["model"]
+
+        asyncio.create_task(
             process_review_async(
-                repo_path,
+                worktree_path,
                 client,
                 model,
                 work_plan,
                 diff,
-                pull_request_url,
-                work_plan_issue_number,
+                pr_url,
+                issue_number,
                 ctx,
             )
         )
-        return None
+
+        return pr_url
 
     except Exception as e:
-        raise YellhornMCPError(f"Failed to review work plan: {str(e)}")
+        raise YellhornMCPError(f"Failed to submit work plan: {str(e)}")
