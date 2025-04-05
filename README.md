@@ -7,7 +7,7 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities t
 ## Features
 
 - **Generate Work Plans**: Creates GitHub issues with detailed implementation plans based on your codebase, with customizable title and detailed description
-- **Automatic Branch Creation**: Automatically creates and links branches to work plan issues for streamlined workflow
+- **Isolated Development Environments**: Automatically creates Git worktrees and linked branches for streamlined, isolated development workflow
 - **Review Code Diffs**: Evaluates pull requests against the original work plan with full codebase context and provides detailed feedback
 - **Seamless GitHub Integration**: Automatically creates labeled issues, posts reviews as PR comments with references to original issues, and handles asynchronous processing
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
@@ -62,17 +62,31 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
    Please generate a work plan with title "[Your Title]" and detailed description "[Your detailed requirements]"
    ```
 
-2. Reviewing your implementation:
+2. Navigate to the created worktree directory:
 
    ```
-   Please review my changes in PR [PR URL] against the work plan from issue #[issue number]
+   cd [worktree_path]  # The path is returned in the response
+   ```
+
+3. View the work plan if needed:
+
+   ```
+   # While in the worktree directory
+   Please get the current work plan for this worktree
+   ```
+
+4. Make your changes and submit them:
+
+   ```
+   # While in the worktree directory
+   Please commit my changes and create a PR with title "[PR Title]" and body "[PR Description]"
    ```
 
 ## Tools
 
 ### generate_work_plan
 
-Creates a GitHub issue with a detailed work plan based on the title and detailed description, labeled with 'yellhorn-mcp'.
+Creates a GitHub issue with a detailed work plan based on the title and detailed description. Also creates a Git worktree with a linked branch for isolated development.
 
 **Input**:
 
@@ -81,21 +95,39 @@ Creates a GitHub issue with a detailed work plan based on the title and detailed
 
 **Output**:
 
-- URL to the created GitHub issue
+- JSON string containing:
+  - `issue_url`: URL to the created GitHub issue
+  - `worktree_path`: Path to the created Git worktree directory
 
-### review_work_plan
+### get_workplan
 
-Reviews a pull request against the original work plan and provides feedback. Includes the full codebase as context for better analysis and adds a reference to the original work plan in the review comment.
+Retrieves the work plan content (GitHub issue body) associated with the current Git worktree.
+
+**Note**: Must be run from within a worktree created by 'generate_work_plan'.
 
 **Input**:
 
-- `work_plan_issue_number`: GitHub issue number containing the work plan
-- `pull_request_url`: GitHub PR URL containing the changes to review
-- `ctx`: Server context
+- No parameters required
 
 **Output**:
 
-- Asynchronously posts a review directly to the PR with a reference to the original work plan issue
+- The content of the work plan issue as a string
+
+### submit_workplan
+
+Submits the completed work from the current Git worktree. Stages all changes, commits them, pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated work plan issue.
+
+**Note**: Must be run from within a worktree created by 'generate_work_plan'.
+
+**Input**:
+
+- `pr_title`: Title for the GitHub Pull Request
+- `pr_body`: Body content for the GitHub Pull Request
+- `commit_message`: Optional commit message (defaults to "WIP submission for issue #X")
+
+**Output**:
+
+- The URL of the created GitHub Pull Request
 
 ## Development
 

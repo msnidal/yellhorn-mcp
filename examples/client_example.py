@@ -22,11 +22,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-async def generate_work_plan(
-    session: ClientSession, 
-    title: str, 
-    detailed_description: str
-) -> str:
+async def generate_work_plan(session: ClientSession, title: str, detailed_description: str) -> str:
     """
     Generate a work plan using the Yellhorn MCP server.
     Creates a GitHub issue and returns the issue URL.
@@ -42,10 +38,7 @@ async def generate_work_plan(
     # Call the generate_work_plan tool
     result = await session.call_tool(
         "generate_work_plan",
-        arguments={
-            "title": title,
-            "detailed_description": detailed_description
-        },
+        arguments={"title": title, "detailed_description": detailed_description},
     )
 
     # Extract the issue URL from the response
@@ -53,12 +46,12 @@ async def generate_work_plan(
 
 
 async def review_work_plan(
-    session: ClientSession, 
-    work_plan: str | None = None, 
+    session: ClientSession,
+    work_plan: str | None = None,
     diff: str | None = None,
     work_plan_issue_number: str | None = None,
     pr_url: str | None = None,
-    post_to_pr: bool = False
+    post_to_pr: bool = False,
 ) -> str:
     """
     Review a diff against a work plan using the Yellhorn MCP server.
@@ -77,28 +70,30 @@ async def review_work_plan(
 
     Returns:
         Review feedback or confirmation message.
-        
+
     Raises:
         ValueError: If neither work_plan nor work_plan_issue_number is provided.
     """
     arguments = {}
-    
+
     # Set the arguments according to server API
     if work_plan_issue_number:
         arguments["work_plan_issue_number"] = work_plan_issue_number
     elif work_plan:
         # Note: The current server implementation doesn't support raw content,
         # so we'll raise an error for now
-        raise ValueError("Raw work plan content is not supported. Please provide a work_plan_issue_number")
+        raise ValueError(
+            "Raw work plan content is not supported. Please provide a work_plan_issue_number"
+        )
     else:
         raise ValueError("work_plan_issue_number must be provided")
-    
+
     if pr_url:
         arguments["pull_request_url"] = pr_url
     else:
         # Note: The current server implementation requires a pull_request_url
         raise ValueError("pull_request_url must be provided")
-    
+
     # Call the review_work_plan tool
     await session.call_tool(
         "review_work_plan",
@@ -160,11 +155,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 # Generate work plan
                 print(f"Generating work plan with title: {args.title}")
                 print(f"Detailed description: {args.description}")
-                issue_url = await generate_work_plan(
-                    session, 
-                    args.title, 
-                    args.description
-                )
+                issue_url = await generate_work_plan(session, args.title, args.description)
                 print("\nGitHub Issue Created:")
                 print(issue_url)
                 print(
@@ -177,7 +168,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 work_plan_issue_number = None
                 diff = None
                 pr_url = None
-                
+
                 # Determine work plan source
                 if args.work_plan_issue_number:
                     work_plan_issue_number = args.work_plan_issue_number
@@ -185,7 +176,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 else:
                     print("Error: --work-plan-issue-number must be specified")
                     sys.exit(1)
-                
+
                 # Determine PR URL (required)
                 if args.pr_url:
                     pr_url = args.pr_url
@@ -193,13 +184,11 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 else:
                     print("Error: --pr-url must be specified")
                     sys.exit(1)
-                
+
                 # Review PR
                 print("Initiating review...")
                 result = await review_work_plan(
-                    session,
-                    work_plan_issue_number=work_plan_issue_number,
-                    pr_url=pr_url
+                    session, work_plan_issue_number=work_plan_issue_number, pr_url=pr_url
                 )
                 print("\nResult:")
                 print(result)
@@ -216,27 +205,35 @@ def main():
     # Generate work plan command
     plan_parser = subparsers.add_parser("plan", help="Generate a work plan")
     plan_parser.add_argument(
-        "--title", dest="title", required=True,
-        help="Title for the work plan (e.g., 'Implement User Authentication')"
+        "--title",
+        dest="title",
+        required=True,
+        help="Title for the work plan (e.g., 'Implement User Authentication')",
     )
     plan_parser.add_argument(
-        "--description", dest="description", required=True,
-        help="Detailed description for the work plan"
+        "--description",
+        dest="description",
+        required=True,
+        help="Detailed description for the work plan",
     )
 
     # Review PR command
     review_parser = subparsers.add_parser("review", help="Review a GitHub PR against a work plan")
-    
+
     # Work plan source (GitHub issue number required)
     review_parser.add_argument(
-        "--work-plan-issue-number", dest="work_plan_issue_number", required=True,
-        help="GitHub issue number containing the work plan"
+        "--work-plan-issue-number",
+        dest="work_plan_issue_number",
+        required=True,
+        help="GitHub issue number containing the work plan",
     )
-    
+
     # PR URL (required)
     review_parser.add_argument(
-        "--pr-url", dest="pr_url", required=True,
-        help="GitHub PR URL to review and post comments to"
+        "--pr-url",
+        dest="pr_url",
+        required=True,
+        help="GitHub PR URL to review and post comments to",
     )
 
     args = parser.parse_args()
