@@ -8,6 +8,7 @@ similar to how Claude Code would call the MCP tools. It provides command-line in
 2. Generating work plans (creates GitHub issues and git worktrees)
 3. Getting work plans from a worktree
 4. Submitting completed work (creates GitHub PRs)
+5. Reviewing work from an existing PR
 
 This client uses the MCP client API to interact with the server through stdio transport,
 which is the same approach Claude Code uses.
@@ -23,7 +24,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-async def generate_work_plan(session: ClientSession, title: str, detailed_description: str) -> dict:
+async def generate_workplan(session: ClientSession, title: str, detailed_description: str) -> dict:
     """
     Generate a work plan using the Yellhorn MCP server.
     Creates a GitHub issue and git worktree, and returns both URLs.
@@ -36,9 +37,9 @@ async def generate_work_plan(session: ClientSession, title: str, detailed_descri
     Returns:
         Dictionary containing the GitHub issue URL and worktree path.
     """
-    # Call the generate_work_plan tool
+    # Call the generate_workplan tool
     result = await session.call_tool(
-        "generate_work_plan",
+        "generate_workplan",
         arguments={"title": title, "detailed_description": detailed_description},
     )
 
@@ -54,7 +55,7 @@ async def get_workplan(session: ClientSession) -> str:
 
     This function calls the get_workplan tool to fetch the content of the GitHub issue
     associated with the current git worktree. It must be run from within a worktree
-    created by generate_work_plan.
+    created by generate_workplan.
 
     Args:
         session: MCP client session.
@@ -64,11 +65,57 @@ async def get_workplan(session: ClientSession) -> str:
 
     Note:
         This function requires the current working directory to be a git worktree
-        created by generate_work_plan.
+        created by generate_workplan.
     """
     # Call the get_workplan tool with no arguments
     # (it uses the current working directory to determine the issue number)
     result = await session.call_tool("get_workplan", arguments={})
+    return result
+
+
+async def get_workplan_by_issue(session: ClientSession, issue_number: str) -> str:
+    """
+    Get the work plan content directly from a GitHub issue by number.
+
+    This function calls the get_workplan_by_issue tool to fetch the content of a
+    GitHub issue identified by its number. Unlike get_workplan, it doesn't
+    require being in a worktree directory.
+
+    Args:
+        session: MCP client session.
+        issue_number: The GitHub issue number to fetch.
+
+    Returns:
+        The content of the work plan issue as a string.
+    """
+    # Call the get_workplan_by_issue tool with the issue number
+    result = await session.call_tool(
+        "get_workplan_by_issue", arguments={"issue_number": issue_number}
+    )
+    return result
+
+
+async def review_workplan(session: ClientSession) -> str:
+    """
+    Trigger a code review for the PR associated with the current git worktree.
+
+    This function calls the review_workplan tool to trigger an asynchronous review
+    of the Pull Request associated with the current git worktree. It must be run
+    from within a worktree created by generate_workplan that already has a PR.
+
+    Args:
+        session: MCP client session.
+
+    Returns:
+        A confirmation message with the URL of the PR being reviewed.
+
+    Note:
+        This function requires the current working directory to be a git worktree
+        created by generate_workplan that has an associated PR.
+    """
+    # Call the review_workplan tool with no arguments
+    # (it identifies the PR associated with the current worktree)
+    result = await session.call_tool("review_workplan", arguments={})
     return result
 
 
@@ -83,7 +130,7 @@ async def submit_workplan(
 
     This function calls the submit_workplan tool to stage changes, commit them,
     push the branch, create a GitHub PR, and trigger an asynchronous review.
-    It must be run from within a worktree created by generate_work_plan.
+    It must be run from within a worktree created by generate_workplan.
 
     Args:
         session: MCP client session.
@@ -96,7 +143,7 @@ async def submit_workplan(
 
     Note:
         This function requires the current working directory to be a git worktree
-        created by generate_work_plan.
+        created by generate_workplan.
     """
     # Set up the arguments
     arguments = {
@@ -164,7 +211,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 # Generate work plan
                 print(f"Generating work plan with title: {args.title}")
                 print(f"Detailed description: {args.description}")
-                result = await generate_work_plan(session, args.title, args.description)
+                result = await generate_workplan(session, args.title, args.description)
 
                 print("\nGitHub Issue Created:")
                 print(result["issue_url"])
@@ -193,7 +240,38 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 except Exception as e:
                     print(f"Error: {str(e)}")
                     print(
-                        "Make sure you are running this command from within a worktree created by generate_work_plan."
+                        "Make sure you are running this command from within a worktree created by generate_workplan."
+                    )
+                    sys.exit(1)
+
+            elif command == "getplan-issue":
+                # Get work plan by issue number
+                print(f"Retrieving work plan for issue #{args.issue_number}...")
+                try:
+                    work_plan = await get_workplan_by_issue(session, args.issue_number)
+                    print("\nWork Plan:")
+                    print("=" * 50)
+                    print(work_plan)
+                    print("=" * 50)
+                except Exception as e:
+                    print(f"Error: {str(e)}")
+                    sys.exit(1)
+
+            elif command == "review":
+                # Trigger a review for the current worktree's PR
+                print("Triggering a review for the Pull Request associated with this worktree...")
+                try:
+                    result = await review_workplan(session)
+                    print("\nResult:")
+                    print(result)
+                    print(
+                        "\nThe review will be generated asynchronously and posted as a comment on the PR."
+                    )
+                except Exception as e:
+                    print(f"Error: {str(e)}")
+                    print(
+                        "Make sure you are running this command from within a worktree created by generate_workplan "
+                        "that has an associated open Pull Request."
                     )
                     sys.exit(1)
 
@@ -219,7 +297,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 except Exception as e:
                     print(f"Error: {str(e)}")
                     print(
-                        "Make sure you are running this command from within a worktree created by generate_work_plan."
+                        "Make sure you are running this command from within a worktree created by generate_workplan."
                     )
                     sys.exit(1)
 
@@ -255,6 +333,23 @@ def main():
         help="Get the work plan from the current git worktree (must be run from a worktree)",
     )
 
+    # Get work plan by issue command
+    getplan_issue_parser = subparsers.add_parser(
+        "getplan-issue",
+        help="Get the work plan by GitHub issue number (no worktree needed)",
+    )
+    getplan_issue_parser.add_argument(
+        "--issue",
+        dest="issue_number",
+        required=True,
+        help="GitHub issue number to fetch",
+    )
+
+    # Review work command
+    review_parser = subparsers.add_parser(
+        "review", help="Trigger a code review for the PR associated with the current worktree"
+    )
+
     # Submit work command
     submit_parser = subparsers.add_parser(
         "submit", help="Submit completed work from current worktree (commit, push, create PR)"
@@ -285,7 +380,13 @@ def main():
         sys.exit(1)
 
     # Ensure GEMINI_API_KEY is set for commands that require it
-    if not os.environ.get("GEMINI_API_KEY") and args.command in ["plan", "getplan", "submit"]:
+    if not os.environ.get("GEMINI_API_KEY") and args.command in [
+        "plan",
+        "getplan",
+        "getplan-issue",
+        "review",
+        "submit",
+    ]:
         print("Error: GEMINI_API_KEY environment variable is not set")
         print("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
         sys.exit(1)

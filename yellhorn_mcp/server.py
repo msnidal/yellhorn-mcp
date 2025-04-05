@@ -4,15 +4,18 @@ Yellhorn MCP server implementation.
 This module provides a Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro
 capabilities to Claude Code for software development tasks. It offers these primary tools:
 
-1. generate_work_plan: Creates GitHub issues with detailed implementation plans based on
+1. generate_workplan: Creates GitHub issues with detailed implementation plans based on
    your codebase and task description. The work plan is generated asynchronously and the
    issue is updated once it's ready. Creates a git worktree for isolated development.
 
 2. get_workplan: Retrieves the work plan content (GitHub issue body) associated with the
-   current Git worktree. Must be run from within a worktree created by 'generate_work_plan'.
+   current Git worktree. Must be run from within a worktree created by 'generate_workplan'.
 
 3. submit_workplan: Submits the completed work from the current worktree by committing
    changes, pushing to GitHub, creating a PR, and triggering an asynchronous review.
+
+4. review_workplan: Triggers an asynchronous code review for the Pull Request associated 
+   with the current worktree.
 
 The server requires GitHub CLI to be installed and authenticated for GitHub operations.
 """
@@ -670,10 +673,10 @@ async def generate_branch_name(title: str, issue_number: str) -> str:
 
 
 @mcp.tool(
-    name="generate_work_plan",
+    name="generate_workplan",
     description="Generate a detailed work plan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Also creates a git worktree for isolated development.",
 )
-async def generate_work_plan(
+async def generate_workplan(
     title: str,
     detailed_description: str,
     ctx: Context,
@@ -682,6 +685,7 @@ async def generate_work_plan(
     Generate a work plan based on the provided title and detailed description.
     Creates a GitHub issue and processes the work plan generation asynchronously.
     Also automatically creates a linked branch and git worktree for isolated development.
+    Registers the work plan as an MCP resource with metadata linking to the GitHub issue.
 
     Args:
         title: Title for the GitHub issue (will be used as issue title and header).
@@ -750,6 +754,26 @@ async def generate_work_plan(
             # Return only the issue URL in case of failure
             worktree_path = None
 
+        # Register as MCP resource
+        resource_id = f"yellhorn-workplan-gh-{issue_number}"
+        metadata = {
+            "type": "workplan",
+            "source": "github_issue",
+            "issue_url": issue_url,
+            "issue_number": issue_number,
+            "branch_name": branch_name,
+            "worktree_path": str(worktree_path) if worktree_path else None,
+        }
+
+        # Create the MCP resource
+        await ctx.mcp_server.resources.create(
+            resource_id=resource_id,
+            name=f"Workplan: {title}",
+            content_type="text/markdown",
+            metadata=metadata,
+        )
+        await ctx.log(level="info", message=f"Created MCP resource '{resource_id}' for workplan.")
+
         # Start async processing
         asyncio.create_task(
             process_work_plan_async(
@@ -767,6 +791,7 @@ async def generate_work_plan(
         result = {
             "issue_url": issue_url,
             "worktree_path": str(worktree_path) if worktree_path else None,
+            "resource_id": resource_id,
         }
         return json.dumps(result)
 
@@ -776,13 +801,13 @@ async def generate_work_plan(
 
 @mcp.tool(
     name="get_workplan",
-    description="Retrieves the work plan content (GitHub issue body) associated with the current Git worktree. Must be run from within a worktree created by 'generate_work_plan'.",
+    description="Retrieves the work plan content (GitHub issue body) associated with the current Git worktree. Must be run from within a worktree created by 'generate_workplan'.",
 )
 async def get_workplan(ctx: Context) -> str:
     """
     Retrieve the work plan content (GitHub issue body) associated with the current Git worktree.
 
-    This tool must be run from within a worktree directory created by the 'generate_work_plan' tool.
+    This tool must be run from within a worktree directory created by the 'generate_workplan' tool.
     It extracts the issue number from the current branch name and fetches the corresponding
     issue content from GitHub.
 
@@ -809,6 +834,35 @@ async def get_workplan(ctx: Context) -> str:
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to retrieve work plan: {str(e)}")
+
+
+@mcp.tool(
+    name="get_workplan_by_issue",
+    description="Retrieves the work plan content from GitHub using the issue number.",
+)
+async def get_workplan_by_issue(issue_number: str, ctx: Context) -> str:
+    """
+    Retrieve the work plan content (GitHub issue body) using the issue number.
+
+    This tool fetches the content of a GitHub issue identified by its number.
+    Unlike get_workplan, it doesn't require being in a worktree directory.
+
+    Args:
+        issue_number: The GitHub issue number to fetch.
+        ctx: Server context.
+
+    Returns:
+        The content of the work plan issue as a string.
+
+    Raises:
+        YellhornMCPError: If unable to fetch the issue content.
+    """
+    try:
+        repo_path = ctx.request_context.lifespan_context["repo_path"]
+        work_plan = await get_github_issue_body(repo_path, issue_number)
+        return work_plan
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to retrieve work plan for issue #{issue_number}: {str(e)}")
 
 
 async def process_review_async(
@@ -910,6 +964,114 @@ Format your response as a clear, structured review with specific recommendations
         raise YellhornMCPError(error_message)
 
 
+async def _trigger_review(
+    worktree_path: Path, pr_url: str, issue_number: str, ctx: Context
+) -> None:
+    """
+    Trigger an asynchronous review of a Pull Request.
+
+    Args:
+        worktree_path: Path to the worktree.
+        pr_url: URL of the GitHub PR to review.
+        issue_number: Issue number with the original work plan.
+        ctx: Server context.
+
+    Raises:
+        YellhornMCPError: If there's an error triggering the review.
+    """
+    try:
+        # Fetch the work plan and diff for review
+        work_plan = await get_github_issue_body(worktree_path, issue_number)
+        diff = await get_github_pr_diff(worktree_path, pr_url)
+
+        # Get Gemini client and model
+        client = ctx.request_context.lifespan_context["client"]
+        model = ctx.request_context.lifespan_context["model"]
+
+        # Trigger the review asynchronously
+        asyncio.create_task(
+            process_review_async(
+                worktree_path,
+                client,
+                model,
+                work_plan,
+                diff,
+                pr_url,
+                issue_number,
+                ctx,
+            )
+        )
+
+        await ctx.log(
+            level="info",
+            message=f"Triggered review for PR: {pr_url} against issue #{issue_number}",
+        )
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to trigger review: {str(e)}")
+
+
+@mcp.tool(
+    name="review_workplan",
+    description="Triggers an asynchronous code review for the Pull Request associated with the current worktree.",
+)
+async def review_workplan(ctx: Context) -> str:
+    """
+    Trigger an asynchronous review for the Pull Request associated with the current worktree.
+
+    This tool must be run from within a worktree directory created by the 'generate_workplan' tool.
+    It identifies the associated Pull Request, fetches the original work plan from the GitHub issue,
+    and triggers an asynchronous review process.
+
+    Args:
+        ctx: Server context.
+
+    Returns:
+        A confirmation message with the URL of the PR being reviewed.
+
+    Raises:
+        YellhornMCPError: If not in a valid worktree, no PR exists, or other errors occur.
+    """
+    try:
+        # Get the current working directory
+        worktree_path = Path.cwd()
+
+        # Get the current branch name and issue number
+        branch_name, issue_number = await get_current_branch_and_issue(worktree_path)
+
+        # Find the associated Pull Request URL using GitHub CLI
+        try:
+            # Fetch PR URL associated with the head branch
+            pr_info_json = await run_github_command(
+                worktree_path,
+                [
+                    "pr",
+                    "list",
+                    "--head",
+                    branch_name,
+                    "--state",
+                    "open",
+                    "--json",
+                    "url",
+                    "--limit",
+                    "1",
+                ],
+            )
+            pr_info = json.loads(pr_info_json)
+            if not pr_info:
+                raise YellhornMCPError(f"No open Pull Request found for branch '{branch_name}'.")
+            pr_url = pr_info[0]["url"]
+        except Exception as e:
+            raise YellhornMCPError(f"Failed to find PR for branch '{branch_name}': {str(e)}")
+
+        # Trigger the review
+        await _trigger_review(worktree_path, pr_url, issue_number, ctx)
+
+        return f"Review triggered for Pull Request: {pr_url}"
+
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to review work plan: {str(e)}")
+
+
 @mcp.tool(
     name="submit_workplan",
     description="Submits the work completed in the current Git worktree. Stages all changes, commits them (using provided message or a default), pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated work plan issue.",
@@ -923,7 +1085,7 @@ async def submit_workplan(
     """
     Submit the completed work from the current Git worktree.
 
-    This tool must be run from within a worktree directory created by the 'generate_work_plan' tool.
+    This tool must be run from within a worktree directory created by the 'generate_workplan' tool.
     It stages all changes, commits them, pushes the branch to GitHub, creates a Pull Request,
     and triggers an asynchronous review of the changes against the original work plan.
 
@@ -1003,26 +1165,8 @@ async def submit_workplan(
             ],
         )
 
-        # Fetch the work plan and diff for review
-        work_plan = await get_github_issue_body(worktree_path, issue_number)
-        diff = await get_github_pr_diff(worktree_path, pr_url)
-
-        # Trigger the review asynchronously
-        client = ctx.request_context.lifespan_context["client"]
-        model = ctx.request_context.lifespan_context["model"]
-
-        asyncio.create_task(
-            process_review_async(
-                worktree_path,
-                client,
-                model,
-                work_plan,
-                diff,
-                pr_url,
-                issue_number,
-                ctx,
-            )
-        )
+        # Trigger the review
+        await _trigger_review(worktree_path, pr_url, issue_number, ctx)
 
         return pr_url
 

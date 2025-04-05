@@ -4,9 +4,11 @@
 
 Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro API for software development tasks. It provides these main tools:
 
-1. **Generate Work Plan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description. Creates a git worktree for isolated development.
-2. **Get Work Plan**: Retrieves the work plan content from a worktree's associated GitHub issue.
-3. **Submit Work Plan**: Commits changes, pushes to GitHub, creates a PR, and triggers an asynchronous review against the original work plan.
+1. **Generate Workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description. Creates a git worktree for isolated development. Registers the work plan as an MCP resource.
+2. **Get Workplan**: Retrieves the work plan content from a worktree's associated GitHub issue.
+3. **Get Workplan by Issue**: Retrieves a work plan directly using GitHub issue number without needing to be in a worktree.
+4. **Submit Workplan**: Commits changes, pushes to GitHub, creates a PR, and triggers an asynchronous review against the original work plan.
+5. **Review Workplan**: Triggers an asynchronous code review for the PR associated with the current worktree.
 
 ## Installation
 
@@ -160,9 +162,9 @@ This will use the `submit_workplan` tool to stage all changes, commit them, push
 
 ## MCP Tools
 
-### generate_work_plan
+### generate_workplan
 
-Creates a GitHub issue with a detailed work plan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously, with the issue being updated once it's ready. Also creates a Git worktree with a linked branch for isolated development.
+Creates a GitHub issue with a detailed work plan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously, with the issue being updated once it's ready. Also creates a Git worktree with a linked branch for isolated development. Registers the work plan as an MCP resource with metadata linking to the GitHub issue.
 
 **Input**:
 
@@ -174,10 +176,11 @@ Creates a GitHub issue with a detailed work plan based on the title and detailed
 - JSON string containing:
   - `issue_url`: URL to the created GitHub issue
   - `worktree_path`: Path to the created Git worktree directory
+  - `resource_id`: ID of the created MCP resource
 
 ### get_workplan
 
-Retrieves the work plan content (GitHub issue body) associated with the current Git worktree. Must be run from within a worktree created by 'generate_work_plan'.
+Retrieves the work plan content (GitHub issue body) associated with the current Git worktree. Must be run from within a worktree created by 'generate_workplan'.
 
 **Input**:
 
@@ -187,9 +190,21 @@ Retrieves the work plan content (GitHub issue body) associated with the current 
 
 - The content of the work plan issue as a string
 
+### get_workplan_by_issue
+
+Retrieves the work plan content from GitHub using the issue number. Does not require being in a worktree, so can be used from anywhere to access work plans by their issue number.
+
+**Input**:
+
+- `issue_number`: The GitHub issue number to fetch
+
+**Output**:
+
+- The content of the work plan issue as a string
+
 ### submit_workplan
 
-Submits the completed work from the current Git worktree. Stages all changes, commits them, pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated work plan issue. Must be run from within a worktree created by 'generate_work_plan'.
+Submits the completed work from the current Git worktree. Stages all changes, commits them, pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated work plan issue. Must be run from within a worktree created by 'generate_workplan'.
 
 **Input**:
 
@@ -200,6 +215,18 @@ Submits the completed work from the current Git worktree. Stages all changes, co
 **Output**:
 
 - The URL of the created GitHub Pull Request
+
+### review_workplan
+
+Triggers an asynchronous code review for the Pull Request associated with the current worktree. Must be run from within a worktree created by 'generate_workplan' that already has an associated PR.
+
+**Input**:
+
+- No parameters required
+
+**Output**:
+
+- A confirmation message with the URL of the Pull Request being reviewed
 
 ## Integration with Other Programs
 
@@ -250,6 +277,12 @@ python -m examples.client_example plan --title "User Authentication System" --de
 
 # Get work plan (run from worktree directory)
 python -m examples.client_example getplan
+
+# Get work plan by issue number (can be run from anywhere)
+python -m examples.client_example getplan-issue --issue 123
+
+# Trigger a review for a PR (run from worktree directory)
+python -m examples.client_example review
 
 # Submit work (run from worktree directory)
 python -m examples.client_example submit --pr-title "Implement User Authentication" --pr-body "This PR implements user authentication"
