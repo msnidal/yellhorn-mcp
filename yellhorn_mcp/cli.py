@@ -13,7 +13,7 @@ from pathlib import Path
 
 import uvicorn
 
-from yellhorn_mcp.server import mcp
+from yellhorn_mcp.server import is_git_repository, mcp
 
 
 def main():
@@ -73,8 +73,8 @@ def main():
         print(f"Error: Repository path {repo_path} does not exist")
         sys.exit(1)
 
-    git_dir = repo_path / ".git"
-    if not git_dir.exists() or not git_dir.is_dir():
+    # Check if the path is a Git repository (either standard or worktree)
+    if not is_git_repository(repo_path):
         print(f"Error: {repo_path} is not a Git repository")
         sys.exit(1)
 
