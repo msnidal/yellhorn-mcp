@@ -61,8 +61,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     if not repo_path.exists():
         raise ValueError(f"Repository path {repo_path} does not exist")
 
-    git_dir = repo_path / ".git"
-    if not git_dir.exists() or not git_dir.is_dir():
+    # Check if the path is a Git repository (either standard or worktree)
+    if not is_git_repository(repo_path):
         raise ValueError(f"{repo_path} is not a Git repository")
 
     # Configure Gemini API
@@ -564,6 +564,33 @@ async def get_default_branch(repo_path: Path) -> str:
                 )
 
 
+def is_git_repository(path: Path) -> bool:
+    """
+    Check if a path is a Git repository (either standard or worktree).
+
+    Args:
+        path: Path to check.
+
+    Returns:
+        True if the path is a Git repository (either standard or worktree), False otherwise.
+    """
+    git_path = path / ".git"
+
+    # Not a git repo if .git doesn't exist
+    if not git_path.exists():
+        return False
+
+    # Standard repository: .git is a directory
+    if git_path.is_dir():
+        return True
+
+    # Git worktree: .git is a file that contains a reference to the actual git directory
+    if git_path.is_file():
+        return True
+
+    return False
+
+
 async def get_current_branch_and_issue(worktree_path: Path) -> tuple[str, str]:
     """
     Get the current branch name and associated issue number from a worktree.
@@ -578,6 +605,12 @@ async def get_current_branch_and_issue(worktree_path: Path) -> tuple[str, str]:
         YellhornMCPError: If not in a git repository, or branch name doesn't match expected format.
     """
     try:
+        # Verify this is a git repository (either standard or worktree)
+        if not is_git_repository(worktree_path):
+            raise YellhornMCPError(
+                "Not in a git repository. Please run this command from within a worktree created by generate_work_plan."
+            )
+
         # Get the current branch name
         branch_name = await run_git_command(worktree_path, ["rev-parse", "--abbrev-ref", "HEAD"])
 

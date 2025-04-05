@@ -21,6 +21,7 @@ from yellhorn_mcp.server import (
     get_github_issue_body,
     get_github_pr_diff,
     get_workplan,
+    is_git_repository,
     post_github_pr_review,
     process_review_async,
     process_work_plan_async,
@@ -266,34 +267,67 @@ async def test_get_default_branch():
             await get_default_branch(Path("/mock/repo"))
 
 
+def test_is_git_repository():
+    """Test the is_git_repository function."""
+    # Test with .git directory (standard repository)
+    with patch("pathlib.Path.exists", return_value=True):
+        with patch("pathlib.Path.is_dir", return_value=True):
+            with patch("pathlib.Path.is_file", return_value=False):
+                assert is_git_repository(Path("/mock/repo")) is True
+
+    # Test with .git file (worktree)
+    with patch("pathlib.Path.exists", return_value=True):
+        with patch("pathlib.Path.is_dir", return_value=False):
+            with patch("pathlib.Path.is_file", return_value=True):
+                assert is_git_repository(Path("/mock/worktree")) is True
+
+    # Test with no .git
+    with patch("pathlib.Path.exists", return_value=False):
+        assert is_git_repository(Path("/mock/not_a_repo")) is False
+
+    # Test with .git that is neither a file nor a directory
+    with patch("pathlib.Path.exists", return_value=True):
+        with patch("pathlib.Path.is_dir", return_value=False):
+            with patch("pathlib.Path.is_file", return_value=False):
+                assert is_git_repository(Path("/mock/strange_repo")) is False
+
+
 @pytest.mark.asyncio
 async def test_get_current_branch_and_issue():
     """Test getting the current branch and issue number."""
     # Test successful case
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-        mock_git.return_value = "issue-123-feature-implementation"
+    with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
+        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+            mock_git.return_value = "issue-123-feature-implementation"
 
-        branch_name, issue_number = await get_current_branch_and_issue(Path("/mock/worktree"))
+            branch_name, issue_number = await get_current_branch_and_issue(Path("/mock/worktree"))
 
-        assert branch_name == "issue-123-feature-implementation"
-        assert issue_number == "123"
-        mock_git.assert_called_once_with(
-            Path("/mock/worktree"), ["rev-parse", "--abbrev-ref", "HEAD"]
-        )
+            assert branch_name == "issue-123-feature-implementation"
+            assert issue_number == "123"
+            mock_git.assert_called_once_with(
+                Path("/mock/worktree"), ["rev-parse", "--abbrev-ref", "HEAD"]
+            )
 
     # Test with invalid branch name format
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-        mock_git.return_value = "feature-branch"
+    with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
+        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+            mock_git.return_value = "feature-branch"
 
-        with pytest.raises(YellhornMCPError, match="does not match expected format"):
-            await get_current_branch_and_issue(Path("/mock/worktree"))
+            with pytest.raises(YellhornMCPError, match="does not match expected format"):
+                await get_current_branch_and_issue(Path("/mock/worktree"))
 
     # Test when not in a git repository
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-        mock_git.side_effect = YellhornMCPError("not a git repository")
-
+    with patch("yellhorn_mcp.server.is_git_repository", return_value=False):
         with pytest.raises(YellhornMCPError, match="Not in a git repository"):
             await get_current_branch_and_issue(Path("/mock/worktree"))
+
+    # Test with git command failure
+    with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
+        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+            mock_git.side_effect = YellhornMCPError("not a git repository")
+
+            with pytest.raises(YellhornMCPError, match="Not in a git repository"):
+                await get_current_branch_and_issue(Path("/mock/worktree"))
 
 
 @pytest.mark.asyncio
