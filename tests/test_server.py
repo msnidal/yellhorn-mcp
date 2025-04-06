@@ -21,7 +21,7 @@ async def test_list_resources(mock_request_context):
         mock_gh.return_value = json.dumps(sample_issues)
         
         # Call list_resources
-        resources = await list_resources(None, None, mock_request_context)
+        resources = await list_resources(None, mock_request_context)
         
         # Verify the command was called correctly
         mock_gh.assert_called_once_with(
@@ -38,16 +38,16 @@ async def test_list_resources(mock_request_context):
         assert resources[0].metadata["url"] == "https://github.com/user/repo/issues/123"
         
         # Test with specific resource type
-        resources = await list_resources(None, "yellhorn_workplan", mock_request_context)
+        resources = await list_resources(None, mock_request_context, "yellhorn_workplan")
         assert len(resources) == 2
         
         # Test with incorrect resource type
-        resources = await list_resources(None, "unknown_type", mock_request_context)
+        resources = await list_resources(None, mock_request_context, "unknown_type")
         assert len(resources) == 0
         
         # Test error handling
         mock_gh.side_effect = Exception("GitHub API error")
-        resources = await list_resources(None, None, mock_request_context)
+        resources = await list_resources(None, mock_request_context)
         assert len(resources) == 0
 
 
@@ -59,7 +59,7 @@ async def test_get_resource(mock_request_context):
         mock_get_issue.return_value = "# Test Workplan\n\n1. Step 1\n2. Step 2"
         
         # Call get_resource
-        content = await get_resource(None, "123", None, mock_request_context)
+        content = await get_resource(None, mock_request_context, "123")
         
         # Verify the function was called correctly
         mock_get_issue.assert_called_once_with(Path("/mock/repo"), "123")
@@ -69,12 +69,12 @@ async def test_get_resource(mock_request_context):
         
         # Test with incorrect resource type
         with pytest.raises(ValueError, match="Unsupported resource type"):
-            await get_resource(None, "123", "unknown_type", mock_request_context)
+            await get_resource(None, mock_request_context, "123", "unknown_type")
         
         # Test error handling
         mock_get_issue.side_effect = Exception("GitHub API error")
         with pytest.raises(ValueError, match="Failed to get resource"):
-            await get_resource(None, "123", None, mock_request_context)
+            await get_resource(None, mock_request_context, "123")
 from mcp.common.resource import Resource
 from mcp.server.fastmcp import Context
 

@@ -83,13 +83,13 @@ mcp = FastMCP(
 )
 
 
-async def list_resources(self, resource_type: str | None = None, ctx: Context) -> list[Resource]:
+async def list_resources(self, ctx: Context, resource_type: str | None = None) -> list[Resource]:
     """
     List workplan resources (GitHub issues created by this tool).
     
     Args:
-        resource_type: Optional resource type to filter by.
         ctx: Server context.
+        resource_type: Optional resource type to filter by.
         
     Returns:
         List of resources (GitHub issues with yellhorn-mcp label).
@@ -129,14 +129,14 @@ async def list_resources(self, resource_type: str | None = None, ctx: Context) -
         return []
 
 
-async def get_resource(self, resource_id: str, resource_type: str | None = None, ctx: Context) -> str:
+async def get_resource(self, ctx: Context, resource_id: str, resource_type: str | None = None) -> str:
     """
     Get the content of a workplan resource (GitHub issue).
     
     Args:
+        ctx: Server context.
         resource_id: The issue number.
         resource_type: Optional resource type.
-        ctx: Server context.
         
     Returns:
         The content of the workplan issue as a string.
