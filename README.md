@@ -9,8 +9,9 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities t
 - **Generate workplans**: Creates GitHub issues with detailed implementation plans based on your codebase, with customizable title and detailed description
 - **Isolated Development Environments**: Automatically creates Git worktrees and linked branches for streamlined, isolated development workflow
 - **Review Code Diffs**: Evaluates pull requests against the original workplan with full codebase context and provides detailed feedback
-- **Seamless GitHub Integration**: Automatically creates labeled issues, posts reviews as PR comments with references to original issues, and handles asynchronous processing
+- **Seamless GitHub Integration**: Automatically creates labeled issues with proper branch linking in the GitHub UI, posts reviews as PR comments with references to original issues, and handles asynchronous processing
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
+- **MCP Resources**: Exposes workplans as standard MCP resources for easy listing and retrieval
 
 ## Installation
 
@@ -75,11 +76,17 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
    Please get the current workplan for this worktree
    ```
 
-4. Make your changes and submit them:
+4. Make your changes, create a PR, and request a review:
 
    ```
-   # While in the worktree directory
-   Please commit my changes and create a PR with title "[PR Title]" and body "[PR Description]"
+   # First create a PR using your preferred method (Git CLI, GitHub CLI, or web UI)
+   git add .
+   git commit -m "Implement feature"
+   git push origin HEAD
+   gh pr create --title "[PR Title]" --body "[PR Description]"
+   
+   # Then, while in the worktree directory, ask Claude to review it
+   Please trigger a review for PR "[PR URL]" against the original workplan
    ```
 
 ## Tools
@@ -113,21 +120,36 @@ Retrieves the workplan content (GitHub issue body) associated with the current G
 
 - The content of the workplan issue as a string
 
-### submit_workplan
+### review_workplan
 
-Submits the completed work from the current Git worktree. Stages all changes, commits them, pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated workplan issue.
+Triggers an asynchronous code review for the current Git worktree's associated Pull Request against its original workplan issue.
 
 **Note**: Must be run from within a worktree created by 'generate_workplan'.
 
 **Input**:
 
-- `pr_title`: Title for the GitHub Pull Request
-- `pr_body`: Body content for the GitHub Pull Request
-- `commit_message`: Optional commit message (defaults to "WIP submission for issue #X")
+- `pr_url`: The URL of the GitHub Pull Request to review
 
 **Output**:
 
-- The URL of the created GitHub Pull Request
+- A confirmation message that the review task has been initiated
+
+## Resource Access
+
+Yellhorn MCP also implements the standard MCP resource API to provide access to workplans:
+
+- `list-resources`: Lists all workplans (GitHub issues with the yellhorn-mcp label)
+- `get-resource`: Retrieves the content of a specific workplan by issue number
+
+These can be accessed via the standard MCP CLI commands:
+
+```bash
+# List all workplans
+mcp list-resources yellhorn-mcp
+
+# Get a specific workplan by issue number
+mcp get-resource yellhorn-mcp 123
+```
 
 ## Development
 

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from google import genai
+from mcp.common.resource import Resource
 from mcp.server.fastmcp import Context, FastMCP
 
 
@@ -80,6 +81,82 @@ mcp = FastMCP(
     dependencies=["google-genai~=1.8.0", "aiohttp~=3.11.14", "pydantic~=2.11.1"],
     lifespan=app_lifespan,
 )
+
+
+async def list_resources(self, resource_type: str | None = None, ctx: Context) -> list[Resource]:
+    """
+    List workplan resources (GitHub issues created by this tool).
+    
+    Args:
+        resource_type: Optional resource type to filter by.
+        ctx: Server context.
+        
+    Returns:
+        List of resources (GitHub issues with yellhorn-mcp label).
+    """
+    # We only have one resource type, so we can ignore resource_type if it's
+    # None or matches our type
+    if resource_type is not None and resource_type != "yellhorn_workplan":
+        return []
+        
+    repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+    
+    try:
+        # Get all issues with the yellhorn-mcp label
+        json_output = await run_github_command(
+            repo_path, ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"]
+        )
+        
+        # Parse the JSON output
+        import json
+        issues = json.loads(json_output)
+        
+        # Convert to Resource objects
+        resources = []
+        for issue in issues:
+            resources.append(
+                Resource(
+                    id=str(issue["number"]),
+                    type="yellhorn_workplan",
+                    name=issue["title"],
+                    metadata={"url": issue["url"]}
+                )
+            )
+            
+        return resources
+    except Exception as e:
+        await ctx.log(level="error", message=f"Failed to list resources: {str(e)}")
+        return []
+
+
+async def get_resource(self, resource_id: str, resource_type: str | None = None, ctx: Context) -> str:
+    """
+    Get the content of a workplan resource (GitHub issue).
+    
+    Args:
+        resource_id: The issue number.
+        resource_type: Optional resource type.
+        ctx: Server context.
+        
+    Returns:
+        The content of the workplan issue as a string.
+    """
+    # Verify resource type if provided
+    if resource_type is not None and resource_type != "yellhorn_workplan":
+        raise ValueError(f"Unsupported resource type: {resource_type}")
+        
+    repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+    
+    try:
+        # Fetch the issue content using the issue number as resource_id
+        return await get_github_issue_body(repo_path, resource_id)
+    except Exception as e:
+        raise ValueError(f"Failed to get resource: {str(e)}")
+
+
+# Register resource methods
+mcp.list_resources = list_resources.__get__(mcp)
+mcp.get_resource = get_resource.__get__(mcp)
 
 
 async def run_git_command(repo_path: Path, command: list[str]) -> str:
@@ -575,6 +652,11 @@ def is_git_repository(path: Path) -> bool:
         True if the path is a Git repository (either standard or worktree), False otherwise.
     """
     git_path = path / ".git"
+    
+    # Add debug logging to help diagnose worktree detection issues
+    mcp.logger.debug(f"Checking git repo status for {path}. .git path: {git_path}. "
+                   f"Exists: {git_path.exists()}. Is file: {git_path.is_file() if git_path.exists() else False}. "
+                   f"Is dir: {git_path.is_dir() if git_path.exists() else False}")
 
     # Not a git repo if .git doesn't exist
     if not git_path.exists():
@@ -653,16 +735,23 @@ async def create_git_worktree(repo_path: Path, branch_name: str, issue_number: s
         # Get the default branch to create the new branch from
         default_branch = await get_default_branch(repo_path)
 
-        # Create the worktree with a new branch tracking the default branch
+        # Use gh issue develop to create and link the branch to the issue
+        # This ensures proper association in the GitHub UI's 'Development' section
+        await run_github_command(
+            repo_path, 
+            ["issue", "develop", issue_number, "--name", branch_name, "--base-branch", default_branch]
+        )
+        
+        # Now create the worktree with that branch
         await run_git_command(
             repo_path,
             ["worktree", "add", "--track", "-b", branch_name, str(worktree_path), default_branch],
         )
 
-        # Link the branch to the issue on GitHub
-        await run_github_command(
-            repo_path, ["issue", "develop", issue_number, "--branch", branch_name]
-        )
+        mcp.logger.debug(f"Created worktree at {worktree_path}. Checking git repo status.")
+        git_path = worktree_path / ".git"
+        mcp.logger.debug(f"Checking git repo status for {worktree_path}. .git path: {git_path}. "
+                        f"Exists: {git_path.exists()}. Is file: {git_path.is_file()}. Is dir: {git_path.is_dir()}")
 
         return worktree_path
     except Exception as e:
@@ -944,97 +1033,36 @@ Format your response as a clear, structured review with specific recommendations
 
 
 @mcp.tool(
-    name="submit_workplan",
-    description="Submits the work completed in the current Git worktree. Stages all changes, commits them (using provided message or a default), pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated workplan issue.",
+    name="review_workplan",
+    description="Triggers an asynchronous code review for the current Git worktree's associated Pull Request against its original workplan issue.",
 )
-async def submit_workplan(
-    pr_title: str,
-    pr_body: str,
+async def review_workplan(
+    pr_url: str,
     ctx: Context,
-    commit_message: str | None = None,
 ) -> str:
     """
-    Submit the completed work from the current Git worktree.
+    Trigger an asynchronous code review for a Pull Request against its original workplan.
 
     This tool must be run from within a worktree directory created by the 'generate_workplan' tool.
-    It stages all changes, commits them, pushes the branch to GitHub, creates a Pull Request,
-    and triggers an asynchronous review of the changes against the original workplan.
+    It fetches the original workplan from the associated GitHub issue, retrieves the PR diff,
+    and initiates an asynchronous AI review process.
 
     Args:
-        pr_title: Title for the GitHub Pull Request.
-        pr_body: Body content for the GitHub Pull Request.
-        commit_message: Optional commit message. If not provided, a default will be used.
+        pr_url: The URL of the GitHub Pull Request to review.
         ctx: Server context.
 
     Returns:
-        The URL of the created GitHub Pull Request.
+        A confirmation message that the review task has been initiated.
 
     Raises:
-        YellhornMCPError: If not in a valid worktree or errors occur during submission.
+        YellhornMCPError: If not in a valid worktree or errors occur during the review process.
     """
     try:
         # Get the current working directory
         worktree_path = Path.cwd()
 
         # Get the current branch name and issue number
-        branch_name, issue_number = await get_current_branch_and_issue(worktree_path)
-
-        # Determine commit message
-        if not commit_message:
-            commit_message = f"WIP submission for issue #{issue_number}"
-
-        # Stage all changes
-        await run_git_command(worktree_path, ["add", "."])
-
-        # Commit changes
-        try:
-            await run_git_command(worktree_path, ["commit", "-m", commit_message])
-        except YellhornMCPError as e:
-            # If there's nothing to commit, proceed anyway
-            if "nothing to commit" in str(e).lower():
-                # Log a warning but continue
-                await ctx.log(
-                    level="warning",
-                    message="No changes to commit. Proceeding with PR creation if the branch exists remotely.",
-                )
-            else:
-                # Re-raise for other errors
-                raise
-
-        # Push the branch to GitHub
-        try:
-            await run_git_command(worktree_path, ["push", "--set-upstream", "origin", branch_name])
-        except YellhornMCPError as e:
-            if "everything up-to-date" in str(e).lower():
-                # Branch is already pushed, proceed with PR creation
-                await ctx.log(
-                    level="info",
-                    message="Branch already pushed. Proceeding with PR creation.",
-                )
-            else:
-                # Re-raise for other errors
-                raise
-
-        # Get the default branch
-        repo_path = ctx.request_context.lifespan_context["repo_path"]
-        default_branch = await get_default_branch(repo_path)
-
-        # Create the Pull Request
-        pr_url = await run_github_command(
-            worktree_path,
-            [
-                "pr",
-                "create",
-                "--title",
-                pr_title,
-                "--body",
-                pr_body,
-                "--head",
-                branch_name,
-                "--base",
-                default_branch,
-            ],
-        )
+        _, issue_number = await get_current_branch_and_issue(worktree_path)
 
         # Fetch the workplan and diff for review
         workplan = await get_github_issue_body(worktree_path, issue_number)
@@ -1057,7 +1085,7 @@ async def submit_workplan(
             )
         )
 
-        return pr_url
+        return f"Review task initiated for PR {pr_url} against workplan issue #{issue_number}."
 
     except Exception as e:
-        raise YellhornMCPError(f"Failed to submit workplan: {str(e)}")
+        raise YellhornMCPError(f"Failed to trigger workplan review: {str(e)}")
