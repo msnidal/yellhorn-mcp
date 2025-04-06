@@ -86,11 +86,11 @@ mcp = FastMCP(
 async def list_resources(self, ctx: Context, resource_type: str | None = None) -> list[Resource]:
     """
     List workplan resources (GitHub issues created by this tool).
-    
+
     Args:
         ctx: Server context.
         resource_type: Optional resource type to filter by.
-        
+
     Returns:
         List of resources (GitHub issues with yellhorn-mcp label).
     """
@@ -98,19 +98,20 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
     # None or matches our type
     if resource_type is not None and resource_type != "yellhorn_workplan":
         return []
-        
+
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-    
+
     try:
         # Get all issues with the yellhorn-mcp label
         json_output = await run_github_command(
             repo_path, ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"]
         )
-        
+
         # Parse the JSON output
         import json
+
         issues = json.loads(json_output)
-        
+
         # Convert to Resource objects
         resources = []
         for issue in issues:
@@ -119,34 +120,36 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
                     id=str(issue["number"]),
                     type="yellhorn_workplan",
                     name=issue["title"],
-                    metadata={"url": issue["url"]}
+                    metadata={"url": issue["url"]},
                 )
             )
-            
+
         return resources
     except Exception as e:
         await ctx.log(level="error", message=f"Failed to list resources: {str(e)}")
         return []
 
 
-async def get_resource(self, ctx: Context, resource_id: str, resource_type: str | None = None) -> str:
+async def get_resource(
+    self, ctx: Context, resource_id: str, resource_type: str | None = None
+) -> str:
     """
     Get the content of a workplan resource (GitHub issue).
-    
+
     Args:
         ctx: Server context.
         resource_id: The issue number.
         resource_type: Optional resource type.
-        
+
     Returns:
         The content of the workplan issue as a string.
     """
     # Verify resource type if provided
     if resource_type is not None and resource_type != "yellhorn_workplan":
         raise ValueError(f"Unsupported resource type: {resource_type}")
-        
+
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-    
+
     try:
         # Fetch the issue content using the issue number as resource_id
         return await get_github_issue_body(repo_path, resource_id)
@@ -652,7 +655,7 @@ def is_git_repository(path: Path) -> bool:
         True if the path is a Git repository (either standard or worktree), False otherwise.
     """
     git_path = path / ".git"
-    
+
     # Debug information could be logged here if needed
     # print(f"Checking git repo status for {path}. .git path: {git_path}")
     # print(f"Exists: {git_path.exists()}. Is file: {git_path.is_file() if git_path.exists() else False}. Is dir: {git_path.is_dir() if git_path.exists() else False}")
@@ -737,10 +740,18 @@ async def create_git_worktree(repo_path: Path, branch_name: str, issue_number: s
         # Use gh issue develop to create and link the branch to the issue
         # This ensures proper association in the GitHub UI's 'Development' section
         await run_github_command(
-            repo_path, 
-            ["issue", "develop", issue_number, "--name", branch_name, "--base-branch", default_branch]
+            repo_path,
+            [
+                "issue",
+                "develop",
+                issue_number,
+                "--name",
+                branch_name,
+                "--base-branch",
+                default_branch,
+            ],
         )
-        
+
         # Now create the worktree with that branch
         await run_git_command(
             repo_path,

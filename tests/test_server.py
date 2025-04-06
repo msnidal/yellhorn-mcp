@@ -1,8 +1,8 @@
 """Tests for the Yellhorn MCP server."""
 
 import asyncio
-from pathlib import Path
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,6 +21,8 @@ async def test_get_resource(mock_request_context):
     """Test getting a workplan resource."""
     # Skip the test until we can fix the Resource method
     pytest.skip("Skipping test until get_resource is fixed")
+
+
 from mcp import Resource
 from mcp.server.fastmcp import Context
 
@@ -36,10 +38,10 @@ from yellhorn_mcp.server import (
     get_default_branch,
     get_github_issue_body,
     get_github_pr_diff,
+    get_resource,
     get_workplan,
     is_git_repository,
     list_resources,
-    get_resource,
     post_github_pr_review,
     process_review_async,
     process_workplan_async,
@@ -364,10 +366,18 @@ async def test_create_git_worktree():
 
                 # Check GitHub issue develop call with the new parameters
                 mock_gh.assert_called_with(
-                    Path("/mock/repo"), 
-                    ["issue", "develop", "123", "--name", "issue-123-feature", "--base-branch", "main"]
+                    Path("/mock/repo"),
+                    [
+                        "issue",
+                        "develop",
+                        "123",
+                        "--name",
+                        "issue-123-feature",
+                        "--base-branch",
+                        "main",
+                    ],
                 )
-                
+
                 # Check worktree creation command
                 mock_git.assert_called_with(
                     Path("/mock/repo"),
@@ -695,7 +705,7 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
                         assert "Review task initiated for PR" in result
                         assert pr_url in result
                         assert "issue #123" in result
-                        
+
                         # Verify the function calls
                         mock_cwd.assert_called()
                         mock_get_branch_issue.assert_called_once_with(Path("/mock/worktree"))
@@ -716,8 +726,7 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
 
             with pytest.raises(YellhornMCPError, match="Failed to trigger workplan review"):
                 await review_workplan(
-                    pr_url="https://github.com/user/repo/pull/456",
-                    ctx=mock_request_context
+                    pr_url="https://github.com/user/repo/pull/456", ctx=mock_request_context
                 )
 
     # Test with invalid PR URL
@@ -735,10 +744,7 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
                     mock_get_diff.side_effect = YellhornMCPError("Invalid PR URL")
 
                     with pytest.raises(YellhornMCPError, match="Failed to trigger workplan review"):
-                        await review_workplan(
-                            pr_url="invalid-url",
-                            ctx=mock_request_context
-                        )
+                        await review_workplan(pr_url="invalid-url", ctx=mock_request_context)
 
 
 @pytest.mark.asyncio
