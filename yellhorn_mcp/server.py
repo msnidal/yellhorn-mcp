@@ -653,10 +653,9 @@ def is_git_repository(path: Path) -> bool:
     """
     git_path = path / ".git"
     
-    # Add debug logging to help diagnose worktree detection issues
-    mcp.logger.debug(f"Checking git repo status for {path}. .git path: {git_path}. "
-                   f"Exists: {git_path.exists()}. Is file: {git_path.is_file() if git_path.exists() else False}. "
-                   f"Is dir: {git_path.is_dir() if git_path.exists() else False}")
+    # Debug information could be logged here if needed
+    # print(f"Checking git repo status for {path}. .git path: {git_path}")
+    # print(f"Exists: {git_path.exists()}. Is file: {git_path.is_file() if git_path.exists() else False}. Is dir: {git_path.is_dir() if git_path.exists() else False}")
 
     # Not a git repo if .git doesn't exist
     if not git_path.exists():
@@ -748,10 +747,10 @@ async def create_git_worktree(repo_path: Path, branch_name: str, issue_number: s
             ["worktree", "add", "--track", "-b", branch_name, str(worktree_path), default_branch],
         )
 
-        mcp.logger.debug(f"Created worktree at {worktree_path}. Checking git repo status.")
-        git_path = worktree_path / ".git"
-        mcp.logger.debug(f"Checking git repo status for {worktree_path}. .git path: {git_path}. "
-                        f"Exists: {git_path.exists()}. Is file: {git_path.is_file()}. Is dir: {git_path.is_dir()}")
+        # Log for debugging purposes if needed
+        # print(f"Created worktree at {worktree_path}")
+        # git_path = worktree_path / ".git"
+        # print(f"Git path: {git_path}, Exists: {git_path.exists()}, Is file: {git_path.is_file()}, Is dir: {git_path.is_dir()}")
 
         return worktree_path
     except Exception as e:
