@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from google import genai
-from mcp.common.resource import Resource
+from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
 
 

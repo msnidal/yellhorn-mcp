@@ -75,7 +75,7 @@ async def test_get_resource(mock_request_context):
         mock_get_issue.side_effect = Exception("GitHub API error")
         with pytest.raises(ValueError, match="Failed to get resource"):
             await get_resource(None, mock_request_context, "123")
-from mcp.common.resource import Resource
+from mcp import Resource
 from mcp.server.fastmcp import Context
 
 from yellhorn_mcp.server import (
