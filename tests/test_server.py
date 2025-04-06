@@ -14,7 +14,7 @@ from yellhorn_mcp.server import (
     ensure_label_exists,
     format_codebase_for_prompt,
     generate_branch_name,
-    generate_work_plan,
+    generate_workplan,
     get_codebase_snapshot,
     get_current_branch_and_issue,
     get_default_branch,
@@ -24,7 +24,7 @@ from yellhorn_mcp.server import (
     is_git_repository,
     post_github_pr_review,
     process_review_async,
-    process_work_plan_async,
+    process_workplan_async,
     run_git_command,
     run_github_command,
     submit_workplan,
@@ -365,8 +365,8 @@ async def test_create_git_worktree():
 
 
 @pytest.mark.asyncio
-async def test_generate_work_plan(mock_request_context, mock_genai_client):
-    """Test generating a work plan."""
+async def test_generate_workplan(mock_request_context, mock_genai_client):
+    """Test generating a workplan."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
@@ -382,7 +382,7 @@ async def test_generate_work_plan(mock_request_context, mock_genai_client):
 
                     with patch("asyncio.create_task") as mock_create_task:
                         # Test with required title and detailed description
-                        response = await generate_work_plan(
+                        response = await generate_workplan(
                             title="Feature Implementation Plan",
                             detailed_description="Create a new feature to support X",
                             ctx=mock_request_context,
@@ -426,10 +426,10 @@ async def test_generate_work_plan(mock_request_context, mock_genai_client):
                             Path("/mock/repo"), "issue-123-feature-implementation-plan", "123"
                         )
 
-                        # Check that the process_work_plan_async task is created with the correct parameters
+                        # Check that the process_workplan_async task is created with the correct parameters
                         args, kwargs = mock_create_task.call_args
                         coroutine = args[0]
-                        assert coroutine.__name__ == "process_work_plan_async"
+                        assert coroutine.__name__ == "process_workplan_async"
 
 
 @pytest.mark.asyncio
@@ -573,8 +573,8 @@ async def test_update_github_issue():
 
 
 @pytest.mark.asyncio
-async def test_process_work_plan_async(mock_request_context, mock_genai_client):
-    """Test processing work plan asynchronously."""
+async def test_process_workplan_async(mock_request_context, mock_genai_client):
+    """Test processing workplan asynchronously."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
@@ -588,7 +588,7 @@ async def test_process_work_plan_async(mock_request_context, mock_genai_client):
         mock_format.return_value = "Formatted codebase"
 
         # Test with required parameters
-        await process_work_plan_async(
+        await process_workplan_async(
             Path("/mock/repo"),
             mock_genai_client,
             "gemini-model",
@@ -607,7 +607,7 @@ async def test_process_work_plan_async(mock_request_context, mock_genai_client):
         assert "<detailed_description>" in kwargs.get("contents", "")
         assert "Create a new feature to support X" in kwargs.get("contents", "")
 
-        # Check that the issue was updated with the work plan including the title
+        # Check that the issue was updated with the workplan including the title
         mock_update.assert_called_once()
         args, kwargs = mock_update.call_args
         assert args[0] == Path("/mock/repo")
@@ -617,7 +617,7 @@ async def test_process_work_plan_async(mock_request_context, mock_genai_client):
 
 @pytest.mark.asyncio
 async def test_get_workplan(mock_request_context):
-    """Test getting the work plan associated with the current worktree."""
+    """Test getting the workplan associated with the current worktree."""
     with patch("pathlib.Path.cwd") as mock_cwd:
         mock_cwd.return_value = Path("/mock/worktree")
 
@@ -625,12 +625,12 @@ async def test_get_workplan(mock_request_context):
             mock_get_branch_issue.return_value = ("issue-123-feature", "123")
 
             with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-                mock_get_issue.return_value = "# Work Plan\n\n1. Implement X\n2. Test X"
+                mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
-                # Test getting the work plan
+                # Test getting the workplan
                 result = await get_workplan(mock_request_context)
 
-                assert result == "# Work Plan\n\n1. Implement X\n2. Test X"
+                assert result == "# workplan\n\n1. Implement X\n2. Test X"
                 mock_cwd.assert_called_once()
                 mock_get_branch_issue.assert_called_once_with(Path("/mock/worktree"))
                 mock_get_issue.assert_called_once_with(Path("/mock/worktree"), "123")
@@ -642,7 +642,7 @@ async def test_get_workplan(mock_request_context):
         with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
             mock_get_branch_issue.side_effect = YellhornMCPError("Not in a git repository")
 
-            with pytest.raises(YellhornMCPError, match="Failed to retrieve work plan"):
+            with pytest.raises(YellhornMCPError, match="Failed to retrieve workplan"):
                 await get_workplan(mock_request_context)
 
 
@@ -666,7 +666,7 @@ async def test_submit_workplan(mock_request_context, mock_genai_client):
                         mock_gh.return_value = "https://github.com/user/repo/pull/456"
 
                         with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-                            mock_get_issue.return_value = "# Work Plan\n\n1. Implement X\n2. Test X"
+                            mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
                             with patch("yellhorn_mcp.server.get_github_pr_diff") as mock_get_diff:
                                 mock_get_diff.return_value = (
@@ -810,7 +810,7 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
 
-        work_plan = "1. Implement X\n2. Test X"
+        workplan = "1. Implement X\n2. Test X"
         diff = "diff --git a/file.py b/file.py\n+def x(): pass"
         pr_url = "https://github.com/user/repo/pull/1"
         issue_number = "42"
@@ -820,7 +820,7 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
             mock_request_context.request_context.lifespan_context["repo_path"],
             mock_genai_client,
             "gemini-model",
-            work_plan,
+            workplan,
             diff,
             pr_url,
             issue_number,
@@ -829,7 +829,7 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
 
         # Check that the review contains the right content
         assert (
-            response == f"Review based on work plan in issue #{issue_number}\n\nMock response text"
+            response == f"Review based on workplan in issue #{issue_number}\n\nMock response text"
         )
 
         # Check that the API was called with codebase included in prompt
@@ -854,7 +854,7 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
             mock_request_context.request_context.lifespan_context["repo_path"],
             mock_genai_client,
             "gemini-model",
-            work_plan,
+            workplan,
             diff,
             pr_url,
             None,
@@ -864,7 +864,7 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
         assert response == "Mock response text"
         mock_genai_client.aio.models.generate_content.assert_called_once()
         args, kwargs = mock_post_review.call_args
-        assert "Review for work plan" not in args[2]
+        assert "Review for workplan" not in args[2]
 
         # Reset mocks
         mock_genai_client.aio.models.generate_content.reset_mock()
@@ -875,7 +875,7 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
             mock_request_context.request_context.lifespan_context["repo_path"],
             mock_genai_client,
             "gemini-model",
-            work_plan,
+            workplan,
             diff,
             None,
             issue_number,

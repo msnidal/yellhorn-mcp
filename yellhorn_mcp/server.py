@@ -4,12 +4,12 @@ Yellhorn MCP server implementation.
 This module provides a Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro
 capabilities to Claude Code for software development tasks. It offers these primary tools:
 
-1. generate_work_plan: Creates GitHub issues with detailed implementation plans based on
-   your codebase and task description. The work plan is generated asynchronously and the
+1. generate_workplan: Creates GitHub issues with detailed implementation plans based on
+   your codebase and task description. The workplan is generated asynchronously and the
    issue is updated once it's ready. Creates a git worktree for isolated development.
 
-2. get_workplan: Retrieves the work plan content (GitHub issue body) associated with the
-   current Git worktree. Must be run from within a worktree created by 'generate_work_plan'.
+2. get_workplan: Retrieves the workplan content (GitHub issue body) associated with the
+   current Git worktree. Must be run from within a worktree created by 'generate_workplan'.
 
 3. submit_workplan: Submits the completed work from the current worktree by committing
    changes, pushing to GitHub, creating a PR, and triggering an asynchronous review.
@@ -443,7 +443,7 @@ async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: st
         raise YellhornMCPError(f"Failed to post GitHub PR review: {str(e)}")
 
 
-async def process_work_plan_async(
+async def process_workplan_async(
     repo_path: Path,
     client: genai.Client,
     model: str,
@@ -453,13 +453,13 @@ async def process_work_plan_async(
     detailed_description: str,
 ) -> None:
     """
-    Process work plan generation asynchronously and update the GitHub issue.
+    Process workplan generation asynchronously and update the GitHub issue.
 
     Args:
         repo_path: Path to the repository.
         client: Gemini API client.
         model: Gemini model name.
-        title: Title for the work plan.
+        title: Title for the workplan.
         issue_number: GitHub issue number to update.
         ctx: Server context.
         detailed_description: Detailed description for the workplan.
@@ -470,7 +470,7 @@ async def process_work_plan_async(
         codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct prompt
-        prompt = f"""You are an expert software developer tasked with creating a detailed work plan that will be published as a GitHub issue.
+        prompt = f"""You are an expert software developer tasked with creating a detailed workplan that will be published as a GitHub issue.
         
 {codebase_info}
 
@@ -482,43 +482,43 @@ async def process_work_plan_async(
 {detailed_description}
 </detailed_description>
 
-Please provide a highly detailed work plan for implementing this task, considering the existing codebase.
+Please provide a highly detailed workplan for implementing this task, considering the existing codebase.
 Include specific files to modify, new files to create, and detailed implementation steps.
-Respond directly with a clear, structured work plan with numbered steps, code snippets, and thorough explanations in Markdown. 
+Respond directly with a clear, structured workplan with numbered steps, code snippets, and thorough explanations in Markdown. 
 Your response will be published directly to a GitHub issue without modification, so please include:
 - Detailed headers and Markdown sections
 - Code blocks with appropriate language syntax highlighting
 - Checkboxes for action items that can be marked as completed
 - Any relevant diagrams or explanations
 
-The work plan should be comprehensive enough that a developer could implement it without additional context.
+The workplan should be comprehensive enough that a developer could implement it without additional context.
 """
         await ctx.log(
             level="info",
-            message=f"Generating work plan with Gemini API for title: {title} with model {model}",
+            message=f"Generating workplan with Gemini API for title: {title} with model {model}",
         )
         response = await client.aio.models.generate_content(model=model, contents=prompt)
-        work_plan_content = response.text
-        if not work_plan_content:
+        workplan_content = response.text
+        if not workplan_content:
             await update_github_issue(
                 repo_path,
                 issue_number,
-                "Failed to generate work plan: Received an empty response from Gemini API.",
+                "Failed to generate workplan: Received an empty response from Gemini API.",
             )
             return
 
         # Add the title as header to the final body
-        full_body = f"# {title}\n\n{work_plan_content}"
+        full_body = f"# {title}\n\n{workplan_content}"
 
-        # Update the GitHub issue with the generated work plan
+        # Update the GitHub issue with the generated workplan
         await update_github_issue(repo_path, issue_number, full_body)
         await ctx.log(
             level="info",
-            message=f"Successfully updated GitHub issue #{issue_number} with generated work plan",
+            message=f"Successfully updated GitHub issue #{issue_number} with generated workplan",
         )
 
     except Exception as e:
-        error_message = f"Failed to generate work plan: {str(e)}"
+        error_message = f"Failed to generate workplan: {str(e)}"
         await ctx.log(level="error", message=error_message)
         try:
             await update_github_issue(repo_path, issue_number, f"Error: {error_message}")
@@ -608,7 +608,7 @@ async def get_current_branch_and_issue(worktree_path: Path) -> tuple[str, str]:
         # Verify this is a git repository (either standard or worktree)
         if not is_git_repository(worktree_path):
             raise YellhornMCPError(
-                "Not in a git repository. Please run this command from within a worktree created by generate_work_plan."
+                "Not in a git repository. Please run this command from within a worktree created by generate_workplan."
             )
 
         # Get the current branch name
@@ -626,7 +626,7 @@ async def get_current_branch_and_issue(worktree_path: Path) -> tuple[str, str]:
     except YellhornMCPError as e:
         if "not a git repository" in str(e).lower():
             raise YellhornMCPError(
-                "Not in a git repository. Please run this command from within a worktree created by generate_work_plan."
+                "Not in a git repository. Please run this command from within a worktree created by generate_workplan."
             )
         raise
 
@@ -703,17 +703,17 @@ async def generate_branch_name(title: str, issue_number: str) -> str:
 
 
 @mcp.tool(
-    name="generate_work_plan",
-    description="Generate a detailed work plan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Also creates a git worktree for isolated development.",
+    name="generate_workplan",
+    description="Generate a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Also creates a git worktree for isolated development.",
 )
-async def generate_work_plan(
+async def generate_workplan(
     title: str,
     detailed_description: str,
     ctx: Context,
 ) -> str:
     """
-    Generate a work plan based on the provided title and detailed description.
-    Creates a GitHub issue and processes the work plan generation asynchronously.
+    Generate a workplan based on the provided title and detailed description.
+    Creates a GitHub issue and processes the workplan generation asynchronously.
     Also automatically creates a linked branch and git worktree for isolated development.
 
     Args:
@@ -725,7 +725,7 @@ async def generate_work_plan(
         JSON string containing the GitHub issue URL and worktree path.
 
     Raises:
-        YellhornMCPError: If there's an error generating the work plan.
+        YellhornMCPError: If there's an error generating the workplan.
     """
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
     client: genai.Client = ctx.request_context.lifespan_context["client"]
@@ -736,7 +736,7 @@ async def generate_work_plan(
         await ensure_label_exists(repo_path, "yellhorn-mcp", "Issues created by yellhorn-mcp")
 
         # Prepare initial body with the title and detailed description
-        initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed work plan, please wait...*"
+        initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan, please wait...*"
 
         # Create a GitHub issue with the yellhorn-mcp label
         issue_url = await run_github_command(
@@ -775,7 +775,7 @@ async def generate_work_plan(
                 message=f"Worktree created at '{worktree_path}' with branch '{branch_name}' for issue #{issue_number}",
             )
         except Exception as worktree_error:
-            # Log the error but continue with the work plan generation
+            # Log the error but continue with the workplan generation
             await ctx.log(
                 level="warning",
                 message=f"Failed to create worktree for issue #{issue_number}: {str(worktree_error)}",
@@ -785,7 +785,7 @@ async def generate_work_plan(
 
         # Start async processing
         asyncio.create_task(
-            process_work_plan_async(
+            process_workplan_async(
                 repo_path,
                 client,
                 model,
@@ -809,13 +809,13 @@ async def generate_work_plan(
 
 @mcp.tool(
     name="get_workplan",
-    description="Retrieves the work plan content (GitHub issue body) associated with the current Git worktree. Must be run from within a worktree created by 'generate_work_plan'.",
+    description="Retrieves the workplan content (GitHub issue body) associated with the current Git worktree. Must be run from within a worktree created by 'generate_workplan'.",
 )
 async def get_workplan(ctx: Context) -> str:
     """
-    Retrieve the work plan content (GitHub issue body) associated with the current Git worktree.
+    Retrieve the workplan content (GitHub issue body) associated with the current Git worktree.
 
-    This tool must be run from within a worktree directory created by the 'generate_work_plan' tool.
+    This tool must be run from within a worktree directory created by the 'generate_workplan' tool.
     It extracts the issue number from the current branch name and fetches the corresponding
     issue content from GitHub.
 
@@ -823,7 +823,7 @@ async def get_workplan(ctx: Context) -> str:
         ctx: Server context.
 
     Returns:
-        The content of the work plan issue as a string.
+        The content of the workplan issue as a string.
 
     Raises:
         YellhornMCPError: If not in a valid worktree or unable to fetch the issue content.
@@ -836,35 +836,35 @@ async def get_workplan(ctx: Context) -> str:
         _, issue_number = await get_current_branch_and_issue(worktree_path)
 
         # Fetch the issue content
-        work_plan = await get_github_issue_body(worktree_path, issue_number)
+        workplan = await get_github_issue_body(worktree_path, issue_number)
 
-        return work_plan
+        return workplan
 
     except Exception as e:
-        raise YellhornMCPError(f"Failed to retrieve work plan: {str(e)}")
+        raise YellhornMCPError(f"Failed to retrieve workplan: {str(e)}")
 
 
 async def process_review_async(
     repo_path: Path,
     client: genai.Client,
     model: str,
-    work_plan: str,
+    workplan: str,
     diff: str,
     pr_url: str | None,
-    work_plan_issue_number: str | None,
+    workplan_issue_number: str | None,
     ctx: Context,
 ) -> str:
     """
-    Process the review of a work plan and diff asynchronously, optionally posting to a GitHub PR.
+    Process the review of a workplan and diff asynchronously, optionally posting to a GitHub PR.
 
     Args:
         repo_path: Path to the repository.
         client: Gemini API client.
         model: Gemini model name.
-        work_plan: The original work plan.
+        workplan: The original workplan.
         diff: The code diff to review.
         pr_url: Optional URL to the GitHub PR where the review should be posted.
-        work_plan_issue_number: Optional GitHub issue number with the original work plan.
+        workplan_issue_number: Optional GitHub issue number with the original workplan.
         ctx: Server context.
 
     Returns:
@@ -876,19 +876,19 @@ async def process_review_async(
         codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct prompt
-        prompt = f"""You are an expert code reviewer evaluating if a code diff correctly implements a work plan.
+        prompt = f"""You are an expert code reviewer evaluating if a code diff correctly implements a workplan.
 
 {codebase_info}
 
-Original Work Plan:
-{work_plan}
+Original Workplan:
+{workplan}
 
 Code Diff:
 {diff}
 
-Please review if this code diff correctly implements the work plan and provide detailed feedback.
+Please review if this code diff correctly implements the workplan and provide detailed feedback.
 Consider:
-1. Whether all requirements in the work plan are addressed
+1. Whether all requirements in the workplan are addressed
 2. Code quality and potential issues
 3. Any missing components or improvements needed
 
@@ -908,9 +908,9 @@ Format your response as a clear, structured review with specific recommendations
             raise YellhornMCPError("Received an empty response from Gemini API.")
 
         # Add reference to the original issue if provided
-        if work_plan_issue_number:
+        if workplan_issue_number:
             review = (
-                f"Review based on work plan in issue #{work_plan_issue_number}\n\n{review_content}"
+                f"Review based on workplan in issue #{workplan_issue_number}\n\n{review_content}"
             )
         else:
             review = review_content
@@ -945,7 +945,7 @@ Format your response as a clear, structured review with specific recommendations
 
 @mcp.tool(
     name="submit_workplan",
-    description="Submits the work completed in the current Git worktree. Stages all changes, commits them (using provided message or a default), pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated work plan issue.",
+    description="Submits the work completed in the current Git worktree. Stages all changes, commits them (using provided message or a default), pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated workplan issue.",
 )
 async def submit_workplan(
     pr_title: str,
@@ -956,9 +956,9 @@ async def submit_workplan(
     """
     Submit the completed work from the current Git worktree.
 
-    This tool must be run from within a worktree directory created by the 'generate_work_plan' tool.
+    This tool must be run from within a worktree directory created by the 'generate_workplan' tool.
     It stages all changes, commits them, pushes the branch to GitHub, creates a Pull Request,
-    and triggers an asynchronous review of the changes against the original work plan.
+    and triggers an asynchronous review of the changes against the original workplan.
 
     Args:
         pr_title: Title for the GitHub Pull Request.
@@ -1036,8 +1036,8 @@ async def submit_workplan(
             ],
         )
 
-        # Fetch the work plan and diff for review
-        work_plan = await get_github_issue_body(worktree_path, issue_number)
+        # Fetch the workplan and diff for review
+        workplan = await get_github_issue_body(worktree_path, issue_number)
         diff = await get_github_pr_diff(worktree_path, pr_url)
 
         # Trigger the review asynchronously
@@ -1049,7 +1049,7 @@ async def submit_workplan(
                 worktree_path,
                 client,
                 model,
-                work_plan,
+                workplan,
                 diff,
                 pr_url,
                 issue_number,
@@ -1060,4 +1060,4 @@ async def submit_workplan(
         return pr_url
 
     except Exception as e:
-        raise YellhornMCPError(f"Failed to submit work plan: {str(e)}")
+        raise YellhornMCPError(f"Failed to submit workplan: {str(e)}")

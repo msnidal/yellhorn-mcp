@@ -6,9 +6,9 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities t
 
 ## Features
 
-- **Generate Work Plans**: Creates GitHub issues with detailed implementation plans based on your codebase, with customizable title and detailed description
+- **Generate workplans**: Creates GitHub issues with detailed implementation plans based on your codebase, with customizable title and detailed description
 - **Isolated Development Environments**: Automatically creates Git worktrees and linked branches for streamlined, isolated development workflow
-- **Review Code Diffs**: Evaluates pull requests against the original work plan with full codebase context and provides detailed feedback
+- **Review Code Diffs**: Evaluates pull requests against the original workplan with full codebase context and provides detailed feedback
 - **Seamless GitHub Integration**: Automatically creates labeled issues, posts reviews as PR comments with references to original issues, and handles asynchronous processing
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
 
@@ -59,7 +59,7 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
 1. Starting a project task:
 
    ```
-   Please generate a work plan with title "[Your Title]" and detailed description "[Your detailed requirements]"
+   Please generate a workplan with title "[Your Title]" and detailed description "[Your detailed requirements]"
    ```
 
 2. Navigate to the created worktree directory:
@@ -68,11 +68,11 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
    cd [worktree_path]  # The path is returned in the response
    ```
 
-3. View the work plan if needed:
+3. View the workplan if needed:
 
    ```
    # While in the worktree directory
-   Please get the current work plan for this worktree
+   Please get the current workplan for this worktree
    ```
 
 4. Make your changes and submit them:
@@ -84,9 +84,9 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
 
 ## Tools
 
-### generate_work_plan
+### generate_workplan
 
-Creates a GitHub issue with a detailed work plan based on the title and detailed description. Also creates a Git worktree with a linked branch for isolated development.
+Creates a GitHub issue with a detailed workplan based on the title and detailed description. Also creates a Git worktree with a linked branch for isolated development.
 
 **Input**:
 
@@ -101,9 +101,9 @@ Creates a GitHub issue with a detailed work plan based on the title and detailed
 
 ### get_workplan
 
-Retrieves the work plan content (GitHub issue body) associated with the current Git worktree.
+Retrieves the workplan content (GitHub issue body) associated with the current Git worktree.
 
-**Note**: Must be run from within a worktree created by 'generate_work_plan'.
+**Note**: Must be run from within a worktree created by 'generate_workplan'.
 
 **Input**:
 
@@ -111,13 +111,13 @@ Retrieves the work plan content (GitHub issue body) associated with the current 
 
 **Output**:
 
-- The content of the work plan issue as a string
+- The content of the workplan issue as a string
 
 ### submit_workplan
 
-Submits the completed work from the current Git worktree. Stages all changes, commits them, pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated work plan issue.
+Submits the completed work from the current Git worktree. Stages all changes, commits them, pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated workplan issue.
 
-**Note**: Must be run from within a worktree created by 'generate_work_plan'.
+**Note**: Must be run from within a worktree created by 'generate_workplan'.
 
 **Input**:
 
