@@ -12,15 +12,107 @@ from google import genai
 @pytest.mark.asyncio
 async def test_list_resources(mock_request_context):
     """Test listing workplan resources."""
-    # Skip the test until we can fix the Resource construction
-    pytest.skip("Skipping test until Resource construction is fixed")
+    with patch("yellhorn_mcp.server.run_github_command") as mock_gh, \
+         patch("yellhorn_mcp.server.Resource") as mock_resource_class:
+        # Mock the GitHub CLI to return JSON data with issues
+        mock_gh.return_value = '''[
+            {"number": 123, "title": "Test Issue 1", "url": "https://github.com/user/repo/issues/123"},
+            {"number": 456, "title": "Test Issue 2", "url": "https://github.com/user/repo/issues/456"}
+        ]'''
+        
+        # Configure mock_resource_class to return mock Resource objects
+        mock_resource1 = MagicMock()
+        mock_resource1.id = "123"
+        mock_resource1.type = "yellhorn_workplan"
+        mock_resource1.name = "Test Issue 1"
+        mock_resource1.metadata = {"url": "https://github.com/user/repo/issues/123"}
+        
+        mock_resource2 = MagicMock()
+        mock_resource2.id = "456"
+        mock_resource2.type = "yellhorn_workplan"
+        mock_resource2.name = "Test Issue 2"
+        mock_resource2.metadata = {"url": "https://github.com/user/repo/issues/456"}
+        
+        # Configure the Resource constructor to return our mock objects
+        mock_resource_class.side_effect = [mock_resource1, mock_resource2]
+        
+        # When no resource_type is provided or it matches "yellhorn_workplan"
+        resources = await list_resources(None, mock_request_context, None)
+        
+        # Verify the GitHub command was called correctly
+        mock_gh.assert_called_once_with(
+            mock_request_context.request_context.lifespan_context["repo_path"],
+            ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"]
+        )
+        
+        # Verify Resource constructor was called correctly
+        assert mock_resource_class.call_count == 2
+        mock_resource_class.assert_any_call(
+            id="123", 
+            type="yellhorn_workplan", 
+            name="Test Issue 1", 
+            metadata={"url": "https://github.com/user/repo/issues/123"}
+        )
+        mock_resource_class.assert_any_call(
+            id="456", 
+            type="yellhorn_workplan", 
+            name="Test Issue 2", 
+            metadata={"url": "https://github.com/user/repo/issues/456"}
+        )
+        
+        # Verify resources are returned correctly
+        assert len(resources) == 2
+        assert resources[0].id == "123"
+        assert resources[0].type == "yellhorn_workplan"
+        assert resources[0].name == "Test Issue 1"
+        assert resources[0].metadata == {"url": "https://github.com/user/repo/issues/123"}
+        
+        assert resources[1].id == "456"
+        assert resources[1].type == "yellhorn_workplan"
+        assert resources[1].name == "Test Issue 2"
+        assert resources[1].metadata == {"url": "https://github.com/user/repo/issues/456"}
+        
+        # Reset mocks for the next test
+        mock_gh.reset_mock()
+        mock_resource_class.reset_mock()
+        mock_resource_class.side_effect = [mock_resource1, mock_resource2]
+        
+        # Test with resource_type="yellhorn_workplan" - should return the resources
+        resources = await list_resources(None, mock_request_context, "yellhorn_workplan")
+        assert len(resources) == 2
+        
+        # Reset mock for the final test
+        mock_gh.reset_mock()
+        
+        # Test with different resource_type - should return empty list
+        resources = await list_resources(None, mock_request_context, "different_type")
+        assert len(resources) == 0
+        # GitHub command should not be called in this case
+        mock_gh.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_get_resource(mock_request_context):
     """Test getting a workplan resource."""
-    # Skip the test until we can fix the Resource method
-    pytest.skip("Skipping test until get_resource is fixed")
+    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+        # Mock the GitHub issue body retrieval
+        mock_get_issue.return_value = "# Test Workplan\n\n1. Step one\n2. Step two"
+        
+        # Call the get_resource method
+        resource_content = await get_resource(None, mock_request_context, "123", "yellhorn_workplan")
+        
+        # Verify the GitHub issue body was retrieved correctly
+        mock_get_issue.assert_called_once_with(
+            mock_request_context.request_context.lifespan_context["repo_path"],
+            "123"
+        )
+        
+        # Verify resource content is returned correctly
+        assert resource_content == "# Test Workplan\n\n1. Step one\n2. Step two"
+        
+    # Test with unsupported resource type
+    with pytest.raises(ValueError, match="Unsupported resource type"):
+        await get_resource(None, mock_request_context, "123", "unsupported_type")
 
 
 from mcp import Resource

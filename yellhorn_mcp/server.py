@@ -115,6 +115,7 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
         # Convert to Resource objects
         resources = []
         for issue in issues:
+            # Use explicit constructor arguments to ensure parameter order is correct
             resources.append(
                 Resource(
                     id=str(issue["number"]),
@@ -126,7 +127,8 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
 
         return resources
     except Exception as e:
-        await ctx.log(level="error", message=f"Failed to list resources: {str(e)}")
+        if ctx:  # Ensure ctx is not None before attempting to log
+            await ctx.log(level="error", message=f"Failed to list resources: {str(e)}")
         return []
 
 
