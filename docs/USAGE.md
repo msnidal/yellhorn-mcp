@@ -151,15 +151,29 @@ Please retrieve the workplan for this worktree.
 
 This will use the `get_workplan` tool to fetch the latest content of the GitHub issue associated with the current worktree.
 
-### 4. Make Changes and Submit
+### 4. Make Changes and Create a PR
 
-After making changes to implement the workplan:
+After making changes to implement the workplan, create a PR using your preferred method:
+
+```bash
+# Manual Git flow
+git add .
+git commit -m "Implement user authentication"
+git push origin HEAD
+
+# GitHub CLI
+gh pr create --title "Implement User Authentication" --body "This PR adds JWT authentication with bcrypt password hashing."
+```
+
+### 5. Request a Review
+
+Once your PR is created, you can request a review against the original workplan:
 
 ```
-Please commit my changes and create a PR with title "Implement User Authentication" and description "This PR adds JWT authentication with bcrypt password hashing."
+Please review the PR at "https://github.com/user/repo/pull/123" against the original workplan.
 ```
 
-This will use the `submit_workplan` tool to stage all changes, commit them, push the branch to GitHub, create a Pull Request, and trigger an asynchronous review against the original workplan. The tool returns the URL of the created PR.
+This will use the `review_workplan` tool to fetch the original workplan from the associated GitHub issue, retrieve the PR diff, and trigger an asynchronous review. The review will be posted as a comment on the PR when it's ready.
 
 ## MCP Tools
 
@@ -190,19 +204,54 @@ Retrieves the workplan content (GitHub issue body) associated with the current G
 
 - The content of the workplan issue as a string
 
-### submit_workplan
+### review_workplan
 
-Submits the completed work from the current Git worktree. Stages all changes, commits them, pushes the branch, creates a GitHub Pull Request, and triggers an asynchronous code review against the associated workplan issue. Must be run from within a worktree created by 'generate_workplan'.
+Triggers an asynchronous code review for the current Git worktree's associated Pull Request against its original workplan issue. Must be run from within a worktree created by 'generate_workplan'.
 
 **Input**:
 
-- `pr_title`: Title for the GitHub Pull Request
-- `pr_body`: Body content for the GitHub Pull Request
-- `commit_message`: Optional commit message (defaults to "WIP submission for issue #X")
+- `pr_url`: The URL of the GitHub Pull Request to review
 
 **Output**:
 
-- The URL of the created GitHub Pull Request
+- A confirmation message that the review task has been initiated
+
+## MCP Resources
+
+Yellhorn MCP implements the standard MCP resource API to provide easy access to workplans:
+
+### Resource Type: yellhorn_workplan
+
+Represents a GitHub issue created by the Yellhorn MCP server with a detailed implementation plan.
+
+**Resource Fields**:
+
+- `id`: The GitHub issue number
+- `type`: Always "yellhorn_workplan"
+- `name`: The title of the GitHub issue
+- `metadata`: Additional information about the issue, including its URL
+
+### Accessing Resources
+
+Use the standard MCP commands to list and access workplans:
+
+```bash
+# List all workplans
+mcp list-resources yellhorn-mcp
+
+# Get a specific workplan by issue number
+mcp get-resource yellhorn-mcp 123
+```
+
+Or programmatically with the MCP client API:
+
+```python
+# List workplans
+resources = await session.list_resources()
+
+# Get a workplan by ID
+workplan = await session.get_resource("123")
+```
 
 ## Integration with Other Programs
 
@@ -234,10 +283,10 @@ curl -X POST http://127.0.0.1:8000/tools/get_workplan \
   -H "Content-Type: application/json" \
   -d '{}'
 
-# Call a tool (submit_workplan) - Note: Must be run from a worktree directory
-curl -X POST http://127.0.0.1:8000/tools/submit_workplan \
+# Call a tool (review_workplan) - Note: Must be run from a worktree directory
+curl -X POST http://127.0.0.1:8000/tools/review_workplan \
   -H "Content-Type: application/json" \
-  -d '{"pr_title": "Implement User Authentication", "pr_body": "This PR adds JWT authentication", "commit_message": "Implementation complete"}'
+  -d '{"pr_url": "https://github.com/user/repo/pull/123"}'
 ```
 
 ### Example Client
@@ -254,8 +303,8 @@ python -m examples.client_example plan --title "User Authentication System" --de
 # Get workplan (run from worktree directory)
 python -m examples.client_example getplan
 
-# Submit work (run from worktree directory)
-python -m examples.client_example submit --pr-title "Implement User Authentication" --pr-body "This PR implements user authentication"
+# Review work (run from worktree directory)
+python -m examples.client_example review --pr-url "https://github.com/user/repo/pull/123"
 ```
 
 The example client uses the MCP client API to interact with the server through stdio transport, which is the same approach Claude Code uses.

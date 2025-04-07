@@ -72,45 +72,31 @@ async def get_workplan(session: ClientSession) -> str:
     return result
 
 
-async def submit_workplan(
+async def review_workplan(
     session: ClientSession,
-    pr_title: str,
-    pr_body: str,
-    commit_message: str | None = None,
+    pr_url: str,
 ) -> str:
     """
-    Submit completed work from the current git worktree.
+    Trigger a review of a PR against the original workplan.
 
-    This function calls the submit_workplan tool to stage changes, commit them,
-    push the branch, create a GitHub PR, and trigger an asynchronous review.
-    It must be run from within a worktree created by generate_workplan.
+    This function calls the review_workplan tool to fetch the original workplan,
+    the PR diff, and trigger an asynchronous review. It must be run from within
+    a worktree created by generate_workplan.
 
     Args:
         session: MCP client session.
-        pr_title: Title for the GitHub Pull Request.
-        pr_body: Body content for the GitHub Pull Request.
-        commit_message: Optional commit message (defaults to a standard message).
+        pr_url: URL of the GitHub Pull Request to review.
 
     Returns:
-        The URL of the created GitHub Pull Request.
+        A confirmation message that the review task has been initiated.
 
     Note:
         This function requires the current working directory to be a git worktree
         created by generate_workplan.
     """
-    # Set up the arguments
-    arguments = {
-        "pr_title": pr_title,
-        "pr_body": pr_body,
-    }
-
-    # Add commit_message if provided
-    if commit_message:
-        arguments["commit_message"] = commit_message
-
-    # Call the submit_workplan tool
-    pr_url = await session.call_tool("submit_workplan", arguments=arguments)
-    return pr_url
+    # Call the review_workplan tool
+    result = await session.call_tool("review_workplan", arguments={"pr_url": pr_url})
+    return result
 
 
 async def list_tools(session: ClientSession) -> None:
@@ -197,22 +183,14 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                     )
                     sys.exit(1)
 
-            elif command == "submit":
-                # Submit work
-                print(f"Submitting work with PR title: {args.pr_title}")
-                print(f"PR body: {args.pr_body}")
-                if args.commit_message:
-                    print(f"Commit message: {args.commit_message}")
+            elif command == "review":
+                # Review work
+                print(f"Triggering review for PR: {args.pr_url}")
 
                 try:
-                    pr_url = await submit_workplan(
-                        session,
-                        args.pr_title,
-                        args.pr_body,
-                        args.commit_message if hasattr(args, "commit_message") else None,
-                    )
-                    print("\nPull Request Created:")
-                    print(pr_url)
+                    result = await review_workplan(session, args.pr_url)
+                    print("\nReview Task:")
+                    print(result)
                     print(
                         "\nA review will be generated asynchronously and posted as a comment on the PR."
                     )
@@ -255,27 +233,15 @@ def main():
         help="Get the workplan from the current git worktree (must be run from a worktree)",
     )
 
-    # Submit work command
-    submit_parser = subparsers.add_parser(
-        "submit", help="Submit completed work from current worktree (commit, push, create PR)"
+    # Review work command
+    review_parser = subparsers.add_parser(
+        "review", help="Trigger a review of a PR against the original workplan"
     )
-    submit_parser.add_argument(
-        "--pr-title",
-        dest="pr_title",
+    review_parser.add_argument(
+        "--pr-url",
+        dest="pr_url",
         required=True,
-        help="Title for the GitHub Pull Request",
-    )
-    submit_parser.add_argument(
-        "--pr-body",
-        dest="pr_body",
-        required=True,
-        help="Body content for the GitHub Pull Request",
-    )
-    submit_parser.add_argument(
-        "--commit-message",
-        dest="commit_message",
-        required=False,
-        help="Optional commit message (defaults to standard message)",
+        help="URL of the GitHub Pull Request to review",
     )
 
     args = parser.parse_args()
