@@ -72,8 +72,13 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
 3. View the workplan if needed:
 
    ```
+   # Option 1: From the worktree directory (auto-detects issue number)
    # While in the worktree directory
    Please get the current workplan for this worktree
+   
+   # Option 2: From the main repository (requires explicit issue number)
+   # You don't need to be in the worktree directory
+   Please get the workplan for issue #123
    ```
 
 4. Make your changes, create a PR, and request a review:
@@ -113,13 +118,11 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 
 ### get_workplan
 
-Retrieves the workplan content (GitHub issue body) associated with the current Git worktree.
-
-**Note**: Must be run from within a worktree created by 'generate_workplan'.
+Retrieves the workplan content (GitHub issue body) associated with a workplan. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).
 
 **Input**:
 
-- No parameters required
+- `issue_number`: Optional issue number for the workplan. Required if run outside a Yellhorn worktree.
 
 **Output**:
 

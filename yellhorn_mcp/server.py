@@ -910,34 +910,79 @@ async def generate_workplan(
 
 @mcp.tool(
     name="get_workplan",
-    description="Retrieves the workplan content (GitHub issue body) associated with the current Git worktree. Must be run from within a worktree created by 'generate_workplan'.",
+    description="Retrieves the workplan content (GitHub issue body) associated with a workplan. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).",
 )
-async def get_workplan(ctx: Context) -> str:
+async def get_workplan(
+    ctx: Context,
+    issue_number: str | None = None,
+) -> str:
     """
-    Retrieve the workplan content (GitHub issue body) associated with the current Git worktree.
+    Retrieve the workplan content (GitHub issue body) associated with a workplan.
 
-    This tool must be run from within a worktree directory created by the 'generate_workplan' tool.
-    It extracts the issue number from the current branch name and fetches the corresponding
-    issue content from GitHub.
+    This tool can be run either from within a worktree directory created by the 'generate_workplan'
+    tool (where it automatically detects the issue number from the branch name) or from the main
+    repository (where the issue_number must be explicitly provided). It fetches the issue content
+    from GitHub.
 
     Args:
         ctx: Server context.
+        issue_number: Optional issue number for the workplan. Required if run outside
+                      a Yellhorn worktree.
 
     Returns:
         The content of the workplan issue as a string.
 
     Raises:
-        YellhornMCPError: If not in a valid worktree or unable to fetch the issue content.
+        YellhornMCPError: If not in a valid worktree and issue_number is not provided,
+                          or if unable to fetch the issue content.
     """
     try:
         # Get the current working directory
-        worktree_path = Path.cwd()
+        current_path = Path.cwd()
+        target_issue_number: str | None = None
 
-        # Get the current branch name and extract issue number
-        _, issue_number = await get_current_branch_and_issue(worktree_path)
+        # Attempt to determine the issue number from the branch name (worktree context)
+        try:
+            # This function implicitly checks if we are in a correctly named worktree branch
+            _, issue_from_branch = await get_current_branch_and_issue(current_path)
+            # If an issue number was explicitly provided, it takes precedence
+            if issue_number:
+                await ctx.log(
+                    level="warning",
+                    message=f"Explicit issue number {issue_number} provided, overriding issue {issue_from_branch} detected from branch.",
+                )
+                target_issue_number = issue_number
+            else:
+                target_issue_number = issue_from_branch
+            await ctx.log(
+                level="info",
+                message=f"Running in worktree context for issue #{target_issue_number}.",
+            )
+
+        except YellhornMCPError:
+            # We are likely not in a Yellhorn worktree (e.g., main repo)
+            await ctx.log(
+                level="info",
+                message="Not running in a Yellhorn worktree context. Explicit issue number required.",
+            )
+            if not issue_number:
+                raise YellhornMCPError(
+                    "Error: 'issue_number' parameter is required when running 'get_workplan' outside of a Yellhorn-managed worktree."
+                )
+            target_issue_number = issue_number
+            await ctx.log(
+                level="info",
+                message=f"Running in main repository context for specified issue #{target_issue_number}.",
+            )
+
+        # Ensure target_issue_number is set before proceeding
+        if not target_issue_number:
+            raise YellhornMCPError(
+                "Unable to determine target issue number. Please provide an explicit issue_number."
+            )
 
         # Fetch the issue content
-        workplan = await get_github_issue_body(worktree_path, issue_number)
+        workplan = await get_github_issue_body(current_path, target_issue_number)
 
         return workplan
 
