@@ -132,7 +132,6 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
         return []
 
 
-
 async def read_resource(
     self, ctx: Context, resource_id: str, resource_type: str | None = None
 ) -> str:
