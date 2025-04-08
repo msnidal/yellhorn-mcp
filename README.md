@@ -178,7 +178,7 @@ The project uses GitHub Actions for continuous integration and deployment:
   - Testing with pytest
 
 - **Publishing**: Automatically publishes to PyPI when a version tag is pushed
-  - Tag must match the version in pyproject.toml (e.g., v0.2.1)
+  - Tag must match the version in pyproject.toml (e.g., v0.2.2)
   - Requires a PyPI API token stored as a GitHub repository secret (PYPI_API_TOKEN)
 
 To release a new version:
