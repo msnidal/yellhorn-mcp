@@ -29,6 +29,7 @@ from typing import Any
 from google import genai
 from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
+from pydantic import FileUrl
 
 
 class YellhornMCPError(Exception):
@@ -118,10 +119,9 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
             # Use explicit constructor arguments to ensure parameter order is correct
             resources.append(
                 Resource(
-                    id=str(issue["number"]),
-                    type="yellhorn_workplan",
-                    name=issue["title"],
-                    metadata={"url": issue["url"]},
+                    uri=FileUrl(f"file://workplans/{str(issue['number'])}.md"),
+                    name=f"Workplan #{issue['number']}: {issue['title']}",
+                    mimeType="text/markdown",
                 )
             )
 
@@ -132,7 +132,8 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
         return []
 
 
-async def get_resource(
+
+async def read_resource(
     self, ctx: Context, resource_id: str, resource_type: str | None = None
 ) -> str:
     """
@@ -161,7 +162,7 @@ async def get_resource(
 
 # Register resource methods
 mcp.list_resources = list_resources.__get__(mcp)
-mcp.get_resource = get_resource.__get__(mcp)
+mcp.read_resource = read_resource.__get__(mcp)
 
 
 async def run_git_command(repo_path: Path, command: list[str]) -> str:

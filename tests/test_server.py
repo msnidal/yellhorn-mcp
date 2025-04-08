@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from google import genai
+from pydantic import FileUrl
 
 
 @pytest.mark.asyncio
@@ -24,16 +25,14 @@ async def test_list_resources(mock_request_context):
 
         # Configure mock_resource_class to return mock Resource objects
         mock_resource1 = MagicMock()
-        mock_resource1.id = "123"
-        mock_resource1.type = "yellhorn_workplan"
-        mock_resource1.name = "Test Issue 1"
-        mock_resource1.metadata = {"url": "https://github.com/user/repo/issues/123"}
+        mock_resource1.uri = FileUrl(f"file://workplans/123.md")
+        mock_resource1.name = "Workplan #123: Test Issue 1"
+        mock_resource1.mimeType = "text/markdown"
 
         mock_resource2 = MagicMock()
-        mock_resource2.id = "456"
-        mock_resource2.type = "yellhorn_workplan"
-        mock_resource2.name = "Test Issue 2"
-        mock_resource2.metadata = {"url": "https://github.com/user/repo/issues/456"}
+        mock_resource2.uri = FileUrl(f"file://workplans/456.md")
+        mock_resource2.name = "Workplan #456: Test Issue 2"
+        mock_resource2.mimeType = "text/markdown"
 
         # Configure the Resource constructor to return our mock objects
         mock_resource_class.side_effect = [mock_resource1, mock_resource2]
@@ -50,29 +49,25 @@ async def test_list_resources(mock_request_context):
         # Verify Resource constructor was called correctly
         assert mock_resource_class.call_count == 2
         mock_resource_class.assert_any_call(
-            id="123",
-            type="yellhorn_workplan",
-            name="Test Issue 1",
-            metadata={"url": "https://github.com/user/repo/issues/123"},
+            uri=FileUrl(f"file://workplans/123.md"),
+            name="Workplan #123: Test Issue 1",
+            mimeType="text/markdown",
         )
         mock_resource_class.assert_any_call(
-            id="456",
-            type="yellhorn_workplan",
-            name="Test Issue 2",
-            metadata={"url": "https://github.com/user/repo/issues/456"},
+            uri=FileUrl(f"file://workplans/456.md"),
+            name="Workplan #456: Test Issue 2",
+            mimeType="text/markdown",
         )
 
         # Verify resources are returned correctly
         assert len(resources) == 2
-        assert resources[0].id == "123"
-        assert resources[0].type == "yellhorn_workplan"
-        assert resources[0].name == "Test Issue 1"
-        assert resources[0].metadata == {"url": "https://github.com/user/repo/issues/123"}
+        assert resources[0].uri == FileUrl(f"file://workplans/123.md")
+        assert resources[0].name == "Workplan #123: Test Issue 1"
+        assert resources[0].mimeType == "text/markdown"
 
-        assert resources[1].id == "456"
-        assert resources[1].type == "yellhorn_workplan"
-        assert resources[1].name == "Test Issue 2"
-        assert resources[1].metadata == {"url": "https://github.com/user/repo/issues/456"}
+        assert resources[1].uri == FileUrl(f"file://workplans/456.md")
+        assert resources[1].name == "Workplan #456: Test Issue 2"
+        assert resources[1].mimeType == "text/markdown"
 
         # Reset mocks for the next test
         mock_gh.reset_mock()
@@ -101,7 +96,7 @@ async def test_get_resource(mock_request_context):
         mock_get_issue.return_value = "# Test Workplan\n\n1. Step one\n2. Step two"
 
         # Call the get_resource method
-        resource_content = await get_resource(
+        resource_content = await read_resource(
             None, mock_request_context, "123", "yellhorn_workplan"
         )
 
@@ -115,7 +110,7 @@ async def test_get_resource(mock_request_context):
 
     # Test with unsupported resource type
     with pytest.raises(ValueError, match="Unsupported resource type"):
-        await get_resource(None, mock_request_context, "123", "unsupported_type")
+        await read_resource(None, mock_request_context, "123", "unsupported_type")
 
 
 from mcp import Resource
@@ -133,13 +128,13 @@ from yellhorn_mcp.server import (
     get_default_branch,
     get_github_issue_body,
     get_github_pr_diff,
-    get_resource,
     get_workplan,
     is_git_repository,
     list_resources,
     post_github_pr_review,
     process_review_async,
     process_workplan_async,
+    read_resource,
     review_workplan,
     run_git_command,
     run_github_command,
