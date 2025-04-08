@@ -75,27 +75,37 @@ async def get_workplan(session: ClientSession) -> str:
 async def review_workplan(
     session: ClientSession,
     pr_url: str,
+    issue_number: str | None = None,
 ) -> str:
     """
     Trigger a review of a PR against the original workplan.
 
     This function calls the review_workplan tool to fetch the original workplan,
-    the PR diff, and trigger an asynchronous review. It must be run from within
-    a worktree created by generate_workplan.
+    the PR diff, and trigger an asynchronous review. It can be run from within
+    a worktree created by generate_workplan (auto-detects issue) or from the main
+    repository (requires explicit issue_number).
 
     Args:
         session: MCP client session.
         pr_url: URL of the GitHub Pull Request to review.
+        issue_number: Optional issue number for the workplan. Required if run outside
+                      a Yellhorn worktree.
 
     Returns:
         A confirmation message that the review task has been initiated.
 
     Note:
-        This function requires the current working directory to be a git worktree
-        created by generate_workplan.
+        When run from the main repository, issue_number must be provided.
+        When run from a Yellhorn worktree, issue_number is optional and will
+        default to the issue number detected from the branch name.
     """
+    # Prepare arguments, including optional issue_number
+    arguments = {"pr_url": pr_url}
+    if issue_number:
+        arguments["issue_number"] = issue_number
+
     # Call the review_workplan tool
-    result = await session.call_tool("review_workplan", arguments={"pr_url": pr_url})
+    result = await session.call_tool("review_workplan", arguments=arguments)
     return result
 
 
@@ -186,9 +196,12 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
             elif command == "review":
                 # Review work
                 print(f"Triggering review for PR: {args.pr_url}")
+                if args.issue_number:
+                    print(f"Explicitly targeting workplan issue: {args.issue_number}")
 
                 try:
-                    result = await review_workplan(session, args.pr_url)
+                    # Prepare arguments, including optional issue_number
+                    result = await review_workplan(session, args.pr_url, args.issue_number)
                     print("\nReview Task:")
                     print(result)
                     print(
@@ -197,7 +210,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 except Exception as e:
                     print(f"Error: {str(e)}")
                     print(
-                        "Make sure you are running this command from within a worktree created by generate_workplan."
+                        "Ensure you are running this command from the correct directory (worktree or main repo) and provide --issue-number if required."
                     )
                     sys.exit(1)
 
@@ -242,6 +255,13 @@ def main():
         dest="pr_url",
         required=True,
         help="URL of the GitHub Pull Request to review",
+    )
+    review_parser.add_argument(
+        "--issue-number",
+        dest="issue_number",
+        required=False,
+        default=None,
+        help="GitHub issue number for the workplan (required if not in a worktree)",
     )
 
     args = parser.parse_args()
