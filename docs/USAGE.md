@@ -145,11 +145,21 @@ Switch to the worktree directory that was created by `generate_workplan`.
 
 ### 3. View the workplan (if needed)
 
+You have two options to view a workplan:
+
+**Option 1: From the worktree directory** (auto-detects the issue number)
 ```
+# Run this from within the worktree directory
 Please retrieve the workplan for this worktree.
 ```
 
-This will use the `get_workplan` tool to fetch the latest content of the GitHub issue associated with the current worktree.
+**Option 2: From the main repository** (requires explicit issue number)
+```
+# You can run this from anywhere, including the main repository
+Please retrieve the workplan for issue #123.
+```
+
+This will use the `get_workplan` tool to fetch the latest content of the GitHub issue.
 
 ### 4. Make Changes and Create a PR
 
@@ -167,10 +177,18 @@ gh pr create --title "Implement User Authentication" --body "This PR adds JWT au
 
 ### 5. Request a Review
 
-Once your PR is created, you can request a review against the original workplan:
+Once your PR is created, you can request a review against the original workplan. You have two options:
 
+**Option 1: From the worktree directory** (auto-detects the issue number)
 ```
+# Run this from within the worktree directory
 Please review the PR at "https://github.com/user/repo/pull/123" against the original workplan.
+```
+
+**Option 2: From the main repository** (requires explicit issue number)
+```
+# You can run this from anywhere, including the main repository
+Please review the PR at "https://github.com/user/repo/pull/123" against the workplan in issue #456.
 ```
 
 This will use the `review_workplan` tool to fetch the original workplan from the associated GitHub issue, retrieve the PR diff, and trigger an asynchronous review. The review will be posted as a comment on the PR when it's ready.
@@ -194,11 +212,11 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 
 ### get_workplan
 
-Retrieves the workplan content (GitHub issue body) associated with the current Git worktree. Must be run from within a worktree created by 'generate_workplan'.
+Retrieves the workplan content (GitHub issue body) associated with a workplan. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).
 
 **Input**:
 
-- No parameters required
+- `issue_number`: Optional issue number for the workplan. Required if run outside a Yellhorn worktree.
 
 **Output**:
 
@@ -206,11 +224,12 @@ Retrieves the workplan content (GitHub issue body) associated with the current G
 
 ### review_workplan
 
-Triggers an asynchronous code review for the current Git worktree's associated Pull Request against its original workplan issue. Must be run from within a worktree created by 'generate_workplan'.
+Triggers an asynchronous code review for a Pull Request against its original workplan issue. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).
 
 **Input**:
 
 - `pr_url`: The URL of the GitHub Pull Request to review
+- `issue_number`: Optional issue number for the workplan. Required if run outside a Yellhorn worktree.
 
 **Output**:
 
@@ -278,15 +297,25 @@ curl -X POST http://127.0.0.1:8000/tools/generate_workplan \
   -H "Content-Type: application/json" \
   -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"}'
 
-# Call a tool (get_workplan) - Note: Must be run from a worktree directory
+# Call a tool (get_workplan) from a worktree directory
 curl -X POST http://127.0.0.1:8000/tools/get_workplan \
   -H "Content-Type: application/json" \
   -d '{}'
 
-# Call a tool (review_workplan) - Note: Must be run from a worktree directory
+# Call a tool (get_workplan) from the main repository (requires issue_number)
+curl -X POST http://127.0.0.1:8000/tools/get_workplan \
+  -H "Content-Type: application/json" \
+  -d '{"issue_number": "123"}'
+
+# Call a tool (review_workplan) from a worktree directory
 curl -X POST http://127.0.0.1:8000/tools/review_workplan \
   -H "Content-Type: application/json" \
   -d '{"pr_url": "https://github.com/user/repo/pull/123"}'
+
+# Call a tool (review_workplan) from the main repository (requires issue_number)
+curl -X POST http://127.0.0.1:8000/tools/review_workplan \
+  -H "Content-Type: application/json" \
+  -d '{"pr_url": "https://github.com/user/repo/pull/123", "issue_number": "456"}'
 ```
 
 ### Example Client
@@ -300,11 +329,17 @@ python -m examples.client_example list
 # Generate a workplan
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"
 
-# Get workplan (run from worktree directory)
+# Get workplan (from worktree directory)
 python -m examples.client_example getplan
 
-# Review work (run from worktree directory)
+# Get workplan (from main repository - requires issue number)
+python -m examples.client_example getplan --issue-number "123"
+
+# Review work (from worktree directory)
 python -m examples.client_example review --pr-url "https://github.com/user/repo/pull/123"
+
+# Review work (from main repository - requires issue number)
+python -m examples.client_example review --pr-url "https://github.com/user/repo/pull/123" --issue-number "456"
 ```
 
 The example client uses the MCP client API to interact with the server through stdio transport, which is the same approach Claude Code uses.
