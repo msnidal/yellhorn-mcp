@@ -750,10 +750,25 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         mock_genai_client.aio.models.generate_content.assert_called_once()
         args, kwargs = mock_genai_client.aio.models.generate_content.call_args
         assert kwargs.get("model") == "gemini-model"
-        assert "<title>" in kwargs.get("contents", "")
-        assert "Feature Implementation Plan" in kwargs.get("contents", "")
-        assert "<detailed_description>" in kwargs.get("contents", "")
-        assert "Create a new feature to support X" in kwargs.get("contents", "")
+
+        # Check basic prompt content
+        prompt_content = kwargs.get("contents", "")
+        assert "<title>" in prompt_content
+        assert "Feature Implementation Plan" in prompt_content
+        assert "<detailed_description>" in prompt_content
+        assert "Create a new feature to support X" in prompt_content
+
+        # Check for sub-LLM guidance content
+        assert "## Instructions for Workplan Structure" in prompt_content
+        assert 'ALWAYS start your workplan with a "## Summary" section' in prompt_content
+        assert "guide a sub-LLM that needs to understand the workplan" in prompt_content
+        assert "## Implementation Steps" in prompt_content
+        assert "## Technical Details" in prompt_content
+        assert "## Files to Modify" in prompt_content
+        assert (
+            "without additional context, and structured in a way that makes it easy for an LLM"
+            in prompt_content
+        )
 
         # Check that the issue was updated with the workplan including the title
         mock_update.assert_called_once()

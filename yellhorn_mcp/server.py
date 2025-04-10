@@ -576,11 +576,26 @@ Your response will be published directly to a GitHub issue without modification,
 - Checkboxes for action items that can be marked as completed
 - Any relevant diagrams or explanations
 
-At the beginning of your workplan, include a section titled "## Summary" with a brief overview of
-the implementation approach. Keep the summary concise (3-5 sentences) so that an LLM can quickly
-understand what the workplan is about without parsing the entire detailed implementation plan.
+## Instructions for Workplan Structure
 
-The workplan should be comprehensive enough that a developer or AI assistant could implement it without additional context.
+1. ALWAYS start your workplan with a "## Summary" section that provides a concise overview of the implementation approach (3-5 sentences max). This summary should:
+   - State what will be implemented
+   - Outline the general approach
+   - Mention key files/components affected
+   - Be focused enough to guide a sub-LLM that needs to understand the workplan without parsing the entire document
+
+2. After the summary, include these clearly demarcated sections:
+   - "## Implementation Steps" - A numbered or bulleted list of specific tasks
+   - "## Technical Details" - Explanations of key design decisions and important considerations
+   - "## Files to Modify" - List of existing files that will need changes, with brief descriptions
+   - "## New Files to Create" - If applicable, list new files with their purpose
+
+3. For each implementation step or file modification, include:
+   - The specific code changes using formatted code blocks with syntax highlighting
+   - Explanations of WHY each change is needed, not just WHAT to change
+   - Detailed context that would help a less-experienced developer or LLM understand the change
+
+The workplan should be comprehensive enough that a developer or AI assistant could implement it without additional context, and structured in a way that makes it easy for an LLM to quickly understand and work with the contained information.
 """
         await ctx.log(
             level="info",
