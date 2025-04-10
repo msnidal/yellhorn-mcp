@@ -6,13 +6,16 @@ capabilities to Claude Code for software development tasks. It offers these prim
 
 1. generate_workplan: Creates GitHub issues with detailed implementation plans based on
    your codebase and task description. The workplan is generated asynchronously and the
-   issue is updated once it's ready. Creates a git worktree for isolated development.
+   issue is updated once it's ready.
 
-2. get_workplan: Retrieves the workplan content (GitHub issue body) associated with the
-   current Git worktree. Must be run from within a worktree created by 'generate_workplan'.
+2. create_worktree: Creates a git worktree with a linked branch for isolated development
+   from an existing workplan issue.
 
-3. submit_workplan: Submits the completed work from the current worktree by committing
-   changes, pushing to GitHub, creating a PR, and triggering an asynchronous review.
+3. get_workplan: Retrieves the workplan content (GitHub issue body) associated with the
+   current Git worktree or specified issue number.
+
+4. review_workplan: Triggers an asynchronous code review for a Pull Request against its
+   original workplan issue.
 
 The server requires GitHub CLI to be installed and authenticated for GitHub operations.
 """
@@ -573,7 +576,26 @@ Your response will be published directly to a GitHub issue without modification,
 - Checkboxes for action items that can be marked as completed
 - Any relevant diagrams or explanations
 
-The workplan should be comprehensive enough that a developer could implement it without additional context.
+## Instructions for Workplan Structure
+
+1. ALWAYS start your workplan with a "## Summary" section that provides a concise overview of the implementation approach (3-5 sentences max). This summary should:
+   - State what will be implemented
+   - Outline the general approach
+   - Mention key files/components affected
+   - Be focused enough to guide a sub-LLM that needs to understand the workplan without parsing the entire document
+
+2. After the summary, include these clearly demarcated sections:
+   - "## Implementation Steps" - A numbered or bulleted list of specific tasks
+   - "## Technical Details" - Explanations of key design decisions and important considerations
+   - "## Files to Modify" - List of existing files that will need changes, with brief descriptions
+   - "## New Files to Create" - If applicable, list new files with their purpose
+
+3. For each implementation step or file modification, include:
+   - The specific code changes using formatted code blocks with syntax highlighting
+   - Explanations of WHY each change is needed, not just WHAT to change
+   - Detailed context that would help a less-experienced developer or LLM understand the change
+
+The workplan should be comprehensive enough that a developer or AI assistant could implement it without additional context, and structured in a way that makes it easy for an LLM to quickly understand and work with the contained information.
 """
         await ctx.log(
             level="info",
@@ -805,7 +827,7 @@ async def generate_branch_name(title: str, issue_number: str) -> str:
 
 @mcp.tool(
     name="generate_workplan",
-    description="Generate a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Also creates a git worktree for isolated development.",
+    description="Generate a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'.",
 )
 async def generate_workplan(
     title: str,
@@ -815,7 +837,6 @@ async def generate_workplan(
     """
     Generate a workplan based on the provided title and detailed description.
     Creates a GitHub issue and processes the workplan generation asynchronously.
-    Also automatically creates a linked branch and git worktree for isolated development.
 
     Args:
         title: Title for the GitHub issue (will be used as issue title and header).
@@ -823,7 +844,7 @@ async def generate_workplan(
         ctx: Server context with repository path and Gemini model.
 
     Returns:
-        JSON string containing the GitHub issue URL and worktree path.
+        JSON string containing the GitHub issue URL.
 
     Raises:
         YellhornMCPError: If there's an error generating the workplan.
@@ -861,29 +882,6 @@ async def generate_workplan(
         )
         issue_number = issue_url.split("/")[-1]
 
-        # Generate a branch name for the issue
-        branch_name = await generate_branch_name(title, issue_number)
-
-        # Create a git worktree with the branch
-        try:
-            await ctx.log(
-                level="info",
-                message=f"Creating worktree with branch '{branch_name}' for issue #{issue_number}",
-            )
-            worktree_path = await create_git_worktree(repo_path, branch_name, issue_number)
-            await ctx.log(
-                level="info",
-                message=f"Worktree created at '{worktree_path}' with branch '{branch_name}' for issue #{issue_number}",
-            )
-        except Exception as worktree_error:
-            # Log the error but continue with the workplan generation
-            await ctx.log(
-                level="warning",
-                message=f"Failed to create worktree for issue #{issue_number}: {str(worktree_error)}",
-            )
-            # Return only the issue URL in case of failure
-            worktree_path = None
-
         # Start async processing
         asyncio.create_task(
             process_workplan_async(
@@ -897,15 +895,85 @@ async def generate_workplan(
             )
         )
 
-        # Return both the issue URL and worktree path as JSON
+        # Return the issue URL as JSON
         result = {
             "issue_url": issue_url,
-            "worktree_path": str(worktree_path) if worktree_path else None,
+            "issue_number": issue_number,
         }
         return json.dumps(result)
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to create GitHub issue: {str(e)}")
+
+
+@mcp.tool(
+    name="create_worktree",
+    description="Creates a git worktree with a linked branch for isolated development from a workplan issue.",
+)
+async def create_worktree(
+    issue_number: str,
+    ctx: Context,
+) -> str:
+    """
+    Create a git worktree with a linked branch for isolated development from a workplan issue.
+
+    Args:
+        issue_number: The GitHub issue number for the workplan.
+        ctx: Server context with repository path.
+
+    Returns:
+        JSON string containing the worktree path and branch name.
+
+    Raises:
+        YellhornMCPError: If there's an error creating the worktree.
+    """
+    repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+
+    try:
+        # Fetch the issue details
+        try:
+            issue_data = await run_github_command(
+                repo_path, ["issue", "view", issue_number, "--json", "title,url"]
+            )
+            import json
+
+            issue_json = json.loads(issue_data)
+            issue_title = issue_json.get("title", "")
+            issue_url = issue_json.get("url", "")
+        except Exception as e:
+            raise YellhornMCPError(
+                f"Failed to fetch issue details for issue #{issue_number}: {str(e)}"
+            )
+
+        # Generate a branch name for the issue
+        branch_name = await generate_branch_name(issue_title, issue_number)
+
+        # Create a git worktree with the branch
+        try:
+            await ctx.log(
+                level="info",
+                message=f"Creating worktree with branch '{branch_name}' for issue #{issue_number}",
+            )
+            worktree_path = await create_git_worktree(repo_path, branch_name, issue_number)
+            await ctx.log(
+                level="info",
+                message=f"Worktree created at '{worktree_path}' with branch '{branch_name}' for issue #{issue_number}",
+            )
+        except Exception as e:
+            raise YellhornMCPError(f"Failed to create worktree for issue #{issue_number}: {str(e)}")
+
+        # Return the worktree path and branch name as JSON
+        result = {
+            "worktree_path": str(worktree_path),
+            "branch_name": branch_name,
+            "issue_url": issue_url,
+        }
+        return json.dumps(result)
+
+    except Exception as e:
+        if isinstance(e, YellhornMCPError):
+            raise
+        raise YellhornMCPError(f"Failed to create worktree: {str(e)}")
 
 
 @mcp.tool(

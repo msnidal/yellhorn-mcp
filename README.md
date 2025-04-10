@@ -6,8 +6,8 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities t
 
 ## Features
 
-- **Generate workplans**: Creates GitHub issues with detailed implementation plans based on your codebase, with customizable title and detailed description
-- **Isolated Development Environments**: Automatically creates Git worktrees and linked branches for streamlined, isolated development workflow
+- **Generate workplans**: Creates GitHub issues with detailed implementation plans based on your codebase, with customizable title and detailed description 
+- **Isolated Development Environments**: Creates Git worktrees and linked branches for streamlined, isolated development workflow (can be done separately from workplan generation)
 - **Review Code Diffs**: Evaluates pull requests against the original workplan with full codebase context and provides detailed feedback
 - **Seamless GitHub Integration**: Automatically creates labeled issues with proper branch linking in the GitHub UI, posts reviews as PR comments with references to original issues, and handles asynchronous processing
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
@@ -63,13 +63,19 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
    Please generate a workplan with title "[Your Title]" and detailed description "[Your detailed requirements]"
    ```
 
-2. Navigate to the created worktree directory:
+2. Create a worktree for the workplan (optional):
+
+   ```
+   Please create a worktree for issue #123
+   ```
+
+3. Navigate to the created worktree directory:
 
    ```
    cd [worktree_path]  # The path is returned in the response
    ```
 
-3. View the workplan if needed:
+4. View the workplan if needed:
 
    ```
    # Option 1: From the worktree directory (auto-detects issue number)
@@ -81,7 +87,7 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
    Please get the workplan for issue #123
    ```
 
-4. Make your changes, create a PR, and request a review:
+5. Make your changes, create a PR, and request a review:
 
    ```
    # First create a PR using your preferred method (Git CLI, GitHub CLI, or web UI)
@@ -103,7 +109,7 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
 
 ### generate_workplan
 
-Creates a GitHub issue with a detailed workplan based on the title and detailed description. Also creates a Git worktree with a linked branch for isolated development.
+Creates a GitHub issue with a detailed workplan based on the title and detailed description.
 
 **Input**:
 
@@ -114,7 +120,22 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 
 - JSON string containing:
   - `issue_url`: URL to the created GitHub issue
+  - `issue_number`: The GitHub issue number
+
+### create_worktree
+
+Creates a git worktree with a linked branch for isolated development from an existing workplan issue.
+
+**Input**:
+
+- `issue_number`: The GitHub issue number for the workplan
+
+**Output**:
+
+- JSON string containing:
   - `worktree_path`: Path to the created Git worktree directory
+  - `branch_name`: Name of the branch created for the worktree
+  - `issue_url`: URL to the associated GitHub issue
 
 ### get_workplan
 
