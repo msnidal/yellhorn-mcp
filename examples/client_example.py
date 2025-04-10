@@ -5,9 +5,10 @@ This module demonstrates how to interact with the Yellhorn MCP server programmat
 similar to how Claude Code would call the MCP tools. It provides command-line interfaces for:
 
 1. Listing available tools
-2. Generating workplans (creates GitHub issues and git worktrees)
-3. Getting workplans from a worktree
-4. Submitting completed work (creates GitHub PRs)
+2. Generating workplans (creates GitHub issues)
+3. Creating worktrees for existing workplans
+4. Getting workplans from a worktree
+5. Reviewing completed work (adds reviews to PRs)
 
 This client uses the MCP client API to interact with the server through stdio transport,
 which is the same approach Claude Code uses.
@@ -26,7 +27,7 @@ from mcp.client.stdio import stdio_client
 async def generate_workplan(session: ClientSession, title: str, detailed_description: str) -> dict:
     """
     Generate a workplan using the Yellhorn MCP server.
-    Creates a GitHub issue and git worktree, and returns both URLs.
+    Creates a GitHub issue with a detailed implementation plan.
 
     Args:
         session: MCP client session.
@@ -34,12 +35,38 @@ async def generate_workplan(session: ClientSession, title: str, detailed_descrip
         detailed_description: Detailed description for the workplan.
 
     Returns:
-        Dictionary containing the GitHub issue URL and worktree path.
+        Dictionary containing the GitHub issue URL and issue number.
     """
     # Call the generate_workplan tool
     result = await session.call_tool(
         "generate_workplan",
         arguments={"title": title, "detailed_description": detailed_description},
+    )
+
+    # Parse the JSON response
+    import json
+
+    return json.loads(result)
+
+
+async def create_worktree(
+    session: ClientSession,
+    issue_number: str,
+) -> dict:
+    """
+    Create a git worktree with a linked branch for the specified workplan issue.
+
+    Args:
+        session: MCP client session.
+        issue_number: The GitHub issue number for the workplan.
+
+    Returns:
+        Dictionary containing the worktree path and branch name.
+    """
+    # Call the create_worktree tool
+    result = await session.call_tool(
+        "create_worktree",
+        arguments={"issue_number": issue_number},
     )
 
     # Parse the JSON response
@@ -174,18 +201,32 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
 
                 print("\nGitHub Issue Created:")
                 print(result["issue_url"])
-
-                print("\nGit Worktree Created:")
-                print(
-                    result["worktree_path"]
-                    if result["worktree_path"]
-                    else "Worktree creation failed"
-                )
+                print(f"Issue Number: {result['issue_number']}")
 
                 print(
                     "\nThe workplan is being generated asynchronously and will be updated in the GitHub issue."
                 )
-                print("Navigate to the worktree directory to work on implementing the plan.")
+                print("To create a worktree for this issue, run:")
+                print(f"python -m examples.client_example worktree --issue-number {result['issue_number']}")
+            
+            elif command == "worktree":
+                # Create worktree for existing issue
+                print(f"Creating worktree for issue #{args.issue_number}...")
+                
+                try:
+                    result = await create_worktree(session, args.issue_number)
+                    
+                    print("\nGit Worktree Created:")
+                    print(f"Path: {result['worktree_path']}")
+                    print(f"Branch: {result['branch_name']}")
+                    print(f"For issue: {result['issue_url']}")
+                    
+                    print("\nNavigate to the worktree directory to work on implementing the plan:")
+                    print(f"cd {result['worktree_path']}")
+                except Exception as e:
+                    print(f"Error: {str(e)}")
+                    print("Make sure the issue number exists and is a yellhorn-mcp workplan issue.")
+                    sys.exit(1)
 
             elif command == "getplan":
                 # Get workplan
@@ -239,7 +280,7 @@ def main():
 
     # Generate workplan command
     plan_parser = subparsers.add_parser(
-        "plan", help="Generate a workplan with GitHub issue and git worktree"
+        "plan", help="Generate a workplan with GitHub issue (no worktree)"
     )
     plan_parser.add_argument(
         "--title",
@@ -252,6 +293,17 @@ def main():
         dest="description",
         required=True,
         help="Detailed description for the workplan",
+    )
+    
+    # Create worktree command
+    worktree_parser = subparsers.add_parser(
+        "worktree", help="Create a git worktree for an existing workplan issue"
+    )
+    worktree_parser.add_argument(
+        "--issue-number",
+        dest="issue_number",
+        required=True,
+        help="GitHub issue number for the workplan",
     )
 
     # Get workplan command
@@ -292,7 +344,7 @@ def main():
         sys.exit(1)
 
     # Ensure GEMINI_API_KEY is set for commands that require it
-    if not os.environ.get("GEMINI_API_KEY") and args.command in ["plan", "getplan", "submit"]:
+    if not os.environ.get("GEMINI_API_KEY") and args.command in ["plan", "worktree", "getplan", "review"]:
         print("Error: GEMINI_API_KEY environment variable is not set")
         print("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
         sys.exit(1)

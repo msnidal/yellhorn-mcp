@@ -119,6 +119,7 @@ from mcp.server.fastmcp import Context
 from yellhorn_mcp.server import (
     YellhornMCPError,
     create_git_worktree,
+    create_worktree,
     ensure_label_exists,
     format_codebase_for_prompt,
     generate_branch_name,
@@ -484,6 +485,50 @@ async def test_create_git_worktree():
 
 
 @pytest.mark.asyncio
+async def test_create_worktree(mock_request_context):
+    """Test creating a worktree from an issue number."""
+    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+        # Mock the issue view command
+        mock_gh.side_effect = [
+            '{"title": "Feature Implementation Plan", "url": "https://github.com/user/repo/issues/123"}',
+            # Second call result will be used for GitHub issue develop
+        ]
+
+        with patch("yellhorn_mcp.server.generate_branch_name") as mock_generate_branch:
+            mock_generate_branch.return_value = "issue-123-feature-implementation-plan"
+
+            with patch("yellhorn_mcp.server.create_git_worktree") as mock_create_worktree:
+                mock_create_worktree.return_value = Path("/mock/repo-worktree-123")
+
+                # Test with required issue_number
+                response = await create_worktree(
+                    issue_number="123",
+                    ctx=mock_request_context,
+                )
+
+                # Parse response as JSON and check contents
+                import json
+
+                result = json.loads(response)
+                assert result["worktree_path"] == "/mock/repo-worktree-123"
+                assert result["branch_name"] == "issue-123-feature-implementation-plan"
+                assert result["issue_url"] == "https://github.com/user/repo/issues/123"
+
+                # Check that the issue details were fetched
+                mock_gh.assert_any_call(
+                    Path("/mock/repo"), ["issue", "view", "123", "--json", "title,url"]
+                )
+
+                # Check branch name generation with the correct title
+                mock_generate_branch.assert_called_once_with("Feature Implementation Plan", "123")
+
+                # Check worktree creation with the correct parameters
+                mock_create_worktree.assert_called_once_with(
+                    Path("/mock/repo"), "issue-123-feature-implementation-plan", "123"
+                )
+
+
+@pytest.mark.asyncio
 async def test_generate_workplan(mock_request_context, mock_genai_client):
     """Test generating a workplan."""
     # Set the mock client in the context
@@ -493,62 +538,46 @@ async def test_generate_workplan(mock_request_context, mock_genai_client):
         with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
             mock_gh.return_value = "https://github.com/user/repo/issues/123"
 
-            with patch("yellhorn_mcp.server.generate_branch_name") as mock_generate_branch:
-                mock_generate_branch.return_value = "issue-123-feature-implementation-plan"
+            with patch("asyncio.create_task") as mock_create_task:
+                # Test with required title and detailed description
+                response = await generate_workplan(
+                    title="Feature Implementation Plan",
+                    detailed_description="Create a new feature to support X",
+                    ctx=mock_request_context,
+                )
 
-                with patch("yellhorn_mcp.server.create_git_worktree") as mock_create_worktree:
-                    mock_create_worktree.return_value = Path("/mock/repo-worktree-123")
+                # Parse response as JSON and check contents
+                import json
 
-                    with patch("asyncio.create_task") as mock_create_task:
-                        # Test with required title and detailed description
-                        response = await generate_workplan(
-                            title="Feature Implementation Plan",
-                            detailed_description="Create a new feature to support X",
-                            ctx=mock_request_context,
-                        )
+                result = json.loads(response)
+                assert result["issue_url"] == "https://github.com/user/repo/issues/123"
+                assert result["issue_number"] == "123"
 
-                        # Parse response as JSON and check contents
-                        import json
+                mock_ensure_label.assert_called_once_with(
+                    Path("/mock/repo"), "yellhorn-mcp", "Issues created by yellhorn-mcp"
+                )
+                mock_gh.assert_called_once()
+                mock_create_task.assert_called_once()
 
-                        result = json.loads(response)
-                        assert result["issue_url"] == "https://github.com/user/repo/issues/123"
-                        assert result["worktree_path"] == "/mock/repo-worktree-123"
+                # Check that the GitHub issue is created with the provided title and yellhorn-mcp label
+                issue_call_args = mock_gh.call_args[0]
+                assert "issue" in issue_call_args[1]
+                assert "create" in issue_call_args[1]
+                assert "Feature Implementation Plan" in issue_call_args[1]
+                assert "--label" in issue_call_args[1]
+                assert "yellhorn-mcp" in issue_call_args[1]
 
-                        mock_ensure_label.assert_called_once_with(
-                            Path("/mock/repo"), "yellhorn-mcp", "Issues created by yellhorn-mcp"
-                        )
-                        mock_gh.assert_called_once()
-                        mock_create_task.assert_called_once()
+                # Get the body argument which is '--body' followed by the content
+                body_index = issue_call_args[1].index("--body") + 1
+                body_content = issue_call_args[1][body_index]
+                assert "# Feature Implementation Plan" in body_content
+                assert "## Description" in body_content
+                assert "Create a new feature to support X" in body_content
 
-                        # Check that the GitHub issue is created with the provided title and yellhorn-mcp label
-                        issue_call_args = mock_gh.call_args[0]
-                        assert "issue" in issue_call_args[1]
-                        assert "create" in issue_call_args[1]
-                        assert "Feature Implementation Plan" in issue_call_args[1]
-                        assert "--label" in issue_call_args[1]
-                        assert "yellhorn-mcp" in issue_call_args[1]
-
-                        # Get the body argument which is '--body' followed by the content
-                        body_index = issue_call_args[1].index("--body") + 1
-                        body_content = issue_call_args[1][body_index]
-                        assert "# Feature Implementation Plan" in body_content
-                        assert "## Description" in body_content
-                        assert "Create a new feature to support X" in body_content
-
-                        # Check branch name generation
-                        mock_generate_branch.assert_called_once_with(
-                            "Feature Implementation Plan", "123"
-                        )
-
-                        # Check worktree creation
-                        mock_create_worktree.assert_called_once_with(
-                            Path("/mock/repo"), "issue-123-feature-implementation-plan", "123"
-                        )
-
-                        # Check that the process_workplan_async task is created with the correct parameters
-                        args, kwargs = mock_create_task.call_args
-                        coroutine = args[0]
-                        assert coroutine.__name__ == "process_workplan_async"
+                # Check that the process_workplan_async task is created with the correct parameters
+                args, kwargs = mock_create_task.call_args
+                coroutine = args[0]
+                assert coroutine.__name__ == "process_workplan_async"
 
 
 @pytest.mark.asyncio

@@ -4,9 +4,10 @@
 
 Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro API for software development tasks. It provides these main tools:
 
-1. **Generate workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description. Creates a git worktree for isolated development.
-2. **Get workplan**: Retrieves the workplan content from a worktree's associated GitHub issue.
-3. **Submit workplan**: Commits changes, pushes to GitHub, creates a PR, and triggers an asynchronous review against the original workplan.
+1. **Generate workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
+2. **Create worktree**: Creates a git worktree with a linked branch for isolated development from an existing workplan issue.
+3. **Get workplan**: Retrieves the workplan content from a worktree's associated GitHub issue.
+4. **Review workplan**: Triggers an asynchronous code review for a Pull Request against its original workplan issue.
 
 ## Installation
 
@@ -133,17 +134,25 @@ Once the server is running, Claude Code can utilize the tools it exposes. Here's
 Please generate a workplan for implementing a user authentication system in my application.
 ```
 
-This will use the `generate_workplan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. It also creates a Git worktree for isolated development. The tool will return both the issue URL and worktree path. The issue will initially show a placeholder message and will be updated asynchronously once the plan is generated.
+This will use the `generate_workplan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. The tool will return the issue URL and number. The issue will initially show a placeholder message and will be updated asynchronously once the plan is generated.
 
-### 2. Navigate to the Worktree
+### 2. Creating a worktree (optional)
+
+```
+Please create a worktree for issue #123.
+```
+
+This will use the `create_worktree` tool to create a Git worktree with a linked branch for isolated development. The tool will return the worktree path, branch name, and issue URL.
+
+### 3. Navigate to the Worktree
 
 ```
 cd /path/to/worktree
 ```
 
-Switch to the worktree directory that was created by `generate_workplan`.
+Switch to the worktree directory that was created by `create_worktree`.
 
-### 3. View the workplan (if needed)
+### 4. View the workplan (if needed)
 
 You have two options to view a workplan:
 
@@ -161,7 +170,7 @@ Please retrieve the workplan for issue #123.
 
 This will use the `get_workplan` tool to fetch the latest content of the GitHub issue.
 
-### 4. Make Changes and Create a PR
+### 5. Make Changes and Create a PR
 
 After making changes to implement the workplan, create a PR using your preferred method:
 
@@ -175,7 +184,7 @@ git push origin HEAD
 gh pr create --title "Implement User Authentication" --body "This PR adds JWT authentication with bcrypt password hashing."
 ```
 
-### 5. Request a Review
+### 6. Request a Review
 
 Once your PR is created, you can request a review against the original workplan. You have two options:
 
@@ -197,7 +206,7 @@ This will use the `review_workplan` tool to fetch the original workplan from the
 
 ### generate_workplan
 
-Creates a GitHub issue with a detailed workplan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously, with the issue being updated once it's ready. Also creates a Git worktree with a linked branch for isolated development.
+Creates a GitHub issue with a detailed workplan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously, with the issue being updated once it's ready.
 
 **Input**:
 
@@ -208,7 +217,22 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 
 - JSON string containing:
   - `issue_url`: URL to the created GitHub issue
+  - `issue_number`: The GitHub issue number
+
+### create_worktree
+
+Creates a git worktree with a linked branch for isolated development from an existing workplan issue.
+
+**Input**:
+
+- `issue_number`: The GitHub issue number for the workplan
+
+**Output**:
+
+- JSON string containing:
   - `worktree_path`: Path to the created Git worktree directory
+  - `branch_name`: Name of the branch created for the worktree
+  - `issue_url`: URL to the associated GitHub issue
 
 ### get_workplan
 
@@ -297,6 +321,11 @@ curl -X POST http://127.0.0.1:8000/tools/generate_workplan \
   -H "Content-Type: application/json" \
   -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"}'
 
+# Call a tool (create_worktree)
+curl -X POST http://127.0.0.1:8000/tools/create_worktree \
+  -H "Content-Type: application/json" \
+  -d '{"issue_number": "123"}'
+
 # Call a tool (get_workplan) from a worktree directory
 curl -X POST http://127.0.0.1:8000/tools/get_workplan \
   -H "Content-Type: application/json" \
@@ -328,6 +357,9 @@ python -m examples.client_example list
 
 # Generate a workplan
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"
+
+# Create a worktree for an existing workplan issue
+python -m examples.client_example worktree --issue-number "123"
 
 # Get workplan (from worktree directory)
 python -m examples.client_example getplan
