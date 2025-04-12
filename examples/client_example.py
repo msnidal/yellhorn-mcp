@@ -111,20 +111,22 @@ async def get_workplan(
 
 async def review_workplan(
     session: ClientSession,
-    pr_url: str,
+    base_ref: str = "main",
+    head_ref: str = "HEAD",
     issue_number: str | None = None,
 ) -> str:
     """
-    Trigger a review of a PR against the original workplan.
+    Trigger a review comparing two git refs against the original workplan.
 
     This function calls the review_workplan tool to fetch the original workplan,
-    the PR diff, and trigger an asynchronous review. It can be run from within
-    a worktree created by generate_workplan (auto-detects issue) or from the main
-    repository (requires explicit issue_number).
+    generate a diff between the git refs, and trigger an asynchronous review.
+    It can be run from within a worktree created by generate_workplan (auto-detects issue) 
+    or from the main repository (requires explicit issue_number).
 
     Args:
         session: MCP client session.
-        pr_url: URL of the GitHub Pull Request to review.
+        base_ref: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
+        head_ref: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
         issue_number: Optional issue number for the workplan. Required if run outside
                       a Yellhorn worktree.
 
@@ -137,7 +139,7 @@ async def review_workplan(
         default to the issue number detected from the branch name.
     """
     # Prepare arguments, including optional issue_number
-    arguments = {"pr_url": pr_url}
+    arguments = {"base_ref": base_ref, "head_ref": head_ref}
     if issue_number:
         arguments["issue_number"] = issue_number
 
@@ -250,17 +252,22 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
 
             elif command == "review":
                 # Review work
-                print(f"Triggering review for PR: {args.pr_url}")
+                print(f"Triggering review comparing {args.base_ref}..{args.head_ref}")
                 if args.issue_number:
                     print(f"Explicitly targeting workplan issue: {args.issue_number}")
 
                 try:
                     # Prepare arguments, including optional issue_number
-                    result = await review_workplan(session, args.pr_url, args.issue_number)
+                    result = await review_workplan(
+                        session, 
+                        args.base_ref, 
+                        args.head_ref, 
+                        args.issue_number
+                    )
                     print("\nReview Task:")
                     print(result)
                     print(
-                        "\nA review will be generated asynchronously and posted as a comment on the PR."
+                        "\nA review will be generated asynchronously and posted as a GitHub sub-issue."
                     )
                 except Exception as e:
                     print(f"Error: {str(e)}")
@@ -321,13 +328,21 @@ def main():
 
     # Review work command
     review_parser = subparsers.add_parser(
-        "review", help="Trigger a review of a PR against the original workplan"
+        "review", help="Trigger a review comparing two git refs against the workplan"
     )
     review_parser.add_argument(
-        "--pr-url",
-        dest="pr_url",
-        required=True,
-        help="URL of the GitHub Pull Request to review",
+        "--base-ref",
+        dest="base_ref",
+        required=False,
+        default="main",
+        help="Base Git ref (commit SHA, branch name, tag) for comparison (default: 'main')",
+    )
+    review_parser.add_argument(
+        "--head-ref",
+        dest="head_ref",
+        required=False,
+        default="HEAD",
+        help="Head Git ref (commit SHA, branch name, tag) for comparison (default: 'HEAD')",
     )
     review_parser.add_argument(
         "--issue-number",

@@ -89,44 +89,65 @@ mcp = FastMCP(
 
 async def list_resources(self, ctx: Context, resource_type: str | None = None) -> list[Resource]:
     """
-    List workplan resources (GitHub issues created by this tool).
+    List resources (GitHub issues created by this tool).
 
     Args:
         ctx: Server context.
         resource_type: Optional resource type to filter by.
 
     Returns:
-        List of resources (GitHub issues with yellhorn-mcp label).
+        List of resources (GitHub issues with yellhorn-mcp or yellhorn-review-subissue label).
     """
-    # We only have one resource type, so we can ignore resource_type if it's
-    # None or matches our type
-    if resource_type is not None and resource_type != "yellhorn_workplan":
-        return []
-
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+    resources = []
 
     try:
-        # Get all issues with the yellhorn-mcp label
-        json_output = await run_github_command(
-            repo_path, ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"]
-        )
-
-        # Parse the JSON output
-        import json
-
-        issues = json.loads(json_output)
-
-        # Convert to Resource objects
-        resources = []
-        for issue in issues:
-            # Use explicit constructor arguments to ensure parameter order is correct
-            resources.append(
-                Resource(
-                    uri=FileUrl(f"file://workplans/{str(issue['number'])}.md"),
-                    name=f"Workplan #{issue['number']}: {issue['title']}",
-                    mimeType="text/markdown",
-                )
+        # Handle workplan resources
+        if resource_type is None or resource_type == "yellhorn_workplan":
+            # Get all issues with the yellhorn-mcp label
+            json_output = await run_github_command(
+                repo_path, ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"]
             )
+
+            # Parse the JSON output
+            import json
+
+            issues = json.loads(json_output)
+
+            # Convert to Resource objects
+            for issue in issues:
+                # Use explicit constructor arguments to ensure parameter order is correct
+                resources.append(
+                    Resource(
+                        uri=FileUrl(f"file://workplans/{str(issue['number'])}.md"),
+                        name=f"Workplan #{issue['number']}: {issue['title']}",
+                        mimeType="text/markdown",
+                    )
+                )
+
+        # Handle review sub-issue resources
+        if resource_type is None or resource_type == "yellhorn_review_subissue":
+            # Get all issues with the yellhorn-review-subissue label
+            json_output = await run_github_command(
+                repo_path, 
+                ["issue", "list", "--label", "yellhorn-review-subissue", "--json", "number,title,url"]
+            )
+
+            # Parse the JSON output
+            import json
+
+            issues = json.loads(json_output)
+
+            # Convert to Resource objects
+            for issue in issues:
+                # Use explicit constructor arguments to ensure parameter order is correct
+                resources.append(
+                    Resource(
+                        uri=FileUrl(f"file://reviews/{str(issue['number'])}.md"),
+                        name=f"Review #{issue['number']}: {issue['title']}",
+                        mimeType="text/markdown",
+                    )
+                )
 
         return resources
     except Exception as e:
@@ -139,7 +160,7 @@ async def read_resource(
     self, ctx: Context, resource_id: str, resource_type: str | None = None
 ) -> str:
     """
-    Get the content of a workplan resource (GitHub issue).
+    Get the content of a resource (GitHub issue).
 
     Args:
         ctx: Server context.
@@ -147,10 +168,10 @@ async def read_resource(
         resource_type: Optional resource type.
 
     Returns:
-        The content of the workplan issue as a string.
+        The content of the GitHub issue as a string.
     """
     # Verify resource type if provided
-    if resource_type is not None and resource_type != "yellhorn_workplan":
+    if resource_type is not None and resource_type not in ["yellhorn_workplan", "yellhorn_review_subissue"]:
         raise ValueError(f"Unsupported resource type: {resource_type}")
 
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
@@ -465,6 +486,29 @@ async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
         raise YellhornMCPError(f"Failed to fetch GitHub issue/PR content: {str(e)}")
 
 
+async def get_git_diff(repo_path: Path, base_ref: str, head_ref: str) -> str:
+    """
+    Get the diff content between two git references.
+
+    Args:
+        repo_path: Path to the repository.
+        base_ref: Base Git ref (commit SHA, branch name, tag) for comparison.
+        head_ref: Head Git ref (commit SHA, branch name, tag) for comparison.
+
+    Returns:
+        The diff content between the two references.
+
+    Raises:
+        YellhornMCPError: If there's an error generating the diff.
+    """
+    try:
+        # Generate the diff between the specified references
+        result = await run_git_command(repo_path, ["diff", f"{base_ref}..{head_ref}"])
+        return result
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to generate git diff: {str(e)}")
+
+
 async def get_github_pr_diff(repo_path: Path, pr_url: str) -> str:
     """
     Get the diff content of a GitHub PR.
@@ -488,6 +532,58 @@ async def get_github_pr_diff(repo_path: Path, pr_url: str) -> str:
         return result
     except Exception as e:
         raise YellhornMCPError(f"Failed to fetch GitHub PR diff: {str(e)}")
+
+
+async def create_github_subissue(
+    repo_path: Path, parent_issue_number: str, title: str, body: str, labels: list[str]
+) -> str:
+    """
+    Create a GitHub sub-issue with reference to the parent issue.
+
+    Args:
+        repo_path: Path to the repository.
+        parent_issue_number: The parent issue number to reference.
+        title: The title for the sub-issue.
+        body: The body content for the sub-issue.
+        labels: List of labels to apply to the sub-issue.
+
+    Returns:
+        The URL of the created sub-issue.
+
+    Raises:
+        YellhornMCPError: If there's an error creating the sub-issue.
+    """
+    try:
+        # Ensure the yellhorn-review-subissue label exists
+        await ensure_label_exists(
+            repo_path, "yellhorn-review-subissue", "Review sub-issues created by yellhorn-mcp"
+        )
+
+        # Add the parent issue reference to the body
+        body_with_reference = f"Parent Workplan: #{parent_issue_number}\n\n{body}"
+
+        # Create a temporary file to hold the issue body
+        temp_file = repo_path / f"subissue_{parent_issue_number}_review.md"
+        with open(temp_file, "w", encoding="utf-8") as f:
+            f.write(body_with_reference)
+
+        try:
+            # Create the issue with all specified labels plus the review subissue label
+            all_labels = list(labels) + ["yellhorn-review-subissue"]
+            labels_arg = ",".join(all_labels)
+
+            # Create the issue using GitHub CLI
+            result = await run_github_command(
+                repo_path,
+                ["issue", "create", "--title", title, "--body-file", str(temp_file), "--label", labels_arg],
+            )
+            return result  # Returns the issue URL
+        finally:
+            # Clean up the temp file
+            if temp_file.exists():
+                temp_file.unlink()
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to create GitHub sub-issue: {str(e)}")
 
 
 async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: str) -> str:
@@ -596,6 +692,8 @@ Your response will be published directly to a GitHub issue without modification,
    - Detailed context that would help a less-experienced developer or LLM understand the change
 
 The workplan should be comprehensive enough that a developer or AI assistant could implement it without additional context, and structured in a way that makes it easy for an LLM to quickly understand and work with the contained information.
+
+IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
         await ctx.log(
             level="info",
@@ -1064,12 +1162,13 @@ async def process_review_async(
     model: str,
     workplan: str,
     diff: str,
-    pr_url: str | None,
+    base_ref: str,
+    head_ref: str,
     workplan_issue_number: str | None,
     ctx: Context,
 ) -> str:
     """
-    Process the review of a workplan and diff asynchronously, optionally posting to a GitHub PR.
+    Process the review of a workplan and diff asynchronously, creating a GitHub sub-issue.
 
     Args:
         repo_path: Path to the repository.
@@ -1077,36 +1176,61 @@ async def process_review_async(
         model: Gemini model name.
         workplan: The original workplan.
         diff: The code diff to review.
-        pr_url: Optional URL to the GitHub PR where the review should be posted.
+        base_ref: Base Git ref (commit SHA, branch name, tag) for comparison.
+        head_ref: Head Git ref (commit SHA, branch name, tag) for comparison.
         workplan_issue_number: Optional GitHub issue number with the original workplan.
         ctx: Server context.
 
     Returns:
-        The review content.
+        The review content and URL of the created sub-issue.
     """
     try:
         # Get codebase snapshot for better context
         file_paths, file_contents = await get_codebase_snapshot(repo_path)
         codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
-        # Construct prompt
+        # Construct a more structured prompt
         prompt = f"""You are an expert code reviewer evaluating if a code diff correctly implements a workplan.
 
 {codebase_info}
 
-Original Workplan:
+<Original Workplan>
 {workplan}
+</Original Workplan>
 
-Code Diff:
+<Code Diff>
 {diff}
+</Code Diff>
+
+<Comparison Data>
+Base ref: {base_ref}
+Head ref: {head_ref}
+</Comparison Data>
 
 Please review if this code diff correctly implements the workplan and provide detailed feedback.
-Consider:
-1. Whether all requirements in the workplan are addressed
-2. Code quality and potential issues
-3. Any missing components or improvements needed
+The diff represents changes between '{base_ref}' and '{head_ref}'.
 
-Format your response as a clear, structured review with specific recommendations.
+Structure your response with these clear sections:
+
+## Review Summary
+Provide a concise overview of the implementation status.
+
+## Completed Items
+List which parts of the workplan have been successfully implemented in the diff.
+
+## Missing Items
+List which requirements from the workplan are not addressed in the diff.
+
+## Incorrect Implementation
+Identify any parts of the diff that implement workplan items incorrectly.
+
+## Suggested Improvements / Issues
+Note any code quality issues, potential bugs, or suggest alternative approaches.
+
+## Intentional Divergence Notes
+If the implementation intentionally deviates from the workplan for good reasons, explain those reasons.
+
+IMPORTANT: Respond *only* with the Markdown content for the review. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Review Summary' heading.
 """
         await ctx.log(
             level="info",
@@ -1121,63 +1245,61 @@ Format your response as a clear, structured review with specific recommendations
         if not review_content:
             raise YellhornMCPError("Received an empty response from Gemini API.")
 
-        # Add reference to the original issue if provided
         if workplan_issue_number:
-            review = (
-                f"Review based on workplan in issue #{workplan_issue_number}\n\n{review_content}"
-            )
-        else:
-            review = review_content
-
-        # Post to GitHub PR if URL provided
-        if pr_url:
+            # Create a title for the sub-issue
+            review_title = f"Review: {base_ref}..{head_ref} for Workplan #{workplan_issue_number}"
+            
+            # Add metadata to the review content
+            metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`\n- Head ref: `{head_ref}`\n- Workplan: #{workplan_issue_number}\n\n"
+            review_with_metadata = metadata + review_content
+            
+            # Create a sub-issue
             await ctx.log(
                 level="info",
-                message=f"Posting review to GitHub PR: {pr_url}",
+                message=f"Creating GitHub sub-issue for review of workplan #{workplan_issue_number}",
             )
-            await post_github_pr_review(repo_path, pr_url, review)
-
-        return review
+            subissue_url = await create_github_subissue(
+                repo_path, 
+                workplan_issue_number, 
+                review_title, 
+                review_with_metadata, 
+                ["yellhorn-mcp"]
+            )
+            
+            # Return both the review content and the sub-issue URL
+            return f"Review sub-issue created: {subissue_url}\n\n{review_content}"
+        else:
+            return review_content
 
     except Exception as e:
         error_message = f"Failed to generate review: {str(e)}"
         await ctx.log(level="error", message=error_message)
-
-        if pr_url:
-            # If there was an error but we have a PR URL, try to post the error message
-            try:
-                error_content = f"Error generating review: {str(e)}"
-                await post_github_pr_review(repo_path, pr_url, error_content)
-            except Exception as post_error:
-                await ctx.log(
-                    level="error",
-                    message=f"Failed to post error to PR: {str(post_error)}",
-                )
-
         raise YellhornMCPError(error_message)
 
 
 @mcp.tool(
     name="review_workplan",
-    description="Triggers an asynchronous code review for a Pull Request against its original workplan issue. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).",
+    description="Triggers an asynchronous code review comparing two git refs (branches or commits) against a workplan. Creates a GitHub sub-issue with the review. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).",
 )
 async def review_workplan(
-    pr_url: str,
     ctx: Context,
+    base_ref: str = "main",
+    head_ref: str = "HEAD",
     issue_number: str | None = None,
 ) -> str:
     """
-    Trigger an asynchronous code review for a Pull Request against its original workplan.
+    Trigger an asynchronous code review comparing two git refs against a workplan.
 
     This tool can be run either from within a worktree directory created by the 'generate_workplan'
     tool (where it automatically detects the issue number from the branch name) or from the main
     repository (where the issue_number must be explicitly provided). It fetches the original
-    workplan from the associated GitHub issue, retrieves the PR diff, and initiates an
-    asynchronous AI review process.
+    workplan from the associated GitHub issue, generates a diff between the specified git refs,
+    and initiates an asynchronous AI review process that creates a GitHub sub-issue with the review.
 
     Args:
-        pr_url: The URL of the GitHub Pull Request to review.
         ctx: Server context.
+        base_ref: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
+        head_ref: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
         issue_number: Optional issue number for the workplan. Required if run outside
                       a Yellhorn worktree.
 
@@ -1233,9 +1355,13 @@ async def review_workplan(
                 "Unable to determine target issue number. Please provide an explicit issue_number."
             )
 
-        # Fetch the workplan and diff for review
+        # Fetch the workplan and generate diff for review
         workplan = await get_github_issue_body(current_path, target_issue_number)
-        diff = await get_github_pr_diff(current_path, pr_url)
+        diff = await get_git_diff(current_path, base_ref, head_ref)
+
+        # Check if diff is empty
+        if not diff.strip():
+            return f"No differences found between {base_ref} and {head_ref}. Nothing to review."
 
         # Trigger the review asynchronously
         client = ctx.request_context.lifespan_context["client"]
@@ -1248,14 +1374,16 @@ async def review_workplan(
                 model,
                 workplan,
                 diff,
-                pr_url,
+                base_ref,
+                head_ref,
                 target_issue_number,
                 ctx,
             )
         )
 
         return (
-            f"Review task initiated for PR {pr_url} against workplan issue #{target_issue_number}."
+            f"Review task initiated comparing {base_ref}..{head_ref} against workplan issue #{target_issue_number}. "
+            f"Results will be posted as a GitHub sub-issue linked to the workplan."
         )
 
     except Exception as e:
