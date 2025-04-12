@@ -24,9 +24,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-async def generate_workplan(session: ClientSession, title: str, detailed_description: str) -> dict:
+async def create_workplan(session: ClientSession, title: str, detailed_description: str) -> dict:
     """
-    Generate a workplan using the Yellhorn MCP server.
+    Create a workplan using the Yellhorn MCP server.
     Creates a GitHub issue with a detailed implementation plan.
 
     Args:
@@ -37,9 +37,9 @@ async def generate_workplan(session: ClientSession, title: str, detailed_descrip
     Returns:
         Dictionary containing the GitHub issue URL and issue number.
     """
-    # Call the generate_workplan tool
+    # Call the create_workplan tool
     result = await session.call_tool(
-        "generate_workplan",
+        "create_workplan",
         arguments={"title": title, "detailed_description": detailed_description},
     )
 
@@ -173,10 +173,10 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 await list_tools(session)
 
             elif command == "plan":
-                # Generate workplan
-                print(f"Generating workplan with title: {args.title}")
+                # Create workplan
+                print(f"Creating workplan with title: {args.title}")
                 print(f"Detailed description: {args.description}")
-                result = await generate_workplan(session, args.title, args.description)
+                result = await create_workplan(session, args.title, args.description)
 
                 print("\nGitHub Issue Created:")
                 print(result["issue_url"])
@@ -250,9 +250,9 @@ def main():
     # List tools command
     list_parser = subparsers.add_parser("list", help="List available tools")
 
-    # Generate workplan command
+    # Create workplan command
     plan_parser = subparsers.add_parser(
-        "plan", help="Generate a workplan with GitHub issue (no worktree)"
+        "plan", help="Create a workplan with GitHub issue (no worktree)"
     )
     plan_parser.add_argument(
         "--title",

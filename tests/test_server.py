@@ -186,10 +186,10 @@ from yellhorn_mcp.server import (
     create_git_worktree,
     create_github_subissue,
     create_worktree,
+    create_workplan,
     ensure_label_exists,
     format_codebase_for_prompt,
     generate_branch_name,
-    generate_workplan,
     get_codebase_snapshot,
     get_current_branch_and_issue,
     get_default_branch,
@@ -596,8 +596,8 @@ async def test_create_worktree(mock_request_context):
 
 
 @pytest.mark.asyncio
-async def test_generate_workplan(mock_request_context, mock_genai_client):
-    """Test generating a workplan."""
+async def test_create_workplan(mock_request_context, mock_genai_client):
+    """Test creating a workplan."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
@@ -607,7 +607,7 @@ async def test_generate_workplan(mock_request_context, mock_genai_client):
 
             with patch("asyncio.create_task") as mock_create_task:
                 # Test with required title and detailed description
-                response = await generate_workplan(
+                response = await create_workplan(
                     title="Feature Implementation Plan",
                     detailed_description="Create a new feature to support X",
                     ctx=mock_request_context,
@@ -907,21 +907,25 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
     with patch("pathlib.Path.cwd") as mock_cwd:
         mock_cwd.return_value = Path("/mock/repo")
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-            mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
+        with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+            # Mock the git rev-parse commands
+            mock_run_git.side_effect = ["abc1234", "def5678"]  # base_commit_hash, head_commit_hash
 
-            with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
-                mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
+            with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+                mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
-                with patch("asyncio.create_task") as mock_create_task:
-                    # Test with default refs
-                    result = await review_workplan(
-                        ctx=mock_request_context,
-                        issue_number="123",
-                    )
+                with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
+                    mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
+
+                    with patch("asyncio.create_task") as mock_create_task:
+                        # Test with default refs
+                        result = await review_workplan(
+                            ctx=mock_request_context,
+                            issue_number="123",
+                        )
 
                     # Check the result message
-                    assert "Review task initiated comparing main..HEAD" in result
+                    assert "Review task initiated comparing main (`abc1234`)..HEAD (`def5678`)" in result
                     assert "issue #123" in result
                     assert "GitHub sub-issue" in result
 
@@ -941,6 +945,10 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
                     mock_get_issue.reset_mock()
                     mock_get_diff.reset_mock()
                     mock_create_task.reset_mock()
+                    mock_run_git.reset_mock()
+                    
+                    # New mock values for custom refs
+                    mock_run_git.side_effect = ["v1.0-hash", "feature-hash"]  # base_commit_hash, head_commit_hash
 
                     # Test with custom refs
                     result = await review_workplan(
@@ -951,7 +959,7 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
                     )
 
                     # Check custom refs were used
-                    assert "Review task initiated comparing v1.0..feature-branch" in result
+                    assert "Review task initiated comparing v1.0 (`v1.0-hash`)..feature-branch (`feature-hash`)" in result
                     mock_get_diff.assert_called_once_with(
                         Path("/mock/repo"), "v1.0", "feature-branch"
                     )
@@ -970,20 +978,17 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
     with patch("pathlib.Path.cwd") as mock_cwd:
         mock_cwd.return_value = Path("/mock/repo")
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-            mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
+        with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+            # Simulate error with invalid git ref
+            mock_run_git.side_effect = YellhornMCPError("Invalid git reference")
 
-            with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
-                # Simulate error with invalid git ref
-                mock_get_diff.side_effect = YellhornMCPError("Invalid git reference")
-
-                with pytest.raises(YellhornMCPError, match="Failed to trigger workplan review"):
-                    await review_workplan(
-                        ctx=mock_request_context, 
-                        issue_number="123",
-                        base_ref="invalid-ref", 
-                        head_ref="invalid-ref"
-                    )
+            with pytest.raises(YellhornMCPError, match="Failed to trigger workplan review"):
+                await review_workplan(
+                    ctx=mock_request_context, 
+                    issue_number="123",
+                    base_ref="invalid-ref", 
+                    head_ref="invalid-ref"
+                )
 
 
 @pytest.mark.asyncio
@@ -995,39 +1000,43 @@ async def test_review_workplan_with_different_issue(mock_request_context, mock_g
     with patch("pathlib.Path.cwd") as mock_cwd:
         mock_cwd.return_value = Path("/mock/repo")
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-            mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
+        with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+            # Mock the git rev-parse commands
+            mock_run_git.side_effect = ["v1.0-hash", "feature-hash"]  # base_commit_hash, head_commit_hash
 
-            with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
-                mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
+            with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+                mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
 
-                with patch("asyncio.create_task") as mock_create_task:
-                    # Test with a different issue number and custom refs
-                    base_ref = "v1.0"
-                    head_ref = "feature-branch"
-                    result = await review_workplan(
-                        ctx=mock_request_context,
-                        issue_number="456",
-                        base_ref=base_ref,
-                        head_ref=head_ref,
-                    )
+                with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
+                    mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-                    # Check the result message
-                    assert f"Review task initiated comparing {base_ref}..{head_ref}" in result
-                    assert "issue #456" in result
-                    assert "GitHub sub-issue" in result
+                    with patch("asyncio.create_task") as mock_create_task:
+                        # Test with a different issue number and custom refs
+                        base_ref = "v1.0"
+                        head_ref = "feature-branch"
+                        result = await review_workplan(
+                            ctx=mock_request_context,
+                            issue_number="456",
+                            base_ref=base_ref,
+                            head_ref=head_ref,
+                        )
 
-                    # Verify the function calls
-                    mock_cwd.assert_called()
-                    mock_get_issue.assert_called_once_with(Path("/mock/repo"), "456")
-                    mock_get_diff.assert_called_once_with(
-                        Path("/mock/repo"), base_ref, head_ref
-                    )
-                    mock_create_task.assert_called_once()
+                        # Check the result message
+                        assert f"Review task initiated comparing {base_ref} (`v1.0-hash`)..{head_ref} (`feature-hash`)" in result
+                        assert "issue #456" in result
+                        assert "GitHub sub-issue" in result
 
-                    # Check process_review_async coroutine
-                    coroutine = mock_create_task.call_args[0][0]
-                    assert coroutine.__name__ == "process_review_async"
+                        # Verify the function calls
+                        mock_cwd.assert_called()
+                        mock_get_issue.assert_called_once_with(Path("/mock/repo"), "456")
+                        mock_get_diff.assert_called_once_with(
+                            Path("/mock/repo"), base_ref, head_ref
+                        )
+                        mock_create_task.assert_called_once()
+
+                        # Check process_review_async coroutine
+                        coroutine = mock_create_task.call_args[0][0]
+                        assert coroutine.__name__ == "process_review_async"
 
 
 # This test is no longer needed because issue_number is now required

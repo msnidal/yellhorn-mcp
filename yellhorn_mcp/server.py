@@ -4,7 +4,7 @@ Yellhorn MCP server implementation.
 This module provides a Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro
 capabilities to Claude Code for software development tasks. It offers these primary tools:
 
-1. generate_workplan: Creates GitHub issues with detailed implementation plans based on
+1. create_workplan: Creates GitHub issues with detailed implementation plans based on
    your codebase and task description. The workplan is generated asynchronously and the
    issue is updated once it's ready.
 
@@ -834,7 +834,7 @@ async def get_current_branch_and_issue(worktree_path: Path) -> tuple[str, str]:
         # Verify this is a git repository (either standard or worktree)
         if not is_git_repository(worktree_path):
             raise YellhornMCPError(
-                "Not in a git repository. Please run this command from within a worktree created by generate_workplan."
+                "Not in a git repository. Please run this command from within a worktree created by create_workplan."
             )
 
         # Get the current branch name
@@ -852,7 +852,7 @@ async def get_current_branch_and_issue(worktree_path: Path) -> tuple[str, str]:
     except YellhornMCPError as e:
         if "not a git repository" in str(e).lower():
             raise YellhornMCPError(
-                "Not in a git repository. Please run this command from within a worktree created by generate_workplan."
+                "Not in a git repository. Please run this command from within a worktree created by create_workplan."
             )
         raise
 
@@ -944,16 +944,16 @@ async def generate_branch_name(title: str, issue_number: str) -> str:
 
 
 @mcp.tool(
-    name="generate_workplan",
-    description="Generate a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'.",
+    name="create_workplan",
+    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'.",
 )
-async def generate_workplan(
+async def create_workplan(
     title: str,
     detailed_description: str,
     ctx: Context,
 ) -> str:
     """
-    Generate a workplan based on the provided title and detailed description.
+    Create a workplan based on the provided title and detailed description.
     Creates a GitHub issue and processes the workplan generation asynchronously.
 
     Args:
@@ -965,7 +965,7 @@ async def generate_workplan(
         JSON string containing the GitHub issue URL.
 
     Raises:
-        YellhornMCPError: If there's an error generating the workplan.
+        YellhornMCPError: If there's an error creating the workplan.
     """
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
     client: genai.Client = ctx.request_context.lifespan_context["client"]
@@ -1146,6 +1146,8 @@ async def process_review_async(
     head_ref: str,
     workplan_issue_number: str | None,
     ctx: Context,
+    base_commit_hash: str | None = None,
+    head_commit_hash: str | None = None,
 ) -> str:
     """
     Process the review of a workplan and diff asynchronously, creating a GitHub sub-issue.
@@ -1183,8 +1185,8 @@ async def process_review_async(
 </Code Diff>
 
 <Comparison Data>
-Base ref: {base_ref}
-Head ref: {head_ref}
+Base ref: {base_ref}{f" ({base_commit_hash})" if base_commit_hash else ""}
+Head ref: {head_ref}{f" ({head_commit_hash})" if head_commit_hash else ""}
 </Comparison Data>
 
 Please review if this code diff correctly implements the workplan and provide detailed feedback.
@@ -1227,10 +1229,15 @@ IMPORTANT: Respond *only* with the Markdown content for the review. Do *not* wra
 
         if workplan_issue_number:
             # Create a title for the sub-issue
-            review_title = f"Review: {base_ref}..{head_ref} for Workplan #{workplan_issue_number}"
+            # Use commit hashes if available, otherwise use the ref names
+            base_display = f"{base_ref} ({base_commit_hash})" if base_commit_hash else base_ref
+            head_display = f"{head_ref} ({head_commit_hash})" if head_commit_hash else head_ref
+            review_title = f"Review: {base_display}..{head_display} for Workplan #{workplan_issue_number}"
 
-            # Add metadata to the review content
-            metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`\n- Head ref: `{head_ref}`\n- Workplan: #{workplan_issue_number}\n\n"
+            # Add metadata to the review content with commit hashes
+            base_hash_info = f" (`{base_commit_hash}`)" if base_commit_hash else ""
+            head_hash_info = f" (`{head_commit_hash}`)" if head_commit_hash else ""
+            metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`{base_hash_info}\n- Head ref: `{head_ref}`{head_hash_info}\n- Workplan: #{workplan_issue_number}\n\n"
             review_with_metadata = metadata + review_content
 
             # Create a sub-issue
@@ -1295,13 +1302,17 @@ async def review_workplan(
             message=f"Reviewing code for workplan issue #{issue_number}.",
         )
 
+        # Resolve git references to commit hashes for better tracking
+        base_commit_hash = await run_git_command(current_path, ["rev-parse", base_ref])
+        head_commit_hash = await run_git_command(current_path, ["rev-parse", head_ref])
+
         # Fetch the workplan and generate diff for review
         workplan = await get_github_issue_body(current_path, issue_number)
         diff = await get_git_diff(current_path, base_ref, head_ref)
 
         # Check if diff is empty
         if not diff.strip():
-            return f"No differences found between {base_ref} and {head_ref}. Nothing to review."
+            return f"No differences found between {base_ref} ({base_commit_hash}) and {head_ref} ({head_commit_hash}). Nothing to review."
 
         # Trigger the review asynchronously
         client = ctx.request_context.lifespan_context["client"]
@@ -1318,11 +1329,14 @@ async def review_workplan(
                 head_ref,
                 issue_number,
                 ctx,
+                base_commit_hash=base_commit_hash,
+                head_commit_hash=head_commit_hash,
             )
         )
 
         return (
-            f"Review task initiated comparing {base_ref}..{head_ref} against workplan issue #{issue_number}. "
+            f"Review task initiated comparing {base_ref} (`{base_commit_hash}`)..{head_ref} (`{head_commit_hash}`) "
+            f"against workplan issue #{issue_number}. "
             f"Results will be posted as a GitHub sub-issue linked to the workplan."
         )
 

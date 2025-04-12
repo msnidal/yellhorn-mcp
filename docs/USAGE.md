@@ -4,7 +4,7 @@
 
 Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro API for software development tasks. It provides these main tools:
 
-1. **Generate workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
+1. **Create workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
 2. **Create worktree**: Creates a git worktree with a linked branch for isolated development from an existing workplan issue.
 3. **Get workplan**: Retrieves the workplan content from a worktree's associated GitHub issue.
 4. **Review workplan**: Triggers an asynchronous code review for a Pull Request against its original workplan issue.
@@ -128,13 +128,13 @@ mcp install yellhorn_mcp.server -f .env
 
 Once the server is running, Claude Code can utilize the tools it exposes. Here's a typical workflow:
 
-### 1. Generating a workplan
+### 1. Creating a workplan
 
 ```
 Please generate a workplan for implementing a user authentication system in my application.
 ```
 
-This will use the `generate_workplan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. The tool will return the issue URL and number. The issue will initially show a placeholder message and will be updated asynchronously once the plan is generated.
+This will use the `create_workplan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. The tool will return the issue URL and number. The issue will initially show a placeholder message and will be updated asynchronously once the plan is generated.
 
 ### 2. Creating a worktree (optional)
 
@@ -190,7 +190,7 @@ This will use the `review_workplan` tool to fetch the original workplan from the
 
 ## MCP Tools
 
-### generate_workplan
+### create_workplan
 
 Creates a GitHub issue with a detailed workplan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously, with the issue being updated once it's ready.
 
@@ -303,8 +303,8 @@ curl http://127.0.0.1:8000/openapi.json
 # List available tools
 curl http://127.0.0.1:8000/tools
 
-# Call a tool (generate_workplan)
-curl -X POST http://127.0.0.1:8000/tools/generate_workplan \
+# Call a tool (create_workplan)
+curl -X POST http://127.0.0.1:8000/tools/create_workplan \
   -H "Content-Type: application/json" \
   -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"}'
 
