@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "yellhorn-mcp"
 version = "0.2.5"
 authors = [{ name = "Author" }]
-description = "Yellhorn MCP server uses Gemini 2.5 pro to generate detailed workplans and review pull requests."
+description = "Yellhorn offers MCP tools to generate detailed workplans with Gemini 2.5 Pro and to review diffs against them using your entire codebase as context."
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [

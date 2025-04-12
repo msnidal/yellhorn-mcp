@@ -2,14 +2,14 @@
 
 ![Yellhorn Logo](assets/yellhorn.png)
 
-A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities to Claude Code for software development tasks.
+A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities to Claude Code for software development tasks using your entire codebase in the prompt. This pattern is highly useful for defining work to be done by code assistants like Claude Code or other MCP compatible coding agents, and reviewing the results ensuring they meet the exactly specified original requirements.
 
 ## Features
 
-- **Generate workplans**: Creates GitHub issues with detailed implementation plans based on your codebase, with customizable title and detailed description 
-- **Isolated Development Environments**: Creates Git worktrees and linked branches for streamlined, isolated development workflow (can be done separately from workplan generation)
-- **Review Code Diffs**: Evaluates pull requests against the original workplan with full codebase context and provides detailed feedback
-- **Seamless GitHub Integration**: Automatically creates labeled issues with proper branch linking in the GitHub UI, posts reviews as PR comments with references to original issues, and handles asynchronous processing
+- **Create Workplans**: Creates detailed implementation plans based on a prompt and taking into consideration your entire codebase, posting them as GitHub issues and exposing them as MCP resources for your coding agent
+- **Review Code Diffs**: Provides a tool to evaluate git diffs against the original workplan with full codebase context and provides detailed feedback, ensuring the implementation does not deviate from the original requirements and providing guidance on what to change to do so
+- **Isolated Development Environments**: Creates Git worktrees and linked branches for streamlined, isolated development workflow (can be done separately from workplan generation), allowing parallel development with multiple agents
+- **Seamless GitHub Integration**: Automatically creates labeled issues with proper branch linking in the GitHub UI, posts reviews subissues with references to original workplan issues.
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
 - **MCP Resources**: Exposes workplans as standard MCP resources for easy listing and retrieval
 
@@ -97,7 +97,7 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
 
 ## Tools
 
-### generate_workplan
+### create_workplan
 
 Creates a GitHub issue with a detailed workplan based on the title and detailed description.
 
