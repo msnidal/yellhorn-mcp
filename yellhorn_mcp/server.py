@@ -106,7 +106,8 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
         if resource_type is None or resource_type == "yellhorn_workplan":
             # Get all issues with the yellhorn-mcp label
             json_output = await run_github_command(
-                repo_path, ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"]
+                repo_path,
+                ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"],
             )
 
             # Parse the JSON output
@@ -129,8 +130,15 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
         if resource_type is None or resource_type == "yellhorn_review_subissue":
             # Get all issues with the yellhorn-review-subissue label
             json_output = await run_github_command(
-                repo_path, 
-                ["issue", "list", "--label", "yellhorn-review-subissue", "--json", "number,title,url"]
+                repo_path,
+                [
+                    "issue",
+                    "list",
+                    "--label",
+                    "yellhorn-review-subissue",
+                    "--json",
+                    "number,title,url",
+                ],
             )
 
             # Parse the JSON output
@@ -171,7 +179,10 @@ async def read_resource(
         The content of the GitHub issue as a string.
     """
     # Verify resource type if provided
-    if resource_type is not None and resource_type not in ["yellhorn_workplan", "yellhorn_review_subissue"]:
+    if resource_type is not None and resource_type not in [
+        "yellhorn_workplan",
+        "yellhorn_review_subissue",
+    ]:
         raise ValueError(f"Unsupported resource type: {resource_type}")
 
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
@@ -575,7 +586,16 @@ async def create_github_subissue(
             # Create the issue using GitHub CLI
             result = await run_github_command(
                 repo_path,
-                ["issue", "create", "--title", title, "--body-file", str(temp_file), "--label", labels_arg],
+                [
+                    "issue",
+                    "create",
+                    "--title",
+                    title,
+                    "--body-file",
+                    str(temp_file),
+                    "--label",
+                    labels_arg,
+                ],
             )
             return result  # Returns the issue URL
         finally:
@@ -1248,24 +1268,24 @@ IMPORTANT: Respond *only* with the Markdown content for the review. Do *not* wra
         if workplan_issue_number:
             # Create a title for the sub-issue
             review_title = f"Review: {base_ref}..{head_ref} for Workplan #{workplan_issue_number}"
-            
+
             # Add metadata to the review content
             metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`\n- Head ref: `{head_ref}`\n- Workplan: #{workplan_issue_number}\n\n"
             review_with_metadata = metadata + review_content
-            
+
             # Create a sub-issue
             await ctx.log(
                 level="info",
                 message=f"Creating GitHub sub-issue for review of workplan #{workplan_issue_number}",
             )
             subissue_url = await create_github_subissue(
-                repo_path, 
-                workplan_issue_number, 
-                review_title, 
-                review_with_metadata, 
-                ["yellhorn-mcp"]
+                repo_path,
+                workplan_issue_number,
+                review_title,
+                review_with_metadata,
+                ["yellhorn-mcp"],
             )
-            
+
             # Return both the review content and the sub-issue URL
             return f"Review sub-issue created: {subissue_url}\n\n{review_content}"
         else:

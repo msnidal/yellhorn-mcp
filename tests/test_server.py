@@ -25,13 +25,16 @@ async def test_list_resources(mock_request_context):
                     {"number": 123, "title": "Test Workplan 1", "url": "https://github.com/user/repo/issues/123"},
                     {"number": 456, "title": "Test Workplan 2", "url": "https://github.com/user/repo/issues/456"}
                 ]"""
-            elif "--label" in args[1] and args[1][args[1].index("--label") + 1] == "yellhorn-review-subissue":
+            elif (
+                "--label" in args[1]
+                and args[1][args[1].index("--label") + 1] == "yellhorn-review-subissue"
+            ):
                 return """[
                     {"number": 789, "title": "Review: main..HEAD for Workplan #123", "url": "https://github.com/user/repo/issues/789"},
                     {"number": 987, "title": "Review: v1.0..feature for Workplan #456", "url": "https://github.com/user/repo/issues/987"}
                 ]"""
             return "[]"
-            
+
         mock_gh.side_effect = mock_gh_side_effect
 
         # Configure mock_resource_class to return mock Resource objects
@@ -44,12 +47,12 @@ async def test_list_resources(mock_request_context):
         workplan2.uri = FileUrl(f"file://workplans/456.md")
         workplan2.name = "Workplan #456: Test Workplan 2"
         workplan2.mimeType = "text/markdown"
-        
+
         review1 = MagicMock()
         review1.uri = FileUrl(f"file://reviews/789.md")
         review1.name = "Review #789: Review: main..HEAD for Workplan #123"
         review1.mimeType = "text/markdown"
-        
+
         review2 = MagicMock()
         review2.uri = FileUrl(f"file://reviews/987.md")
         review2.name = "Review #987: Review: v1.0..feature for Workplan #456"
@@ -74,10 +77,10 @@ async def test_list_resources(mock_request_context):
 
         # Verify Resource constructor was called for all 4 resources
         assert mock_resource_class.call_count == 4
-        
+
         # Verify resources are returned correctly (both types)
         assert len(resources) == 4
-        
+
         # Reset mocks for the next test
         mock_gh.reset_mock()
         mock_resource_class.reset_mock()
@@ -90,7 +93,7 @@ async def test_list_resources(mock_request_context):
             mock_request_context.request_context.lifespan_context["repo_path"],
             ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"],
         )
-        
+
         # Reset mocks for the next test
         mock_gh.reset_mock()
         mock_resource_class.reset_mock()
@@ -120,7 +123,7 @@ async def test_read_resource(mock_request_context):
     with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
         # Test 1: Get workplan resource
         mock_get_issue.return_value = "# Test Workplan\n\n1. Step one\n2. Step two"
-        
+
         # Call the read_resource method with yellhorn_workplan type
         resource_content = await read_resource(
             None, mock_request_context, "123", "yellhorn_workplan"
@@ -133,42 +136,40 @@ async def test_read_resource(mock_request_context):
 
         # Verify resource content is returned correctly
         assert resource_content == "# Test Workplan\n\n1. Step one\n2. Step two"
-        
+
         # Reset mock for next test
         mock_get_issue.reset_mock()
-        
+
         # Test 2: Get review sub-issue resource
         mock_get_issue.return_value = "## Review Summary\nThis is a review of the implementation."
-        
+
         # Call the read_resource method with yellhorn_review_subissue type
         resource_content = await read_resource(
             None, mock_request_context, "456", "yellhorn_review_subissue"
         )
-        
+
         # Verify the GitHub issue body was retrieved correctly
         mock_get_issue.assert_called_once_with(
             mock_request_context.request_context.lifespan_context["repo_path"], "456"
         )
-        
+
         # Verify resource content is returned correctly
         assert resource_content == "## Review Summary\nThis is a review of the implementation."
-        
+
         # Reset mock for next test
         mock_get_issue.reset_mock()
-        
+
         # Test 3: Get resource without specifying type
         mock_get_issue.return_value = "# Any content"
-        
+
         # Call the read_resource method without type
-        resource_content = await read_resource(
-            None, mock_request_context, "789", None
-        )
-        
+        resource_content = await read_resource(None, mock_request_context, "789", None)
+
         # Verify the GitHub issue body was retrieved correctly
         mock_get_issue.assert_called_once_with(
             mock_request_context.request_context.lifespan_context["repo_path"], "789"
         )
-        
+
         # Verify resource content is returned correctly
         assert resource_content == "# Any content"
 
@@ -982,29 +983,33 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
                         mock_cwd.assert_called()
                         mock_get_branch_issue.assert_called_once_with(Path("/mock/worktree"))
                         mock_get_issue.assert_called_once_with(Path("/mock/worktree"), "123")
-                        mock_get_diff.assert_called_once_with(Path("/mock/worktree"), "main", "HEAD")
+                        mock_get_diff.assert_called_once_with(
+                            Path("/mock/worktree"), "main", "HEAD"
+                        )
                         mock_create_task.assert_called_once()
 
                         # Check process_review_async coroutine
                         coroutine = mock_create_task.call_args[0][0]
                         assert coroutine.__name__ == "process_review_async"
-                        
+
                         # Reset mocks for next test
                         mock_get_branch_issue.reset_mock()
                         mock_get_issue.reset_mock()
                         mock_get_diff.reset_mock()
                         mock_create_task.reset_mock()
-                        
+
                         # Test with custom refs
                         result = await review_workplan(
                             ctx=mock_request_context,
                             base_ref="v1.0",
                             head_ref="feature-branch",
                         )
-                        
+
                         # Check custom refs were used
                         assert "Review task initiated comparing v1.0..feature-branch" in result
-                        mock_get_diff.assert_called_once_with(Path("/mock/worktree"), "v1.0", "feature-branch")
+                        mock_get_diff.assert_called_once_with(
+                            Path("/mock/worktree"), "v1.0", "feature-branch"
+                        )
 
     # Test error handling
     with patch("pathlib.Path.cwd") as mock_cwd:
@@ -1032,9 +1037,7 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
 
                     with pytest.raises(YellhornMCPError, match="Failed to trigger workplan review"):
                         await review_workplan(
-                            ctx=mock_request_context,
-                            base_ref="invalid-ref",
-                            head_ref="invalid-ref"
+                            ctx=mock_request_context, base_ref="invalid-ref", head_ref="invalid-ref"
                         )
 
 
@@ -1079,7 +1082,9 @@ async def test_review_workplan_from_main_repo(mock_request_context, mock_genai_c
                         mock_cwd.assert_called()
                         mock_get_branch_issue.assert_called_once_with(Path("/mock/repo"))
                         mock_get_issue.assert_called_once_with(Path("/mock/repo"), "456")
-                        mock_get_diff.assert_called_once_with(Path("/mock/repo"), base_ref, head_ref)
+                        mock_get_diff.assert_called_once_with(
+                            Path("/mock/repo"), base_ref, head_ref
+                        )
                         mock_create_task.assert_called_once()
 
                         # Check process_review_async coroutine
@@ -1141,7 +1146,10 @@ async def test_review_workplan_from_worktree_with_explicit_issue(
                         )
 
                         # Check the result message - should use the explicit issue number
-                        assert f"Review task initiated comparing {custom_base}..{custom_head}" in result
+                        assert (
+                            f"Review task initiated comparing {custom_base}..{custom_head}"
+                            in result
+                        )
                         assert "issue #456" in result
                         assert "GitHub sub-issue" in result
 
@@ -1150,7 +1158,9 @@ async def test_review_workplan_from_worktree_with_explicit_issue(
                         mock_get_branch_issue.assert_called_once_with(Path("/mock/worktree"))
                         # Should use the explicitly provided issue number
                         mock_get_issue.assert_called_once_with(Path("/mock/worktree"), "456")
-                        mock_get_diff.assert_called_once_with(Path("/mock/worktree"), custom_base, custom_head)
+                        mock_get_diff.assert_called_once_with(
+                            Path("/mock/worktree"), custom_base, custom_head
+                        )
                         mock_create_task.assert_called_once()
 
                         # Check process_review_async coroutine was called
@@ -1166,9 +1176,9 @@ async def test_get_git_diff():
     """Test getting the diff between git refs."""
     with patch("yellhorn_mcp.server.run_git_command") as mock_git:
         mock_git.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
-        
+
         result = await get_git_diff(Path("/mock/repo"), "main", "feature-branch")
-        
+
         assert result == "diff --git a/file.py b/file.py\n+def x(): pass"
         mock_git.assert_called_once_with(Path("/mock/repo"), ["diff", "main..feature-branch"])
 
@@ -1184,18 +1194,20 @@ async def test_create_github_subissue():
         patch("yellhorn_mcp.server.run_github_command") as mock_gh,
     ):
         mock_gh.return_value = "https://github.com/user/repo/issues/456"
-        
+
         result = await create_github_subissue(
             Path("/mock/repo"),
             "123",
             "Review: main..HEAD for Workplan #123",
             "## Review content",
-            ["yellhorn-mcp"]
+            ["yellhorn-mcp"],
         )
-        
+
         assert result == "https://github.com/user/repo/issues/456"
         mock_ensure_label.assert_called_once_with(
-            Path("/mock/repo"), "yellhorn-review-subissue", "Review sub-issues created by yellhorn-mcp"
+            Path("/mock/repo"),
+            "yellhorn-review-subissue",
+            "Review sub-issues created by yellhorn-mcp",
         )
         mock_gh.assert_called_once()
         # Verify the correct labels were passed
@@ -1250,7 +1262,7 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
         assert "Formatted codebase" in kwargs.get("contents", "")
         assert f"Base ref: {base_ref}" in kwargs.get("contents", "")
         assert f"Head ref: {head_ref}" in kwargs.get("contents", "")
-        
+
         # Verify structured output instructions are present
         assert "## Review Summary" in kwargs.get("contents", "")
         assert "## Completed Items" in kwargs.get("contents", "")
@@ -1258,7 +1270,7 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
         assert "## Incorrect Implementation" in kwargs.get("contents", "")
         assert "## Suggested Improvements / Issues" in kwargs.get("contents", "")
         assert "## Intentional Divergence Notes" in kwargs.get("contents", "")
-        
+
         # Check Markdown block unwrapping instruction
         assert "IMPORTANT: Respond *only* with the Markdown content" in kwargs.get("contents", "")
 

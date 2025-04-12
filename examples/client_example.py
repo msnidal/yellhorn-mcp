@@ -120,7 +120,7 @@ async def review_workplan(
 
     This function calls the review_workplan tool to fetch the original workplan,
     generate a diff between the git refs, and trigger an asynchronous review.
-    It can be run from within a worktree created by generate_workplan (auto-detects issue) 
+    It can be run from within a worktree created by generate_workplan (auto-detects issue)
     or from the main repository (requires explicit issue_number).
 
     Args:
@@ -209,20 +209,22 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                     "\nThe workplan is being generated asynchronously and will be updated in the GitHub issue."
                 )
                 print("To create a worktree for this issue, run:")
-                print(f"python -m examples.client_example worktree --issue-number {result['issue_number']}")
-            
+                print(
+                    f"python -m examples.client_example worktree --issue-number {result['issue_number']}"
+                )
+
             elif command == "worktree":
                 # Create worktree for existing issue
                 print(f"Creating worktree for issue #{args.issue_number}...")
-                
+
                 try:
                     result = await create_worktree(session, args.issue_number)
-                    
+
                     print("\nGit Worktree Created:")
                     print(f"Path: {result['worktree_path']}")
                     print(f"Branch: {result['branch_name']}")
                     print(f"For issue: {result['issue_url']}")
-                    
+
                     print("\nNavigate to the worktree directory to work on implementing the plan:")
                     print(f"cd {result['worktree_path']}")
                 except Exception as e:
@@ -259,10 +261,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 try:
                     # Prepare arguments, including optional issue_number
                     result = await review_workplan(
-                        session, 
-                        args.base_ref, 
-                        args.head_ref, 
-                        args.issue_number
+                        session, args.base_ref, args.head_ref, args.issue_number
                     )
                     print("\nReview Task:")
                     print(result)
@@ -301,7 +300,7 @@ def main():
         required=True,
         help="Detailed description for the workplan",
     )
-    
+
     # Create worktree command
     worktree_parser = subparsers.add_parser(
         "worktree", help="Create a git worktree for an existing workplan issue"
@@ -359,7 +358,12 @@ def main():
         sys.exit(1)
 
     # Ensure GEMINI_API_KEY is set for commands that require it
-    if not os.environ.get("GEMINI_API_KEY") and args.command in ["plan", "worktree", "getplan", "review"]:
+    if not os.environ.get("GEMINI_API_KEY") and args.command in [
+        "plan",
+        "worktree",
+        "getplan",
+        "review",
+    ]:
         print("Error: GEMINI_API_KEY environment variable is not set")
         print("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
         sys.exit(1)
