@@ -2,14 +2,14 @@
 
 ![Yellhorn Logo](assets/yellhorn.png)
 
-A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities to Claude Code for software development tasks.
+A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities to Claude Code for software development tasks using your entire codebase in the prompt. This pattern is highly useful for defining work to be done by code assistants like Claude Code or other MCP compatible coding agents, and reviewing the results ensuring they meet the exactly specified original requirements.
 
 ## Features
 
-- **Generate workplans**: Creates GitHub issues with detailed implementation plans based on your codebase, with customizable title and detailed description 
-- **Isolated Development Environments**: Creates Git worktrees and linked branches for streamlined, isolated development workflow (can be done separately from workplan generation)
-- **Review Code Diffs**: Evaluates pull requests against the original workplan with full codebase context and provides detailed feedback
-- **Seamless GitHub Integration**: Automatically creates labeled issues with proper branch linking in the GitHub UI, posts reviews as PR comments with references to original issues, and handles asynchronous processing
+- **Create Workplans**: Creates detailed implementation plans based on a prompt and taking into consideration your entire codebase, posting them as GitHub issues and exposing them as MCP resources for your coding agent
+- **Review Code Diffs**: Provides a tool to evaluate git diffs against the original workplan with full codebase context and provides detailed feedback, ensuring the implementation does not deviate from the original requirements and providing guidance on what to change to do so
+- **Isolated Development Environments**: Creates Git worktrees and linked branches for streamlined, isolated development workflow (can be done separately from workplan generation), allowing parallel development with multiple agents
+- **Seamless GitHub Integration**: Automatically creates labeled issues with proper branch linking in the GitHub UI, posts reviews subissues with references to original workplan issues.
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
 - **MCP Resources**: Exposes workplans as standard MCP resources for easy listing and retrieval
 
@@ -78,12 +78,7 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
 4. View the workplan if needed:
 
    ```
-   # Option 1: From the worktree directory (auto-detects issue number)
-   # While in the worktree directory
-   Please get the current workplan for this worktree
-   
-   # Option 2: From the main repository (requires explicit issue number)
-   # You don't need to be in the worktree directory
+   # You can run this from anywhere
    Please get the workplan for issue #123
    ```
 
@@ -96,18 +91,13 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
    git push origin HEAD
    gh pr create --title "[PR Title]" --body "[PR Description]"
    
-   # Option 1: From the worktree directory (auto-detects issue number)
-   # While in the worktree directory, ask Claude to review it
-   Please trigger a review for PR "[PR URL]" against the original workplan
-   
-   # Option 2: From the main repository (requires explicit issue number)
-   # You don't need to be in the worktree directory
-   Please trigger a review for PR "[PR URL]" against the workplan in issue #123
+   # You can run this from anywhere
+   Please review the PR comparing "main" and "feature-branch" against the workplan in issue #123
    ```
 
 ## Tools
 
-### generate_workplan
+### create_workplan
 
 Creates a GitHub issue with a detailed workplan based on the title and detailed description.
 
@@ -139,11 +129,11 @@ Creates a git worktree with a linked branch for isolated development from an exi
 
 ### get_workplan
 
-Retrieves the workplan content (GitHub issue body) associated with a workplan. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).
+Retrieves the workplan content (GitHub issue body) associated with a workplan.
 
 **Input**:
 
-- `issue_number`: Optional issue number for the workplan. Required if run outside a Yellhorn worktree.
+- `issue_number`: The GitHub issue number for the workplan.
 
 **Output**:
 
@@ -151,12 +141,13 @@ Retrieves the workplan content (GitHub issue body) associated with a workplan. C
 
 ### review_workplan
 
-Triggers an asynchronous code review for a Pull Request against its original workplan issue. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).
+Triggers an asynchronous code review comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the review asynchronously after running (in the background).
 
 **Input**:
 
-- `pr_url`: The URL of the GitHub Pull Request to review
-- `issue_number`: Optional issue number for the workplan. Required if run outside a Yellhorn worktree.
+- `issue_number`: The GitHub issue number for the workplan.
+- `base_ref`: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
+- `head_ref`: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
 
 **Output**:
 

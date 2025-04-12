@@ -4,7 +4,7 @@
 
 Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro API for software development tasks. It provides these main tools:
 
-1. **Generate workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
+1. **Create workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
 2. **Create worktree**: Creates a git worktree with a linked branch for isolated development from an existing workplan issue.
 3. **Get workplan**: Retrieves the workplan content from a worktree's associated GitHub issue.
 4. **Review workplan**: Triggers an asynchronous code review for a Pull Request against its original workplan issue.
@@ -128,13 +128,13 @@ mcp install yellhorn_mcp.server -f .env
 
 Once the server is running, Claude Code can utilize the tools it exposes. Here's a typical workflow:
 
-### 1. Generating a workplan
+### 1. Creating a workplan
 
 ```
 Please generate a workplan for implementing a user authentication system in my application.
 ```
 
-This will use the `generate_workplan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. The tool will return the issue URL and number. The issue will initially show a placeholder message and will be updated asynchronously once the plan is generated.
+This will use the `create_workplan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. The tool will return the issue URL and number. The issue will initially show a placeholder message and will be updated asynchronously once the plan is generated.
 
 ### 2. Creating a worktree (optional)
 
@@ -154,17 +154,10 @@ Switch to the worktree directory that was created by `create_worktree`.
 
 ### 4. View the workplan (if needed)
 
-You have two options to view a workplan:
+To view a workplan, use the following command:
 
-**Option 1: From the worktree directory** (auto-detects the issue number)
 ```
-# Run this from within the worktree directory
-Please retrieve the workplan for this worktree.
-```
-
-**Option 2: From the main repository** (requires explicit issue number)
-```
-# You can run this from anywhere, including the main repository
+# You can run this from anywhere
 Please retrieve the workplan for issue #123.
 ```
 
@@ -186,25 +179,18 @@ gh pr create --title "Implement User Authentication" --body "This PR adds JWT au
 
 ### 6. Request a Review
 
-Once your PR is created, you can request a review against the original workplan. You have two options:
+Once your PR is created, you can request a review against the original workplan:
 
-**Option 1: From the worktree directory** (auto-detects the issue number)
 ```
-# Run this from within the worktree directory
-Please review the PR at "https://github.com/user/repo/pull/123" against the original workplan.
-```
-
-**Option 2: From the main repository** (requires explicit issue number)
-```
-# You can run this from anywhere, including the main repository
-Please review the PR at "https://github.com/user/repo/pull/123" against the workplan in issue #456.
+# You can run this from anywhere
+Please review the PR comparing "main" and "feature-branch" against the workplan in issue #456.
 ```
 
-This will use the `review_workplan` tool to fetch the original workplan from the associated GitHub issue, retrieve the PR diff, and trigger an asynchronous review. The review will be posted as a comment on the PR when it's ready.
+This will use the `review_workplan` tool to fetch the original workplan from the specified GitHub issue, generate a diff between the specified git references, and trigger an asynchronous review. The review will be posted as a GitHub sub-issue linked to the original workplan.
 
 ## MCP Tools
 
-### generate_workplan
+### create_workplan
 
 Creates a GitHub issue with a detailed workplan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously, with the issue being updated once it's ready.
 
@@ -236,11 +222,11 @@ Creates a git worktree with a linked branch for isolated development from an exi
 
 ### get_workplan
 
-Retrieves the workplan content (GitHub issue body) associated with a workplan. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).
+Retrieves the workplan content (GitHub issue body) associated with a workplan.
 
 **Input**:
 
-- `issue_number`: Optional issue number for the workplan. Required if run outside a Yellhorn worktree.
+- `issue_number`: The GitHub issue number for the workplan.
 
 **Output**:
 
@@ -248,12 +234,13 @@ Retrieves the workplan content (GitHub issue body) associated with a workplan. C
 
 ### review_workplan
 
-Triggers an asynchronous code review for a Pull Request against its original workplan issue. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).
+Triggers an asynchronous code review comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the review asynchronously after running (in the background).
 
 **Input**:
 
-- `pr_url`: The URL of the GitHub Pull Request to review
-- `issue_number`: Optional issue number for the workplan. Required if run outside a Yellhorn worktree.
+- `issue_number`: The GitHub issue number for the workplan.
+- `base_ref`: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
+- `head_ref`: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
 
 **Output**:
 
@@ -316,8 +303,8 @@ curl http://127.0.0.1:8000/openapi.json
 # List available tools
 curl http://127.0.0.1:8000/tools
 
-# Call a tool (generate_workplan)
-curl -X POST http://127.0.0.1:8000/tools/generate_workplan \
+# Call a tool (create_workplan)
+curl -X POST http://127.0.0.1:8000/tools/create_workplan \
   -H "Content-Type: application/json" \
   -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"}'
 
@@ -326,25 +313,15 @@ curl -X POST http://127.0.0.1:8000/tools/create_worktree \
   -H "Content-Type: application/json" \
   -d '{"issue_number": "123"}'
 
-# Call a tool (get_workplan) from a worktree directory
-curl -X POST http://127.0.0.1:8000/tools/get_workplan \
-  -H "Content-Type: application/json" \
-  -d '{}'
-
-# Call a tool (get_workplan) from the main repository (requires issue_number)
+# Call a tool (get_workplan)
 curl -X POST http://127.0.0.1:8000/tools/get_workplan \
   -H "Content-Type: application/json" \
   -d '{"issue_number": "123"}'
 
-# Call a tool (review_workplan) from a worktree directory
+# Call a tool (review_workplan)
 curl -X POST http://127.0.0.1:8000/tools/review_workplan \
   -H "Content-Type: application/json" \
-  -d '{"pr_url": "https://github.com/user/repo/pull/123"}'
-
-# Call a tool (review_workplan) from the main repository (requires issue_number)
-curl -X POST http://127.0.0.1:8000/tools/review_workplan \
-  -H "Content-Type: application/json" \
-  -d '{"pr_url": "https://github.com/user/repo/pull/123", "issue_number": "456"}'
+  -d '{"issue_number": "456", "base_ref": "main", "head_ref": "feature-branch"}'
 ```
 
 ### Example Client
@@ -361,17 +338,11 @@ python -m examples.client_example plan --title "User Authentication System" --de
 # Create a worktree for an existing workplan issue
 python -m examples.client_example worktree --issue-number "123"
 
-# Get workplan (from worktree directory)
-python -m examples.client_example getplan
-
-# Get workplan (from main repository - requires issue number)
+# Get workplan
 python -m examples.client_example getplan --issue-number "123"
 
-# Review work (from worktree directory)
-python -m examples.client_example review --pr-url "https://github.com/user/repo/pull/123"
-
-# Review work (from main repository - requires issue number)
-python -m examples.client_example review --pr-url "https://github.com/user/repo/pull/123" --issue-number "456"
+# Review work
+python -m examples.client_example review --issue-number "456" --base-ref "main" --head-ref "feature-branch"
 ```
 
 The example client uses the MCP client API to interact with the server through stdio transport, which is the same approach Claude Code uses.

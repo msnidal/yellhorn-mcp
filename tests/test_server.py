@@ -12,76 +12,105 @@ from pydantic import FileUrl
 
 @pytest.mark.asyncio
 async def test_list_resources(mock_request_context):
-    """Test listing workplan resources."""
+    """Test listing workplan and review sub-issue resources."""
     with (
         patch("yellhorn_mcp.server.run_github_command") as mock_gh,
         patch("yellhorn_mcp.server.Resource") as mock_resource_class,
     ):
-        # Mock the GitHub CLI to return JSON data with issues
-        mock_gh.return_value = """[
-            {"number": 123, "title": "Test Issue 1", "url": "https://github.com/user/repo/issues/123"},
-            {"number": 456, "title": "Test Issue 2", "url": "https://github.com/user/repo/issues/456"}
-        ]"""
+        # Set up 2 workplan issues and 2 review sub-issues
+        # Configure mock responses for different labels
+        def mock_gh_side_effect(*args, **kwargs):
+            if "--label" in args[1] and args[1][args[1].index("--label") + 1] == "yellhorn-mcp":
+                return """[
+                    {"number": 123, "title": "Test Workplan 1", "url": "https://github.com/user/repo/issues/123"},
+                    {"number": 456, "title": "Test Workplan 2", "url": "https://github.com/user/repo/issues/456"}
+                ]"""
+            elif (
+                "--label" in args[1]
+                and args[1][args[1].index("--label") + 1] == "yellhorn-review-subissue"
+            ):
+                return """[
+                    {"number": 789, "title": "Review: main..HEAD for Workplan #123", "url": "https://github.com/user/repo/issues/789"},
+                    {"number": 987, "title": "Review: v1.0..feature for Workplan #456", "url": "https://github.com/user/repo/issues/987"}
+                ]"""
+            return "[]"
+
+        mock_gh.side_effect = mock_gh_side_effect
 
         # Configure mock_resource_class to return mock Resource objects
-        mock_resource1 = MagicMock()
-        mock_resource1.uri = FileUrl(f"file://workplans/123.md")
-        mock_resource1.name = "Workplan #123: Test Issue 1"
-        mock_resource1.mimeType = "text/markdown"
+        workplan1 = MagicMock()
+        workplan1.uri = FileUrl(f"file://workplans/123.md")
+        workplan1.name = "Workplan #123: Test Workplan 1"
+        workplan1.mimeType = "text/markdown"
 
-        mock_resource2 = MagicMock()
-        mock_resource2.uri = FileUrl(f"file://workplans/456.md")
-        mock_resource2.name = "Workplan #456: Test Issue 2"
-        mock_resource2.mimeType = "text/markdown"
+        workplan2 = MagicMock()
+        workplan2.uri = FileUrl(f"file://workplans/456.md")
+        workplan2.name = "Workplan #456: Test Workplan 2"
+        workplan2.mimeType = "text/markdown"
+
+        review1 = MagicMock()
+        review1.uri = FileUrl(f"file://reviews/789.md")
+        review1.name = "Review #789: Review: main..HEAD for Workplan #123"
+        review1.mimeType = "text/markdown"
+
+        review2 = MagicMock()
+        review2.uri = FileUrl(f"file://reviews/987.md")
+        review2.name = "Review #987: Review: v1.0..feature for Workplan #456"
+        review2.mimeType = "text/markdown"
 
         # Configure the Resource constructor to return our mock objects
-        mock_resource_class.side_effect = [mock_resource1, mock_resource2]
+        mock_resource_class.side_effect = [workplan1, workplan2, review1, review2]
 
-        # When no resource_type is provided or it matches "yellhorn_workplan"
+        # 1. Test with no resource_type (should get both types)
         resources = await list_resources(None, mock_request_context, None)
 
-        # Verify the GitHub command was called correctly
+        # Verify the GitHub command was called correctly for both labels
+        assert mock_gh.call_count == 2
+        mock_gh.assert_any_call(
+            mock_request_context.request_context.lifespan_context["repo_path"],
+            ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"],
+        )
+        mock_gh.assert_any_call(
+            mock_request_context.request_context.lifespan_context["repo_path"],
+            ["issue", "list", "--label", "yellhorn-review-subissue", "--json", "number,title,url"],
+        )
+
+        # Verify Resource constructor was called for all 4 resources
+        assert mock_resource_class.call_count == 4
+
+        # Verify resources are returned correctly (both types)
+        assert len(resources) == 4
+
+        # Reset mocks for the next test
+        mock_gh.reset_mock()
+        mock_resource_class.reset_mock()
+        mock_resource_class.side_effect = [workplan1, workplan2]
+
+        # 2. Test with resource_type="yellhorn_workplan" - should return only workplans
+        resources = await list_resources(None, mock_request_context, "yellhorn_workplan")
+        assert len(resources) == 2
         mock_gh.assert_called_once_with(
             mock_request_context.request_context.lifespan_context["repo_path"],
             ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"],
         )
 
-        # Verify Resource constructor was called correctly
-        assert mock_resource_class.call_count == 2
-        mock_resource_class.assert_any_call(
-            uri=FileUrl(f"file://workplans/123.md"),
-            name="Workplan #123: Test Issue 1",
-            mimeType="text/markdown",
-        )
-        mock_resource_class.assert_any_call(
-            uri=FileUrl(f"file://workplans/456.md"),
-            name="Workplan #456: Test Issue 2",
-            mimeType="text/markdown",
-        )
-
-        # Verify resources are returned correctly
-        assert len(resources) == 2
-        assert resources[0].uri == FileUrl(f"file://workplans/123.md")
-        assert resources[0].name == "Workplan #123: Test Issue 1"
-        assert resources[0].mimeType == "text/markdown"
-
-        assert resources[1].uri == FileUrl(f"file://workplans/456.md")
-        assert resources[1].name == "Workplan #456: Test Issue 2"
-        assert resources[1].mimeType == "text/markdown"
-
         # Reset mocks for the next test
         mock_gh.reset_mock()
         mock_resource_class.reset_mock()
-        mock_resource_class.side_effect = [mock_resource1, mock_resource2]
+        mock_resource_class.side_effect = [review1, review2]
 
-        # Test with resource_type="yellhorn_workplan" - should return the resources
-        resources = await list_resources(None, mock_request_context, "yellhorn_workplan")
+        # 3. Test with resource_type="yellhorn_review_subissue" - should return only reviews
+        resources = await list_resources(None, mock_request_context, "yellhorn_review_subissue")
         assert len(resources) == 2
+        mock_gh.assert_called_once_with(
+            mock_request_context.request_context.lifespan_context["repo_path"],
+            ["issue", "list", "--label", "yellhorn-review-subissue", "--json", "number,title,url"],
+        )
 
         # Reset mock for the final test
         mock_gh.reset_mock()
 
-        # Test with different resource_type - should return empty list
+        # 4. Test with different resource_type - should return empty list
         resources = await list_resources(None, mock_request_context, "different_type")
         assert len(resources) == 0
         # GitHub command should not be called in this case
@@ -89,13 +118,13 @@ async def test_list_resources(mock_request_context):
 
 
 @pytest.mark.asyncio
-async def test_get_resource(mock_request_context):
-    """Test getting a workplan resource."""
+async def test_read_resource(mock_request_context):
+    """Test getting resources by type."""
     with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-        # Mock the GitHub issue body retrieval
+        # Test 1: Get workplan resource
         mock_get_issue.return_value = "# Test Workplan\n\n1. Step one\n2. Step two"
 
-        # Call the get_resource method
+        # Call the read_resource method with yellhorn_workplan type
         resource_content = await read_resource(
             None, mock_request_context, "123", "yellhorn_workplan"
         )
@@ -108,6 +137,42 @@ async def test_get_resource(mock_request_context):
         # Verify resource content is returned correctly
         assert resource_content == "# Test Workplan\n\n1. Step one\n2. Step two"
 
+        # Reset mock for next test
+        mock_get_issue.reset_mock()
+
+        # Test 2: Get review sub-issue resource
+        mock_get_issue.return_value = "## Review Summary\nThis is a review of the implementation."
+
+        # Call the read_resource method with yellhorn_review_subissue type
+        resource_content = await read_resource(
+            None, mock_request_context, "456", "yellhorn_review_subissue"
+        )
+
+        # Verify the GitHub issue body was retrieved correctly
+        mock_get_issue.assert_called_once_with(
+            mock_request_context.request_context.lifespan_context["repo_path"], "456"
+        )
+
+        # Verify resource content is returned correctly
+        assert resource_content == "## Review Summary\nThis is a review of the implementation."
+
+        # Reset mock for next test
+        mock_get_issue.reset_mock()
+
+        # Test 3: Get resource without specifying type
+        mock_get_issue.return_value = "# Any content"
+
+        # Call the read_resource method without type
+        resource_content = await read_resource(None, mock_request_context, "789", None)
+
+        # Verify the GitHub issue body was retrieved correctly
+        mock_get_issue.assert_called_once_with(
+            mock_request_context.request_context.lifespan_context["repo_path"], "789"
+        )
+
+        # Verify resource content is returned correctly
+        assert resource_content == "# Any content"
+
     # Test with unsupported resource type
     with pytest.raises(ValueError, match="Unsupported resource type"):
         await read_resource(None, mock_request_context, "123", "unsupported_type")
@@ -119,14 +184,16 @@ from mcp.server.fastmcp import Context
 from yellhorn_mcp.server import (
     YellhornMCPError,
     create_git_worktree,
+    create_github_subissue,
+    create_workplan,
     create_worktree,
     ensure_label_exists,
     format_codebase_for_prompt,
     generate_branch_name,
-    generate_workplan,
     get_codebase_snapshot,
     get_current_branch_and_issue,
     get_default_branch,
+    get_git_diff,
     get_github_issue_body,
     get_github_pr_diff,
     get_workplan,
@@ -529,8 +596,8 @@ async def test_create_worktree(mock_request_context):
 
 
 @pytest.mark.asyncio
-async def test_generate_workplan(mock_request_context, mock_genai_client):
-    """Test generating a workplan."""
+async def test_create_workplan(mock_request_context, mock_genai_client):
+    """Test creating a workplan."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
@@ -540,7 +607,7 @@ async def test_generate_workplan(mock_request_context, mock_genai_client):
 
             with patch("asyncio.create_task") as mock_create_task:
                 # Test with required title and detailed description
-                response = await generate_workplan(
+                response = await create_workplan(
                     title="Feature Implementation Plan",
                     detailed_description="Create a new feature to support X",
                     ctx=mock_request_context,
@@ -780,221 +847,204 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
 
 @pytest.mark.asyncio
 async def test_get_workplan(mock_request_context):
-    """Test getting the workplan from a worktree (auto-detected issue number)."""
+    """Test getting the workplan with the required issue number."""
     with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/worktree")
+        mock_cwd.return_value = Path("/mock/repo")
 
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            mock_get_branch_issue.return_value = ("issue-123-feature", "123")
+        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+            mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
-            with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-                mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
+            # Test getting the workplan with the required issue number
+            result = await get_workplan(mock_request_context, issue_number="123")
 
-                # Test getting the workplan
-                result = await get_workplan(mock_request_context)
-
-                assert result == "# workplan\n\n1. Implement X\n2. Test X"
-                mock_cwd.assert_called_once()
-                mock_get_branch_issue.assert_called_once_with(Path("/mock/worktree"))
-                mock_get_issue.assert_called_once_with(Path("/mock/worktree"), "123")
+            assert result == "# workplan\n\n1. Implement X\n2. Test X"
+            mock_cwd.assert_called_once()
+            mock_get_issue.assert_called_once_with(Path("/mock/repo"), "123")
 
     # Test error handling
     with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/worktree")
+        mock_cwd.return_value = Path("/mock/repo")
 
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            mock_get_branch_issue.side_effect = YellhornMCPError("Not in a git repository")
+        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+            mock_get_issue.side_effect = Exception("Failed to get issue")
 
             with pytest.raises(YellhornMCPError, match="Failed to retrieve workplan"):
-                await get_workplan(mock_request_context)
+                await get_workplan(mock_request_context, issue_number="123")
 
 
 @pytest.mark.asyncio
-async def test_get_workplan_from_main_repo(mock_request_context):
-    """Test getting the workplan from the main repository (explicit issue number)."""
+async def test_get_workplan_with_different_issue(mock_request_context):
+    """Test getting the workplan with a different issue number."""
     with patch("pathlib.Path.cwd") as mock_cwd:
         mock_cwd.return_value = Path("/mock/repo")
 
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            # Simulate failing to get branch and issue from main repo
-            mock_get_branch_issue.side_effect = YellhornMCPError(
-                "Branch name 'main' does not match expected format"
+        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+            mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
+
+            # Test with a different issue number
+            result = await get_workplan(
+                ctx=mock_request_context,
+                issue_number="456",
             )
 
-            with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-                mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
-
-                # Test with explicit issue number
-                result = await get_workplan(
-                    ctx=mock_request_context,
-                    issue_number="456",
-                )
-
-                assert result == "# workplan\n\n1. Implement X\n2. Test X"
-                mock_cwd.assert_called()
-                mock_get_branch_issue.assert_called_once_with(Path("/mock/repo"))
-                mock_get_issue.assert_called_once_with(Path("/mock/repo"), "456")
+            assert result == "# Different workplan\n\n1. Implement Y\n2. Test Y"
+            mock_cwd.assert_called()
+            mock_get_issue.assert_called_once_with(Path("/mock/repo"), "456")
 
 
-@pytest.mark.asyncio
-async def test_get_workplan_from_main_repo_missing_issue(mock_request_context):
-    """Test getting the workplan from the main repository without providing issue_number."""
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/repo")
-
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            # Simulate failing to get branch and issue from main repo
-            mock_get_branch_issue.side_effect = YellhornMCPError(
-                "Branch name 'main' does not match expected format"
-            )
-
-            # Should raise an error when issue_number is not provided in the main repo
-            with pytest.raises(
-                YellhornMCPError, match="parameter is required when running 'get_workplan' outside"
-            ):
-                await get_workplan(
-                    ctx=mock_request_context,
-                )
+# This test is no longer needed because issue_number is now required
 
 
-@pytest.mark.asyncio
-async def test_get_workplan_from_worktree_with_explicit_issue(mock_request_context):
-    """Test getting the workplan from a worktree with an explicit issue number."""
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/worktree")
-
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            mock_get_branch_issue.return_value = ("issue-123-feature", "123")
-
-            with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-                mock_get_issue.return_value = "# workplan\n\n1. Different workplan X\n2. Test Y"
-
-                # Test with explicit issue number that overrides the auto-detected one
-                result = await get_workplan(
-                    ctx=mock_request_context,
-                    issue_number="456",  # Different from branch-detected issue (123)
-                )
-
-                assert result == "# workplan\n\n1. Different workplan X\n2. Test Y"
-                assert "workplan X" in result
-                mock_cwd.assert_called()
-                mock_get_branch_issue.assert_called_once_with(Path("/mock/worktree"))
-                # Should use the explicitly provided issue number
-                mock_get_issue.assert_called_once_with(Path("/mock/worktree"), "456")
+# This test is no longer needed because issue number auto-detection was removed
 
 
 @pytest.mark.asyncio
 async def test_review_workplan(mock_request_context, mock_genai_client):
-    """Test reviewing work from a worktree (auto-detected issue number)."""
+    """Test reviewing work with required issue number."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
     with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/worktree")
+        mock_cwd.return_value = Path("/mock/repo")
 
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            mock_get_branch_issue.return_value = ("issue-123-feature", "123")
+        with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+            # Mock the git rev-parse commands
+            mock_run_git.side_effect = ["abc1234", "def5678"]  # base_commit_hash, head_commit_hash
 
             with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
                 mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
-                with patch("yellhorn_mcp.server.get_github_pr_diff") as mock_get_diff:
+                with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
                     mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
                     with patch("asyncio.create_task") as mock_create_task:
-                        # Test with PR URL
-                        pr_url = "https://github.com/user/repo/pull/456"
+                        # Test with default refs
                         result = await review_workplan(
-                            pr_url=pr_url,
                             ctx=mock_request_context,
+                            issue_number="123",
                         )
 
-                        # Check the result message
-                        assert "Review task initiated for PR" in result
-                        assert pr_url in result
-                        assert "issue #123" in result
+                    # Check the result message
+                    assert (
+                        "Review task initiated comparing main (`abc1234`)..HEAD (`def5678`)"
+                        in result
+                    )
+                    assert "issue #123" in result
+                    assert "GitHub sub-issue" in result
 
-                        # Verify the function calls
-                        mock_cwd.assert_called()
-                        mock_get_branch_issue.assert_called_once_with(Path("/mock/worktree"))
-                        mock_get_issue.assert_called_once_with(Path("/mock/worktree"), "123")
-                        mock_get_diff.assert_called_once_with(Path("/mock/worktree"), pr_url)
-                        mock_create_task.assert_called_once()
+                    # Verify the function calls
+                    mock_cwd.assert_called()
+                    mock_get_issue.assert_called_once_with(Path("/mock/repo"), "123")
+                    mock_get_diff.assert_called_once_with(Path("/mock/repo"), "main", "HEAD")
+                    mock_create_task.assert_called_once()
 
-                        # Check process_review_async coroutine
-                        coroutine = mock_create_task.call_args[0][0]
-                        assert coroutine.__name__ == "process_review_async"
+                    # Check process_review_async coroutine
+                    coroutine = mock_create_task.call_args[0][0]
+                    assert coroutine.__name__ == "process_review_async"
+
+                    # Reset mocks for next test
+                    mock_get_issue.reset_mock()
+                    mock_get_diff.reset_mock()
+                    mock_create_task.reset_mock()
+                    mock_run_git.reset_mock()
+
+                    # New mock values for custom refs
+                    mock_run_git.side_effect = [
+                        "v1.0-hash",
+                        "feature-hash",
+                    ]  # base_commit_hash, head_commit_hash
+
+                    # Test with custom refs
+                    result = await review_workplan(
+                        ctx=mock_request_context,
+                        issue_number="123",
+                        base_ref="v1.0",
+                        head_ref="feature-branch",
+                    )
+
+                    # Check custom refs were used
+                    assert (
+                        "Review task initiated comparing v1.0 (`v1.0-hash`)..feature-branch (`feature-hash`)"
+                        in result
+                    )
+                    mock_get_diff.assert_called_once_with(
+                        Path("/mock/repo"), "v1.0", "feature-branch"
+                    )
 
     # Test error handling
     with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/worktree")
+        mock_cwd.return_value = Path("/mock/repo")
 
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            mock_get_branch_issue.side_effect = YellhornMCPError("Not in a git repository")
+        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+            mock_get_issue.side_effect = Exception("Failed to get issue")
+
+            with pytest.raises(YellhornMCPError, match="Failed to trigger workplan review"):
+                await review_workplan(ctx=mock_request_context, issue_number="123")
+
+    # Test with invalid git ref
+    with patch("pathlib.Path.cwd") as mock_cwd:
+        mock_cwd.return_value = Path("/mock/repo")
+
+        with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+            # Simulate error with invalid git ref
+            mock_run_git.side_effect = YellhornMCPError("Invalid git reference")
 
             with pytest.raises(YellhornMCPError, match="Failed to trigger workplan review"):
                 await review_workplan(
-                    pr_url="https://github.com/user/repo/pull/456", ctx=mock_request_context
+                    ctx=mock_request_context,
+                    issue_number="123",
+                    base_ref="invalid-ref",
+                    head_ref="invalid-ref",
                 )
-
-    # Test with invalid PR URL
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/worktree")
-
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            mock_get_branch_issue.return_value = ("issue-123-feature", "123")
-
-            with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-                mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
-
-                with patch("yellhorn_mcp.server.get_github_pr_diff") as mock_get_diff:
-                    # Simulate error with invalid PR URL
-                    mock_get_diff.side_effect = YellhornMCPError("Invalid PR URL")
-
-                    with pytest.raises(YellhornMCPError, match="Failed to trigger workplan review"):
-                        await review_workplan(pr_url="invalid-url", ctx=mock_request_context)
 
 
 @pytest.mark.asyncio
-async def test_review_workplan_from_main_repo(mock_request_context, mock_genai_client):
-    """Test reviewing work from the main repository (explicit issue number)."""
+async def test_review_workplan_with_different_issue(mock_request_context, mock_genai_client):
+    """Test reviewing work with a different issue number."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
     with patch("pathlib.Path.cwd") as mock_cwd:
         mock_cwd.return_value = Path("/mock/repo")
 
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            # Simulate failing to get branch and issue from main repo
-            mock_get_branch_issue.side_effect = YellhornMCPError(
-                "Branch name 'main' does not match expected format"
-            )
+        with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+            # Mock the git rev-parse commands
+            mock_run_git.side_effect = [
+                "v1.0-hash",
+                "feature-hash",
+            ]  # base_commit_hash, head_commit_hash
 
             with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-                mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
+                mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
 
-                with patch("yellhorn_mcp.server.get_github_pr_diff") as mock_get_diff:
+                with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
                     mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
                     with patch("asyncio.create_task") as mock_create_task:
-                        # Test with explicit issue number
-                        pr_url = "https://github.com/user/repo/pull/456"
+                        # Test with a different issue number and custom refs
+                        base_ref = "v1.0"
+                        head_ref = "feature-branch"
                         result = await review_workplan(
-                            pr_url=pr_url,
                             ctx=mock_request_context,
                             issue_number="456",
+                            base_ref=base_ref,
+                            head_ref=head_ref,
                         )
 
                         # Check the result message
-                        assert "Review task initiated for PR" in result
-                        assert pr_url in result
+                        assert (
+                            f"Review task initiated comparing {base_ref} (`v1.0-hash`)..{head_ref} (`feature-hash`)"
+                            in result
+                        )
                         assert "issue #456" in result
+                        assert "GitHub sub-issue" in result
 
                         # Verify the function calls
                         mock_cwd.assert_called()
-                        mock_get_branch_issue.assert_called_once_with(Path("/mock/repo"))
                         mock_get_issue.assert_called_once_with(Path("/mock/repo"), "456")
-                        mock_get_diff.assert_called_once_with(Path("/mock/repo"), pr_url)
+                        mock_get_diff.assert_called_once_with(
+                            Path("/mock/repo"), base_ref, head_ref
+                        )
                         mock_create_task.assert_called_once()
 
                         # Check process_review_async coroutine
@@ -1002,78 +1052,58 @@ async def test_review_workplan_from_main_repo(mock_request_context, mock_genai_c
                         assert coroutine.__name__ == "process_review_async"
 
 
-@pytest.mark.asyncio
-async def test_review_workplan_from_main_repo_missing_issue(mock_request_context):
-    """Test reviewing work from the main repository without providing issue_number."""
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/repo")
+# This test is no longer needed because issue_number is now required
 
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            # Simulate failing to get branch and issue from main repo
-            mock_get_branch_issue.side_effect = YellhornMCPError(
-                "Branch name 'main' does not match expected format"
-            )
 
-            # Should raise an error when issue_number is not provided in the main repo
-            with pytest.raises(
-                YellhornMCPError,
-                match="parameter is required when running 'review_workplan' outside",
-            ):
-                await review_workplan(
-                    pr_url="https://github.com/user/repo/pull/456",
-                    ctx=mock_request_context,
-                )
+# This test is no longer needed because issue number auto-detection was removed
 
 
 @pytest.mark.asyncio
-async def test_review_workplan_from_worktree_with_explicit_issue(
-    mock_request_context, mock_genai_client
-):
-    """Test reviewing work from a worktree with an explicit issue number."""
-    # Set the mock client in the context
-    mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
+async def test_get_git_diff():
+    """Test getting the diff between git refs."""
+    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+        mock_git.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/worktree")
+        result = await get_git_diff(Path("/mock/repo"), "main", "feature-branch")
 
-        with patch("yellhorn_mcp.server.get_current_branch_and_issue") as mock_get_branch_issue:
-            mock_get_branch_issue.return_value = ("issue-123-feature", "123")
+        assert result == "diff --git a/file.py b/file.py\n+def x(): pass"
+        mock_git.assert_called_once_with(Path("/mock/repo"), ["diff", "main..feature-branch"])
 
-            with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-                mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
-                with patch("yellhorn_mcp.server.get_github_pr_diff") as mock_get_diff:
-                    mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
+@pytest.mark.asyncio
+async def test_create_github_subissue():
+    """Test creating a GitHub sub-issue."""
+    with (
+        patch("yellhorn_mcp.server.ensure_label_exists") as mock_ensure_label,
+        patch("pathlib.Path.exists", return_value=True),
+        patch("pathlib.Path.unlink") as mock_unlink,
+        patch("builtins.open", create=True),
+        patch("yellhorn_mcp.server.run_github_command") as mock_gh,
+    ):
+        mock_gh.return_value = "https://github.com/user/repo/issues/456"
 
-                    with patch("asyncio.create_task") as mock_create_task:
-                        # Test with explicit issue number that overrides the auto-detected one
-                        pr_url = "https://github.com/user/repo/pull/456"
-                        result = await review_workplan(
-                            pr_url=pr_url,
-                            ctx=mock_request_context,
-                            issue_number="456",  # Different from branch-detected issue (123)
-                        )
+        result = await create_github_subissue(
+            Path("/mock/repo"),
+            "123",
+            "Review: main..HEAD for Workplan #123",
+            "## Review content",
+            ["yellhorn-mcp"],
+        )
 
-                        # Check the result message - should use the explicit issue number
-                        assert "Review task initiated for PR" in result
-                        assert pr_url in result
-                        assert "issue #456" in result
-
-                        # Verify the function calls
-                        mock_cwd.assert_called()
-                        mock_get_branch_issue.assert_called_once_with(Path("/mock/worktree"))
-                        # Should use the explicitly provided issue number
-                        mock_get_issue.assert_called_once_with(Path("/mock/worktree"), "456")
-                        mock_get_diff.assert_called_once_with(Path("/mock/worktree"), pr_url)
-                        mock_create_task.assert_called_once()
-
-                        # Check process_review_async coroutine was called
-                        coroutine = mock_create_task.call_args[0][0]
-                        assert coroutine.__name__ == "process_review_async"
-
-                        # Instead of trying to inspect coroutine internals, just verify that
-                        # the result string contains the expected issue number
-                        assert "issue #456" in result
+        assert result == "https://github.com/user/repo/issues/456"
+        mock_ensure_label.assert_called_once_with(
+            Path("/mock/repo"),
+            "yellhorn-review-subissue",
+            "Review sub-issues created by yellhorn-mcp",
+        )
+        mock_gh.assert_called_once()
+        # Verify the correct labels were passed
+        args, kwargs = mock_gh.call_args
+        assert "--label" in args[1]
+        index = args[1].index("--label") + 1
+        assert "yellhorn-mcp,yellhorn-review-subissue" in args[1][index]
+        # Verify temp file is cleaned up
+        mock_unlink.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1083,86 +1113,80 @@ async def test_process_review_async(mock_request_context, mock_genai_client):
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
     with (
-        patch("yellhorn_mcp.server.post_github_pr_review") as mock_post_review,
+        patch("yellhorn_mcp.server.create_github_subissue") as mock_create_subissue,
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
+        mock_create_subissue.return_value = "https://github.com/user/repo/issues/456"
 
         workplan = "1. Implement X\n2. Test X"
         diff = "diff --git a/file.py b/file.py\n+def x(): pass"
-        pr_url = "https://github.com/user/repo/pull/1"
+        base_ref = "main"
+        head_ref = "feature-branch"
         issue_number = "42"
 
-        # With PR URL and issue number (should post review with issue reference)
+        # With issue number (should create sub-issue)
         response = await process_review_async(
             mock_request_context.request_context.lifespan_context["repo_path"],
             mock_genai_client,
             "gemini-model",
             workplan,
             diff,
-            pr_url,
+            base_ref,
+            head_ref,
             issue_number,
             mock_request_context,
         )
 
-        # Check that the review contains the right content
-        assert (
-            response == f"Review based on workplan in issue #{issue_number}\n\nMock response text"
-        )
+        # Check that the response mentions the sub-issue URL
+        assert "Review sub-issue created: https://github.com/user/repo/issues/456" in response
 
         # Check that the API was called with codebase included in prompt
         mock_genai_client.aio.models.generate_content.assert_called_once()
         args, kwargs = mock_genai_client.aio.models.generate_content.call_args
         assert "Formatted codebase" in kwargs.get("contents", "")
+        assert f"Base ref: {base_ref}" in kwargs.get("contents", "")
+        assert f"Head ref: {head_ref}" in kwargs.get("contents", "")
 
-        # Check that the review was posted to PR
-        mock_post_review.assert_called_once()
-        args, kwargs = mock_post_review.call_args
-        assert args[1] == pr_url
-        assert (
-            f"issue #{issue_number}" in args[2]
-        )  # Check that issue reference is in review content
+        # Verify structured output instructions are present
+        assert "## Review Summary" in kwargs.get("contents", "")
+        assert "## Completed Items" in kwargs.get("contents", "")
+        assert "## Missing Items" in kwargs.get("contents", "")
+        assert "## Incorrect Implementation" in kwargs.get("contents", "")
+        assert "## Suggested Improvements / Issues" in kwargs.get("contents", "")
+        assert "## Intentional Divergence Notes" in kwargs.get("contents", "")
+
+        # Check Markdown block unwrapping instruction
+        assert "IMPORTANT: Respond *only* with the Markdown content" in kwargs.get("contents", "")
+
+        # Check that the sub-issue was created with the right parameters
+        mock_create_subissue.assert_called_once()
+        args, kwargs = mock_create_subissue.call_args
+        assert args[0] == Path("/mock/repo")
+        assert args[1] == issue_number
+        assert f"Review: {base_ref}..{head_ref}" in args[2]
+        assert "## Comparison Metadata" in args[3]
+        assert args[4] == ["yellhorn-mcp"]
 
         # Reset mocks
         mock_genai_client.aio.models.generate_content.reset_mock()
-        mock_post_review.reset_mock()
+        mock_create_subissue.reset_mock()
 
-        # Without issue number (should not include issue reference)
+        # Without issue number (should not create sub-issue)
         response = await process_review_async(
             mock_request_context.request_context.lifespan_context["repo_path"],
             mock_genai_client,
             "gemini-model",
             workplan,
             diff,
-            pr_url,
+            base_ref,
+            head_ref,
             None,
             mock_request_context,
         )
 
         assert response == "Mock response text"
         mock_genai_client.aio.models.generate_content.assert_called_once()
-        args, kwargs = mock_post_review.call_args
-        assert "Review for workplan" not in args[2]
-
-        # Reset mocks
-        mock_genai_client.aio.models.generate_content.reset_mock()
-        mock_post_review.reset_mock()
-
-        # Without PR URL (should not post review)
-        response = await process_review_async(
-            mock_request_context.request_context.lifespan_context["repo_path"],
-            mock_genai_client,
-            "gemini-model",
-            workplan,
-            diff,
-            None,
-            issue_number,
-            mock_request_context,
-        )
-
-        assert "Mock response text" in response
-        assert f"issue #{issue_number}" in response
-        mock_genai_client.aio.models.generate_content.assert_called_once()
-        mock_post_review.assert_not_called()
+        mock_create_subissue.assert_not_called()
