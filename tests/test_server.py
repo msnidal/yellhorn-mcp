@@ -185,8 +185,8 @@ from yellhorn_mcp.server import (
     YellhornMCPError,
     create_git_worktree,
     create_github_subissue,
-    create_worktree,
     create_workplan,
+    create_worktree,
     ensure_label_exists,
     format_codebase_for_prompt,
     generate_branch_name,
@@ -925,16 +925,17 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
                         )
 
                     # Check the result message
-                    assert "Review task initiated comparing main (`abc1234`)..HEAD (`def5678`)" in result
+                    assert (
+                        "Review task initiated comparing main (`abc1234`)..HEAD (`def5678`)"
+                        in result
+                    )
                     assert "issue #123" in result
                     assert "GitHub sub-issue" in result
 
                     # Verify the function calls
                     mock_cwd.assert_called()
                     mock_get_issue.assert_called_once_with(Path("/mock/repo"), "123")
-                    mock_get_diff.assert_called_once_with(
-                        Path("/mock/repo"), "main", "HEAD"
-                    )
+                    mock_get_diff.assert_called_once_with(Path("/mock/repo"), "main", "HEAD")
                     mock_create_task.assert_called_once()
 
                     # Check process_review_async coroutine
@@ -946,9 +947,12 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
                     mock_get_diff.reset_mock()
                     mock_create_task.reset_mock()
                     mock_run_git.reset_mock()
-                    
+
                     # New mock values for custom refs
-                    mock_run_git.side_effect = ["v1.0-hash", "feature-hash"]  # base_commit_hash, head_commit_hash
+                    mock_run_git.side_effect = [
+                        "v1.0-hash",
+                        "feature-hash",
+                    ]  # base_commit_hash, head_commit_hash
 
                     # Test with custom refs
                     result = await review_workplan(
@@ -959,7 +963,10 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
                     )
 
                     # Check custom refs were used
-                    assert "Review task initiated comparing v1.0 (`v1.0-hash`)..feature-branch (`feature-hash`)" in result
+                    assert (
+                        "Review task initiated comparing v1.0 (`v1.0-hash`)..feature-branch (`feature-hash`)"
+                        in result
+                    )
                     mock_get_diff.assert_called_once_with(
                         Path("/mock/repo"), "v1.0", "feature-branch"
                     )
@@ -984,10 +991,10 @@ async def test_review_workplan(mock_request_context, mock_genai_client):
 
             with pytest.raises(YellhornMCPError, match="Failed to trigger workplan review"):
                 await review_workplan(
-                    ctx=mock_request_context, 
+                    ctx=mock_request_context,
                     issue_number="123",
-                    base_ref="invalid-ref", 
-                    head_ref="invalid-ref"
+                    base_ref="invalid-ref",
+                    head_ref="invalid-ref",
                 )
 
 
@@ -1002,7 +1009,10 @@ async def test_review_workplan_with_different_issue(mock_request_context, mock_g
 
         with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
             # Mock the git rev-parse commands
-            mock_run_git.side_effect = ["v1.0-hash", "feature-hash"]  # base_commit_hash, head_commit_hash
+            mock_run_git.side_effect = [
+                "v1.0-hash",
+                "feature-hash",
+            ]  # base_commit_hash, head_commit_hash
 
             with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
                 mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
@@ -1022,7 +1032,10 @@ async def test_review_workplan_with_different_issue(mock_request_context, mock_g
                         )
 
                         # Check the result message
-                        assert f"Review task initiated comparing {base_ref} (`v1.0-hash`)..{head_ref} (`feature-hash`)" in result
+                        assert (
+                            f"Review task initiated comparing {base_ref} (`v1.0-hash`)..{head_ref} (`feature-hash`)"
+                            in result
+                        )
                         assert "issue #456" in result
                         assert "GitHub sub-issue" in result
 

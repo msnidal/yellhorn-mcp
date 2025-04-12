@@ -1232,7 +1232,9 @@ IMPORTANT: Respond *only* with the Markdown content for the review. Do *not* wra
             # Use commit hashes if available, otherwise use the ref names
             base_display = f"{base_ref} ({base_commit_hash})" if base_commit_hash else base_ref
             head_display = f"{head_ref} ({head_commit_hash})" if head_commit_hash else head_ref
-            review_title = f"Review: {base_display}..{head_display} for Workplan #{workplan_issue_number}"
+            review_title = (
+                f"Review: {base_display}..{head_display} for Workplan #{workplan_issue_number}"
+            )
 
             # Add metadata to the review content with commit hashes
             base_hash_info = f" (`{base_commit_hash}`)" if base_commit_hash else ""
