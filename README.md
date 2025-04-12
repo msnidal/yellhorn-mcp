@@ -78,12 +78,7 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
 4. View the workplan if needed:
 
    ```
-   # Option 1: From the worktree directory (auto-detects issue number)
-   # While in the worktree directory
-   Please get the current workplan for this worktree
-   
-   # Option 2: From the main repository (requires explicit issue number)
-   # You don't need to be in the worktree directory
+   # You can run this from anywhere
    Please get the workplan for issue #123
    ```
 
@@ -96,13 +91,8 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
    git push origin HEAD
    gh pr create --title "[PR Title]" --body "[PR Description]"
    
-   # Option 1: From the worktree directory (auto-detects issue number)
-   # While in the worktree directory, ask Claude to review it
-   Please trigger a review for PR "[PR URL]" against the original workplan
-   
-   # Option 2: From the main repository (requires explicit issue number)
-   # You don't need to be in the worktree directory
-   Please trigger a review for PR "[PR URL]" against the workplan in issue #123
+   # You can run this from anywhere
+   Please review the PR comparing "main" and "feature-branch" against the workplan in issue #123
    ```
 
 ## Tools
@@ -139,11 +129,11 @@ Creates a git worktree with a linked branch for isolated development from an exi
 
 ### get_workplan
 
-Retrieves the workplan content (GitHub issue body) associated with a workplan. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).
+Retrieves the workplan content (GitHub issue body) associated with a workplan.
 
 **Input**:
 
-- `issue_number`: Optional issue number for the workplan. Required if run outside a Yellhorn worktree.
+- `issue_number`: The GitHub issue number for the workplan.
 
 **Output**:
 
@@ -151,12 +141,13 @@ Retrieves the workplan content (GitHub issue body) associated with a workplan. C
 
 ### review_workplan
 
-Triggers an asynchronous code review for a Pull Request against its original workplan issue. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).
+Triggers an asynchronous code review comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the review asynchronously after running (in the background).
 
 **Input**:
 
-- `pr_url`: The URL of the GitHub Pull Request to review
-- `issue_number`: Optional issue number for the workplan. Required if run outside a Yellhorn worktree.
+- `issue_number`: The GitHub issue number for the workplan.
+- `base_ref`: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
+- `head_ref`: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
 
 **Output**:
 

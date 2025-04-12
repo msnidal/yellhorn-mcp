@@ -77,71 +77,48 @@ async def create_worktree(
 
 async def get_workplan(
     session: ClientSession,
-    issue_number: str | None = None,
+    issue_number: str,
 ) -> str:
     """
     Get the workplan content from a GitHub issue.
 
     This function calls the get_workplan tool to fetch the content of the GitHub issue.
-    It can be run from within a worktree created by generate_workplan (auto-detects issue)
-    or from the main repository (requires explicit issue_number).
 
     Args:
         session: MCP client session.
-        issue_number: Optional issue number for the workplan. Required if run outside
-                      a Yellhorn worktree.
+        issue_number: The GitHub issue number for the workplan.
 
     Returns:
         The content of the workplan issue as a string.
-
-    Note:
-        When run from the main repository, issue_number must be provided.
-        When run from a Yellhorn worktree, issue_number is optional and will
-        default to the issue number detected from the branch name.
     """
-    # Prepare arguments, including optional issue_number
-    arguments = {}
-    if issue_number:
-        arguments["issue_number"] = issue_number
-
     # Call the get_workplan tool
-    result = await session.call_tool("get_workplan", arguments=arguments)
+    result = await session.call_tool("get_workplan", arguments={"issue_number": issue_number})
     return result
 
 
 async def review_workplan(
     session: ClientSession,
+    issue_number: str,
     base_ref: str = "main",
     head_ref: str = "HEAD",
-    issue_number: str | None = None,
 ) -> str:
     """
     Trigger a review comparing two git refs against the original workplan.
 
     This function calls the review_workplan tool to fetch the original workplan,
     generate a diff between the git refs, and trigger an asynchronous review.
-    It can be run from within a worktree created by generate_workplan (auto-detects issue)
-    or from the main repository (requires explicit issue_number).
 
     Args:
         session: MCP client session.
+        issue_number: The GitHub issue number for the workplan.
         base_ref: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
-        issue_number: Optional issue number for the workplan. Required if run outside
-                      a Yellhorn worktree.
 
     Returns:
         A confirmation message that the review task has been initiated.
-
-    Note:
-        When run from the main repository, issue_number must be provided.
-        When run from a Yellhorn worktree, issue_number is optional and will
-        default to the issue number detected from the branch name.
     """
-    # Prepare arguments, including optional issue_number
-    arguments = {"base_ref": base_ref, "head_ref": head_ref}
-    if issue_number:
-        arguments["issue_number"] = issue_number
+    # Prepare arguments
+    arguments = {"issue_number": issue_number, "base_ref": base_ref, "head_ref": head_ref}
 
     # Call the review_workplan tool
     result = await session.call_tool("review_workplan", arguments=arguments)
@@ -234,10 +211,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
 
             elif command == "getplan":
                 # Get workplan
-                if args.issue_number:
-                    print(f"Retrieving workplan for issue #{args.issue_number}...")
-                else:
-                    print("Retrieving workplan for current worktree...")
+                print(f"Retrieving workplan for issue #{args.issue_number}...")
 
                 try:
                     workplan = await get_workplan(session, args.issue_number)
@@ -247,21 +221,16 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                     print("=" * 50)
                 except Exception as e:
                     print(f"Error: {str(e)}")
-                    print(
-                        "Ensure you are running this command from the correct directory (worktree or main repo) and provide --issue-number if required."
-                    )
                     sys.exit(1)
 
             elif command == "review":
                 # Review work
                 print(f"Triggering review comparing {args.base_ref}..{args.head_ref}")
-                if args.issue_number:
-                    print(f"Explicitly targeting workplan issue: {args.issue_number}")
+                print(f"For workplan issue: {args.issue_number}")
 
                 try:
-                    # Prepare arguments, including optional issue_number
                     result = await review_workplan(
-                        session, args.base_ref, args.head_ref, args.issue_number
+                        session, args.issue_number, args.base_ref, args.head_ref
                     )
                     print("\nReview Task:")
                     print(result)
@@ -270,9 +239,6 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                     )
                 except Exception as e:
                     print(f"Error: {str(e)}")
-                    print(
-                        "Ensure you are running this command from the correct directory (worktree or main repo) and provide --issue-number if required."
-                    )
                     sys.exit(1)
 
 
@@ -315,19 +281,24 @@ def main():
     # Get workplan command
     getplan_parser = subparsers.add_parser(
         "getplan",
-        help="Get the workplan from a GitHub issue. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).",
+        help="Get the workplan from a GitHub issue.",
     )
     getplan_parser.add_argument(
         "--issue-number",
         dest="issue_number",
-        required=False,
-        default=None,
-        help="GitHub issue number for the workplan (required if not in a worktree)",
+        required=True,
+        help="GitHub issue number for the workplan",
     )
 
     # Review work command
     review_parser = subparsers.add_parser(
         "review", help="Trigger a review comparing two git refs against the workplan"
+    )
+    review_parser.add_argument(
+        "--issue-number",
+        dest="issue_number",
+        required=True,
+        help="GitHub issue number for the workplan",
     )
     review_parser.add_argument(
         "--base-ref",
@@ -342,13 +313,6 @@ def main():
         required=False,
         default="HEAD",
         help="Head Git ref (commit SHA, branch name, tag) for comparison (default: 'HEAD')",
-    )
-    review_parser.add_argument(
-        "--issue-number",
-        dest="issue_number",
-        required=False,
-        default=None,
-        help="GitHub issue number for the workplan (required if not in a worktree)",
     )
 
     args = parser.parse_args()

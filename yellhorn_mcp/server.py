@@ -1096,79 +1096,39 @@ async def create_worktree(
 
 @mcp.tool(
     name="get_workplan",
-    description="Retrieves the workplan content (GitHub issue body) associated with a workplan. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).",
+    description="Retrieves the workplan content (GitHub issue body) associated with a workplan.",
 )
 async def get_workplan(
     ctx: Context,
-    issue_number: str | None = None,
+    issue_number: str,
 ) -> str:
     """
     Retrieve the workplan content (GitHub issue body) associated with a workplan.
 
-    This tool can be run either from within a worktree directory created by the 'generate_workplan'
-    tool (where it automatically detects the issue number from the branch name) or from the main
-    repository (where the issue_number must be explicitly provided). It fetches the issue content
-    from GitHub.
+    This tool fetches the content of a GitHub issue created by the 'generate_workplan' tool.
+    It retrieves the detailed implementation plan from the specified issue number.
 
     Args:
         ctx: Server context.
-        issue_number: Optional issue number for the workplan. Required if run outside
-                      a Yellhorn worktree.
+        issue_number: The GitHub issue number for the workplan.
 
     Returns:
         The content of the workplan issue as a string.
 
     Raises:
-        YellhornMCPError: If not in a valid worktree and issue_number is not provided,
-                          or if unable to fetch the issue content.
+        YellhornMCPError: If unable to fetch the issue content.
     """
     try:
         # Get the current working directory
         current_path = Path.cwd()
-        target_issue_number: str | None = None
 
-        # Attempt to determine the issue number from the branch name (worktree context)
-        try:
-            # This function implicitly checks if we are in a correctly named worktree branch
-            _, issue_from_branch = await get_current_branch_and_issue(current_path)
-            # If an issue number was explicitly provided, it takes precedence
-            if issue_number:
-                await ctx.log(
-                    level="warning",
-                    message=f"Explicit issue number {issue_number} provided, overriding issue {issue_from_branch} detected from branch.",
-                )
-                target_issue_number = issue_number
-            else:
-                target_issue_number = issue_from_branch
-            await ctx.log(
-                level="info",
-                message=f"Running in worktree context for issue #{target_issue_number}.",
-            )
-
-        except YellhornMCPError:
-            # We are likely not in a Yellhorn worktree (e.g., main repo)
-            await ctx.log(
-                level="info",
-                message="Not running in a Yellhorn worktree context. Explicit issue number required.",
-            )
-            if not issue_number:
-                raise YellhornMCPError(
-                    "Error: 'issue_number' parameter is required when running 'get_workplan' outside of a Yellhorn-managed worktree."
-                )
-            target_issue_number = issue_number
-            await ctx.log(
-                level="info",
-                message=f"Running in main repository context for specified issue #{target_issue_number}.",
-            )
-
-        # Ensure target_issue_number is set before proceeding
-        if not target_issue_number:
-            raise YellhornMCPError(
-                "Unable to determine target issue number. Please provide an explicit issue_number."
-            )
+        await ctx.log(
+            level="info",
+            message=f"Fetching workplan for issue #{issue_number}.",
+        )
 
         # Fetch the issue content
-        workplan = await get_github_issue_body(current_path, target_issue_number)
+        workplan = await get_github_issue_body(current_path, issue_number)
 
         return workplan
 
@@ -1299,84 +1259,44 @@ IMPORTANT: Respond *only* with the Markdown content for the review. Do *not* wra
 
 @mcp.tool(
     name="review_workplan",
-    description="Triggers an asynchronous code review comparing two git refs (branches or commits) against a workplan. Creates a GitHub sub-issue with the review. Can be run from a worktree (auto-detects issue) or the main repo (requires explicit issue_number).",
+    description="Triggers an asynchronous code review comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the review asynchronously after running (in the background).",
 )
 async def review_workplan(
     ctx: Context,
+    issue_number: str,
     base_ref: str = "main",
     head_ref: str = "HEAD",
-    issue_number: str | None = None,
 ) -> str:
     """
     Trigger an asynchronous code review comparing two git refs against a workplan.
 
-    This tool can be run either from within a worktree directory created by the 'generate_workplan'
-    tool (where it automatically detects the issue number from the branch name) or from the main
-    repository (where the issue_number must be explicitly provided). It fetches the original
-    workplan from the associated GitHub issue, generates a diff between the specified git refs,
-    and initiates an asynchronous AI review process that creates a GitHub sub-issue with the review.
+    This tool fetches the original workplan from the specified GitHub issue, generates a diff
+    between the specified git refs, and initiates an asynchronous AI review process that creates
+    a GitHub sub-issue with the review.
 
     Args:
         ctx: Server context.
+        issue_number: The GitHub issue number for the workplan.
         base_ref: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
-        issue_number: Optional issue number for the workplan. Required if run outside
-                      a Yellhorn worktree.
 
     Returns:
         A confirmation message that the review task has been initiated.
 
     Raises:
-        YellhornMCPError: If not in a valid worktree and issue_number is not provided,
-                          or if errors occur during the review process.
+        YellhornMCPError: If errors occur during the review process.
     """
     try:
         # Get the current working directory
         current_path = Path.cwd()
-        target_issue_number: str | None = None
 
-        # Attempt to determine the issue number from the branch name (worktree context)
-        try:
-            # This function implicitly checks if we are in a correctly named worktree branch
-            _, issue_from_branch = await get_current_branch_and_issue(current_path)
-            # If an issue number was explicitly provided, it takes precedence
-            if issue_number:
-                await ctx.log(
-                    level="warning",
-                    message=f"Explicit issue number {issue_number} provided, overriding issue {issue_from_branch} detected from branch.",
-                )
-                target_issue_number = issue_number
-            else:
-                target_issue_number = issue_from_branch
-            await ctx.log(
-                level="info",
-                message=f"Running in worktree context for issue #{target_issue_number}.",
-            )
-
-        except YellhornMCPError:
-            # We are likely not in a Yellhorn worktree (e.g., main repo)
-            await ctx.log(
-                level="info",
-                message="Not running in a Yellhorn worktree context. Explicit issue number required.",
-            )
-            if not issue_number:
-                raise YellhornMCPError(
-                    "Error: 'issue_number' parameter is required when running 'review_workplan' outside of a Yellhorn-managed worktree."
-                )
-            target_issue_number = issue_number
-            await ctx.log(
-                level="info",
-                message=f"Running in main repository context for specified issue #{target_issue_number}.",
-            )
-
-        # Ensure target_issue_number is set before proceeding
-        if not target_issue_number:
-            raise YellhornMCPError(
-                "Unable to determine target issue number. Please provide an explicit issue_number."
-            )
+        await ctx.log(
+            level="info",
+            message=f"Reviewing code for workplan issue #{issue_number}.",
+        )
 
         # Fetch the workplan and generate diff for review
-        workplan = await get_github_issue_body(current_path, target_issue_number)
+        workplan = await get_github_issue_body(current_path, issue_number)
         diff = await get_git_diff(current_path, base_ref, head_ref)
 
         # Check if diff is empty
@@ -1396,13 +1316,13 @@ async def review_workplan(
                 diff,
                 base_ref,
                 head_ref,
-                target_issue_number,
+                issue_number,
                 ctx,
             )
         )
 
         return (
-            f"Review task initiated comparing {base_ref}..{head_ref} against workplan issue #{target_issue_number}. "
+            f"Review task initiated comparing {base_ref}..{head_ref} against workplan issue #{issue_number}. "
             f"Results will be posted as a GitHub sub-issue linked to the workplan."
         )
 
