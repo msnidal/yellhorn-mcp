@@ -7,7 +7,7 @@ Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to
 1. **Create workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
 2. **Create worktree**: Creates a git worktree with a linked branch for isolated development from an existing workplan issue.
 3. **Get workplan**: Retrieves the workplan content from a worktree's associated GitHub issue.
-4. **Review workplan**: Triggers an asynchronous code review for a Pull Request against its original workplan issue.
+4. **Judge workplan**: Triggers an asynchronous code judgement for a Pull Request against its original workplan issue.
 
 ## Installation
 
@@ -27,7 +27,7 @@ The server requires the following environment variables:
 
 - `GEMINI_API_KEY` (required): Your Gemini API key
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
-- `YELLHORN_MCP_MODEL` (optional): Gemini model to use (defaults to "gemini-2.5-pro-exp-03-25")
+- `YELLHORN_MCP_MODEL` (optional): Gemini model to use (defaults to "gemini-2.5-pro-preview-03-25"). You can also use "gemini-2.5-flash-preview-04-17" for lower latency.
 
 ### Excludes with .yellhornignore
 
@@ -79,7 +79,7 @@ gh auth login
 # Set environment variables
 export GEMINI_API_KEY=your_api_key_here
 export REPO_PATH=/path/to/your/repo
-export YELLHORN_MCP_MODEL=gemini-2.5-pro-exp-03-25
+export YELLHORN_MCP_MODEL=gemini-2.5-pro-preview-03-25
 ```
 
 ## Running the Server
@@ -96,7 +96,7 @@ yellhorn-mcp --repo-path /path/to/repo --host 127.0.0.1 --port 8000
 Available command-line options:
 
 - `--repo-path`: Path to the Git repository (defaults to current directory or REPO_PATH env var)
-- `--model`: Gemini model to use (defaults to "gemini-2.5-pro-exp-03-25" or YELLHORN_MCP_MODEL env var)
+- `--model`: Gemini model to use (defaults to "gemini-2.5-pro-preview-03-25" or YELLHORN_MCP_MODEL env var)
 - `--host`: Host to bind the server to (defaults to 127.0.0.1)
 - `--port`: Port to bind the server to (defaults to 8000)
 
@@ -177,16 +177,16 @@ git push origin HEAD
 gh pr create --title "Implement User Authentication" --body "This PR adds JWT authentication with bcrypt password hashing."
 ```
 
-### 6. Request a Review
+### 6. Request a Judgement
 
-Once your PR is created, you can request a review against the original workplan:
+Once your PR is created, you can request a judgement against the original workplan:
 
 ```
 # You can run this from anywhere
-Please review the PR comparing "main" and "feature-branch" against the workplan in issue #456.
+Please judge the PR comparing "main" and "feature-branch" against the workplan in issue #456.
 ```
 
-This will use the `review_workplan` tool to fetch the original workplan from the specified GitHub issue, generate a diff between the specified git references, and trigger an asynchronous review. The review will be posted as a GitHub sub-issue linked to the original workplan.
+This will use the `judge_workplan` tool to fetch the original workplan from the specified GitHub issue, generate a diff between the specified git references, and trigger an asynchronous judgement. The judgement will be posted as a GitHub sub-issue linked to the original workplan.
 
 ## MCP Tools
 
@@ -232,9 +232,9 @@ Retrieves the workplan content (GitHub issue body) associated with a workplan.
 
 - The content of the workplan issue as a string
 
-### review_workplan
+### judge_workplan
 
-Triggers an asynchronous code review comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the review asynchronously after running (in the background).
+Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background).
 
 **Input**:
 
@@ -244,7 +244,7 @@ Triggers an asynchronous code review comparing two git refs (branches or commits
 
 **Output**:
 
-- A confirmation message that the review task has been initiated
+- A confirmation message that the judgement task has been initiated
 
 ## MCP Resources
 
@@ -318,8 +318,8 @@ curl -X POST http://127.0.0.1:8000/tools/get_workplan \
   -H "Content-Type: application/json" \
   -d '{"issue_number": "123"}'
 
-# Call a tool (review_workplan)
-curl -X POST http://127.0.0.1:8000/tools/review_workplan \
+# Call a tool (judge_workplan)
+curl -X POST http://127.0.0.1:8000/tools/judge_workplan \
   -H "Content-Type: application/json" \
   -d '{"issue_number": "456", "base_ref": "main", "head_ref": "feature-branch"}'
 ```
@@ -341,8 +341,8 @@ python -m examples.client_example worktree --issue-number "123"
 # Get workplan
 python -m examples.client_example getplan --issue-number "123"
 
-# Review work
-python -m examples.client_example review --issue-number "456" --base-ref "main" --head-ref "feature-branch"
+# Judge work
+python -m examples.client_example judge --issue-number "456" --base-ref "main" --head-ref "feature-branch"
 ```
 
 The example client uses the MCP client API to interact with the server through stdio transport, which is the same approach Claude Code uses.
@@ -442,7 +442,7 @@ The publishing workflow will automatically run when the tag is pushed, building 
 
 For advanced use cases, you can modify the server's behavior by editing the source code:
 
-- Adjust the prompt templates in `process_workplan_async` and `process_review_async` functions
+- Adjust the prompt templates in `process_workplan_async` and `process_judgement_async` functions
 - Modify the codebase preprocessing in `get_codebase_snapshot` and `format_codebase_for_prompt`
 - Change the Gemini model version with the `YELLHORN_MCP_MODEL` environment variable
 

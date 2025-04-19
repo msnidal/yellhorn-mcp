@@ -8,7 +8,7 @@ similar to how Claude Code would call the MCP tools. It provides command-line in
 2. Generating workplans (creates GitHub issues)
 3. Creating worktrees for existing workplans
 4. Getting workplans from a worktree
-5. Reviewing completed work (adds reviews to PRs)
+5. Judging completed work (adds judgements to PRs)
 
 This client uses the MCP client API to interact with the server through stdio transport,
 which is the same approach Claude Code uses.
@@ -96,17 +96,17 @@ async def get_workplan(
     return result
 
 
-async def review_workplan(
+async def judge_workplan(
     session: ClientSession,
     issue_number: str,
     base_ref: str = "main",
     head_ref: str = "HEAD",
 ) -> str:
     """
-    Trigger a review comparing two git refs against the original workplan.
+    Trigger a judgement comparing two git refs against the original workplan.
 
-    This function calls the review_workplan tool to fetch the original workplan,
-    generate a diff between the git refs, and trigger an asynchronous review.
+    This function calls the judge_workplan tool to fetch the original workplan,
+    generate a diff between the git refs, and trigger an asynchronous judgement.
 
     Args:
         session: MCP client session.
@@ -115,13 +115,13 @@ async def review_workplan(
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
 
     Returns:
-        A confirmation message that the review task has been initiated.
+        A confirmation message that the judgement task has been initiated.
     """
     # Prepare arguments
     arguments = {"issue_number": issue_number, "base_ref": base_ref, "head_ref": head_ref}
 
-    # Call the review_workplan tool
-    result = await session.call_tool("review_workplan", arguments=arguments)
+    # Call the judge_workplan tool
+    result = await session.call_tool("judge_workplan", arguments=arguments)
     return result
 
 
@@ -223,19 +223,19 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                     print(f"Error: {str(e)}")
                     sys.exit(1)
 
-            elif command == "review":
-                # Review work
-                print(f"Triggering review comparing {args.base_ref}..{args.head_ref}")
+            elif command == "judge":
+                # Judge work
+                print(f"Triggering judgement comparing {args.base_ref}..{args.head_ref}")
                 print(f"For workplan issue: {args.issue_number}")
 
                 try:
-                    result = await review_workplan(
+                    result = await judge_workplan(
                         session, args.issue_number, args.base_ref, args.head_ref
                     )
-                    print("\nReview Task:")
+                    print("\nJudgement Task:")
                     print(result)
                     print(
-                        "\nA review will be generated asynchronously and posted as a GitHub sub-issue."
+                        "\nA judgement will be generated asynchronously and posted as a GitHub sub-issue."
                     )
                 except Exception as e:
                     print(f"Error: {str(e)}")
@@ -290,24 +290,24 @@ def main():
         help="GitHub issue number for the workplan",
     )
 
-    # Review work command
-    review_parser = subparsers.add_parser(
-        "review", help="Trigger a review comparing two git refs against the workplan"
+    # Judge work command
+    judge_parser = subparsers.add_parser(
+        "judge", help="Trigger a judgement comparing two git refs against the workplan"
     )
-    review_parser.add_argument(
+    judge_parser.add_argument(
         "--issue-number",
         dest="issue_number",
         required=True,
         help="GitHub issue number for the workplan",
     )
-    review_parser.add_argument(
+    judge_parser.add_argument(
         "--base-ref",
         dest="base_ref",
         required=False,
         default="main",
         help="Base Git ref (commit SHA, branch name, tag) for comparison (default: 'main')",
     )
-    review_parser.add_argument(
+    judge_parser.add_argument(
         "--head-ref",
         dest="head_ref",
         required=False,
@@ -326,7 +326,7 @@ def main():
         "plan",
         "worktree",
         "getplan",
-        "review",
+        "judge",
     ]:
         print("Error: GEMINI_API_KEY environment variable is not set")
         print("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
