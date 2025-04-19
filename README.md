@@ -7,9 +7,9 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities t
 ## Features
 
 - **Create Workplans**: Creates detailed implementation plans based on a prompt and taking into consideration your entire codebase, posting them as GitHub issues and exposing them as MCP resources for your coding agent
-- **Review Code Diffs**: Provides a tool to evaluate git diffs against the original workplan with full codebase context and provides detailed feedback, ensuring the implementation does not deviate from the original requirements and providing guidance on what to change to do so
+- **Judge Code Diffs**: Provides a tool to evaluate git diffs against the original workplan with full codebase context and provides detailed feedback, ensuring the implementation does not deviate from the original requirements and providing guidance on what to change to do so
 - **Isolated Development Environments**: Creates Git worktrees and linked branches for streamlined, isolated development workflow (can be done separately from workplan generation), allowing parallel development with multiple agents
-- **Seamless GitHub Integration**: Automatically creates labeled issues with proper branch linking in the GitHub UI, posts reviews subissues with references to original workplan issues.
+- **Seamless GitHub Integration**: Automatically creates labeled issues with proper branch linking in the GitHub UI, posts judgement sub-issues with references to original workplan issues.
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
 - **MCP Resources**: Exposes workplans as standard MCP resources for easy listing and retrieval
 
@@ -31,7 +31,7 @@ The server requires the following environment variables:
 
 - `GEMINI_API_KEY`: Your Gemini API key (required)
 - `REPO_PATH`: Path to your repository (defaults to current directory)
-- `YELLHORN_MCP_MODEL`: Gemini model to use (defaults to "gemini-2.5-pro-exp-03-25")
+- `YELLHORN_MCP_MODEL`: Gemini model to use (defaults to "gemini-2.5-pro-preview-03-25"). You can also use "gemini-2.5-flash-preview-04-17" for lower latency.
 
 The server also requires the GitHub CLI (`gh`) to be installed and authenticated.
 
@@ -92,7 +92,7 @@ When working with Claude Code, you can use the Yellhorn MCP tools by:
    gh pr create --title "[PR Title]" --body "[PR Description]"
    
    # You can run this from anywhere
-   Please review the PR comparing "main" and "feature-branch" against the workplan in issue #123
+   Please judge the PR comparing "main" and "feature-branch" against the workplan in issue #123
    ```
 
 ## Tools
@@ -139,9 +139,9 @@ Retrieves the workplan content (GitHub issue body) associated with a workplan.
 
 - The content of the workplan issue as a string
 
-### review_workplan
+### judge_workplan
 
-Triggers an asynchronous code review comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the review asynchronously after running (in the background).
+Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background).
 
 **Input**:
 
@@ -151,7 +151,7 @@ Triggers an asynchronous code review comparing two git refs (branches or commits
 
 **Output**:
 
-- A confirmation message that the review task has been initiated
+- A confirmation message that the judgement task has been initiated
 
 ## Resource Access
 
@@ -195,10 +195,13 @@ The project uses GitHub Actions for continuous integration and deployment:
 
 To release a new version:
 
-1. Update version in pyproject.toml
-2. Commit changes: `git commit -am "Bump version to X.Y.Z"`
-3. Tag the commit: `git tag vX.Y.Z`
-4. Push changes and tag: `git push && git push --tags`
+1. Update version in pyproject.toml and yellhorn_mcp/__init__.py
+2. Update CHANGELOG.md with the new changes
+3. Commit changes: `git commit -am "Bump version to X.Y.Z"`
+4. Tag the commit: `git tag vX.Y.Z`
+5. Push changes and tag: `git push && git push --tags`
+
+For a history of changes, see the [Changelog](CHANGELOG.md).
 
 For more detailed instructions, see the [Usage Guide](docs/USAGE.md).
 

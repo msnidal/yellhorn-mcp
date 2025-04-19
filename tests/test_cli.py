@@ -24,7 +24,7 @@ def test_main_success(
     mock_getenv.side_effect = lambda x, default=None: {
         "GEMINI_API_KEY": "mock-api-key",
         "REPO_PATH": "/mock/repo",
-        "YELLHORN_MCP_MODEL": "mock-model",
+        "YELLHORN_MCP_MODEL": "gemini-2.5-pro-preview-03-25",
     }.get(x, default)
 
     # Mock path checks
@@ -45,7 +45,7 @@ def test_main_success(
         # Check that a message was printed to stdout
         captured = capsys.readouterr()
         assert "Repository path: /mock/repo" in captured.out
-        assert "Using model: mock-model" in captured.out
+        assert "Using model: gemini-2.5-pro-preview-03-25" in captured.out
 
         # Check that sys.exit was not called
         mock_exit.assert_not_called()

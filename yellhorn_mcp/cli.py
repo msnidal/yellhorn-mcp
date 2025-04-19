@@ -35,8 +35,8 @@ def main():
     parser.add_argument(
         "--model",
         dest="model",
-        default=os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-exp-03-25"),
-        help="Gemini model to use (default: gemini-2.5-pro-exp-03-25 or YELLHORN_MCP_MODEL)",
+        default=os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25"),
+        help="Gemini model to use (e.g., gemini-2.5-pro-preview-03-25, gemini-2.5-flash-preview-04-17). Default: gemini-2.5-pro-preview-03-25 or YELLHORN_MCP_MODEL env var.",
     )
 
     parser.add_argument(

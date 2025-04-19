@@ -14,7 +14,7 @@ capabilities to Claude Code for software development tasks. It offers these prim
 3. get_workplan: Retrieves the workplan content (GitHub issue body) associated with the
    current Git worktree or specified issue number.
 
-4. review_workplan: Triggers an asynchronous code review for a Pull Request against its
+4. judge_workplan: Triggers an asynchronous code judgement for a Pull Request against its
    original workplan issue.
 
 The server requires GitHub CLI to be installed and authenticated for GitHub operations.
@@ -56,7 +56,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     # Get configuration from environment variables
     repo_path = os.getenv("REPO_PATH", ".")
     api_key = os.getenv("GEMINI_API_KEY")
-    gemini_model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-exp-03-25")
+    gemini_model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
 
     if not api_key:
         raise ValueError("GEMINI_API_KEY is required")
@@ -126,16 +126,16 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
                     )
                 )
 
-        # Handle review sub-issue resources
-        if resource_type is None or resource_type == "yellhorn_review_subissue":
-            # Get all issues with the yellhorn-review-subissue label
+        # Handle judgement sub-issue resources
+        if resource_type is None or resource_type == "yellhorn_judgement_subissue":
+            # Get all issues with the yellhorn-judgement-subissue label
             json_output = await run_github_command(
                 repo_path,
                 [
                     "issue",
                     "list",
                     "--label",
-                    "yellhorn-review-subissue",
+                    "yellhorn-judgement-subissue",
                     "--json",
                     "number,title,url",
                 ],
@@ -151,8 +151,8 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
                 # Use explicit constructor arguments to ensure parameter order is correct
                 resources.append(
                     Resource(
-                        uri=FileUrl(f"file://reviews/{str(issue['number'])}.md"),
-                        name=f"Review #{issue['number']}: {issue['title']}",
+                        uri=FileUrl(f"file://judgements/{str(issue['number'])}.md"),
+                        name=f"Judgement #{issue['number']}: {issue['title']}",
                         mimeType="text/markdown",
                     )
                 )
@@ -181,7 +181,7 @@ async def read_resource(
     # Verify resource type if provided
     if resource_type is not None and resource_type not in [
         "yellhorn_workplan",
-        "yellhorn_review_subissue",
+        "yellhorn_judgement_subissue",
     ]:
         raise ValueError(f"Unsupported resource type: {resource_type}")
 
@@ -565,22 +565,22 @@ async def create_github_subissue(
         YellhornMCPError: If there's an error creating the sub-issue.
     """
     try:
-        # Ensure the yellhorn-review-subissue label exists
+        # Ensure the yellhorn-judgement-subissue label exists
         await ensure_label_exists(
-            repo_path, "yellhorn-review-subissue", "Review sub-issues created by yellhorn-mcp"
+            repo_path, "yellhorn-judgement-subissue", "Judgement sub-issues created by yellhorn-mcp"
         )
 
         # Add the parent issue reference to the body
         body_with_reference = f"Parent Workplan: #{parent_issue_number}\n\n{body}"
 
         # Create a temporary file to hold the issue body
-        temp_file = repo_path / f"subissue_{parent_issue_number}_review.md"
+        temp_file = repo_path / f"subissue_{parent_issue_number}_judgement.md"
         with open(temp_file, "w", encoding="utf-8") as f:
             f.write(body_with_reference)
 
         try:
-            # Create the issue with all specified labels plus the review subissue label
-            all_labels = list(labels) + ["yellhorn-review-subissue"]
+            # Create the issue with all specified labels plus the judgement subissue label
+            all_labels = list(labels) + ["yellhorn-judgement-subissue"]
             labels_arg = ",".join(all_labels)
 
             # Create the issue using GitHub CLI
@@ -1136,7 +1136,7 @@ async def get_workplan(
         raise YellhornMCPError(f"Failed to retrieve workplan: {str(e)}")
 
 
-async def process_review_async(
+async def process_judgement_async(
     repo_path: Path,
     client: genai.Client,
     model: str,
@@ -1150,21 +1150,21 @@ async def process_review_async(
     head_commit_hash: str | None = None,
 ) -> str:
     """
-    Process the review of a workplan and diff asynchronously, creating a GitHub sub-issue.
+    Process the judgement of a workplan and diff asynchronously, creating a GitHub sub-issue.
 
     Args:
         repo_path: Path to the repository.
         client: Gemini API client.
         model: Gemini model name.
         workplan: The original workplan.
-        diff: The code diff to review.
+        diff: The code diff to judge.
         base_ref: Base Git ref (commit SHA, branch name, tag) for comparison.
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison.
         workplan_issue_number: Optional GitHub issue number with the original workplan.
         ctx: Server context.
 
     Returns:
-        The review content and URL of the created sub-issue.
+        The judgement content and URL of the created sub-issue.
     """
     try:
         # Get codebase snapshot for better context
@@ -1172,7 +1172,7 @@ async def process_review_async(
         codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct a more structured prompt
-        prompt = f"""You are an expert code reviewer evaluating if a code diff correctly implements a workplan.
+        prompt = f"""You are an expert code evaluator judging if a code diff correctly implements a workplan.
 
 {codebase_info}
 
@@ -1189,12 +1189,12 @@ Base ref: {base_ref}{f" ({base_commit_hash})" if base_commit_hash else ""}
 Head ref: {head_ref}{f" ({head_commit_hash})" if head_commit_hash else ""}
 </Comparison Data>
 
-Please review if this code diff correctly implements the workplan and provide detailed feedback.
+Please judge if this code diff correctly implements the workplan and provide detailed feedback.
 The diff represents changes between '{base_ref}' and '{head_ref}'.
 
 Structure your response with these clear sections:
 
-## Review Summary
+## Judgement Summary
 Provide a concise overview of the implementation status.
 
 ## Completed Items
@@ -1212,19 +1212,19 @@ Note any code quality issues, potential bugs, or suggest alternative approaches.
 ## Intentional Divergence Notes
 If the implementation intentionally deviates from the workplan for good reasons, explain those reasons.
 
-IMPORTANT: Respond *only* with the Markdown content for the review. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Review Summary' heading.
+IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
         await ctx.log(
             level="info",
-            message=f"Generating review with Gemini API model {model}",
+            message=f"Generating judgement with Gemini API model {model}",
         )
 
         # Call Gemini API
         response = await client.aio.models.generate_content(model=model, contents=prompt)
 
-        # Extract review
-        review_content = response.text
-        if not review_content:
+        # Extract judgement
+        judgement_content = response.text
+        if not judgement_content:
             raise YellhornMCPError("Received an empty response from Gemini API.")
 
         if workplan_issue_number:
@@ -1232,56 +1232,56 @@ IMPORTANT: Respond *only* with the Markdown content for the review. Do *not* wra
             # Use commit hashes if available, otherwise use the ref names
             base_display = f"{base_ref} ({base_commit_hash})" if base_commit_hash else base_ref
             head_display = f"{head_ref} ({head_commit_hash})" if head_commit_hash else head_ref
-            review_title = (
-                f"Review: {base_display}..{head_display} for Workplan #{workplan_issue_number}"
+            judgement_title = (
+                f"Judgement: {base_display}..{head_display} for Workplan #{workplan_issue_number}"
             )
 
-            # Add metadata to the review content with commit hashes
+            # Add metadata to the judgement content with commit hashes
             base_hash_info = f" (`{base_commit_hash}`)" if base_commit_hash else ""
             head_hash_info = f" (`{head_commit_hash}`)" if head_commit_hash else ""
             metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`{base_hash_info}\n- Head ref: `{head_ref}`{head_hash_info}\n- Workplan: #{workplan_issue_number}\n\n"
-            review_with_metadata = metadata + review_content
+            judgement_with_metadata = metadata + judgement_content
 
             # Create a sub-issue
             await ctx.log(
                 level="info",
-                message=f"Creating GitHub sub-issue for review of workplan #{workplan_issue_number}",
+                message=f"Creating GitHub sub-issue for judgement of workplan #{workplan_issue_number}",
             )
             subissue_url = await create_github_subissue(
                 repo_path,
                 workplan_issue_number,
-                review_title,
-                review_with_metadata,
+                judgement_title,
+                judgement_with_metadata,
                 ["yellhorn-mcp"],
             )
 
-            # Return both the review content and the sub-issue URL
-            return f"Review sub-issue created: {subissue_url}\n\n{review_content}"
+            # Return both the judgement content and the sub-issue URL
+            return f"Judgement sub-issue created: {subissue_url}\n\n{judgement_content}"
         else:
-            return review_content
+            return judgement_content
 
     except Exception as e:
-        error_message = f"Failed to generate review: {str(e)}"
+        error_message = f"Failed to generate judgement: {str(e)}"
         await ctx.log(level="error", message=error_message)
         raise YellhornMCPError(error_message)
 
 
 @mcp.tool(
-    name="review_workplan",
-    description="Triggers an asynchronous code review comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the review asynchronously after running (in the background).",
+    name="judge_workplan",
+    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background).",
 )
-async def review_workplan(
+async def judge_workplan(
     ctx: Context,
     issue_number: str,
     base_ref: str = "main",
     head_ref: str = "HEAD",
 ) -> str:
     """
-    Trigger an asynchronous code review comparing two git refs against a workplan.
+    Trigger an asynchronous code judgement comparing two git refs against a workplan.
 
     This tool fetches the original workplan from the specified GitHub issue, generates a diff
-    between the specified git refs, and initiates an asynchronous AI review process that creates
-    a GitHub sub-issue with the review.
+    between the specified git refs, and initiates an asynchronous AI judgement process that creates
+    a GitHub sub-issue with the judgement.
 
     Args:
         ctx: Server context.
@@ -1290,10 +1290,10 @@ async def review_workplan(
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
 
     Returns:
-        A confirmation message that the review task has been initiated.
+        A confirmation message that the judgement task has been initiated.
 
     Raises:
-        YellhornMCPError: If errors occur during the review process.
+        YellhornMCPError: If errors occur during the judgement process.
     """
     try:
         # Get the current working directory
@@ -1301,7 +1301,7 @@ async def review_workplan(
 
         await ctx.log(
             level="info",
-            message=f"Reviewing code for workplan issue #{issue_number}.",
+            message=f"Judging code for workplan issue #{issue_number}.",
         )
 
         # Resolve git references to commit hashes for better tracking
@@ -1314,14 +1314,14 @@ async def review_workplan(
 
         # Check if diff is empty
         if not diff.strip():
-            return f"No differences found between {base_ref} ({base_commit_hash}) and {head_ref} ({head_commit_hash}). Nothing to review."
+            return f"No differences found between {base_ref} ({base_commit_hash}) and {head_ref} ({head_commit_hash}). Nothing to judge."
 
-        # Trigger the review asynchronously
+        # Trigger the judgement asynchronously
         client = ctx.request_context.lifespan_context["client"]
         model = ctx.request_context.lifespan_context["model"]
 
         asyncio.create_task(
-            process_review_async(
+            process_judgement_async(
                 current_path,
                 client,
                 model,
@@ -1337,10 +1337,10 @@ async def review_workplan(
         )
 
         return (
-            f"Review task initiated comparing {base_ref} (`{base_commit_hash}`)..{head_ref} (`{head_commit_hash}`) "
+            f"Judgement task initiated comparing {base_ref} (`{base_commit_hash}`)..{head_ref} (`{head_commit_hash}`) "
             f"against workplan issue #{issue_number}. "
             f"Results will be posted as a GitHub sub-issue linked to the workplan."
         )
 
     except Exception as e:
-        raise YellhornMCPError(f"Failed to trigger workplan review: {str(e)}")
+        raise YellhornMCPError(f"Failed to trigger workplan judgement: {str(e)}")
