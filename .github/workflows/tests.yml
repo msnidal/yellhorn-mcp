@@ -30,6 +30,19 @@ jobs:
     - name: Import sort check with isort
       run: |
         isort --check yellhorn_mcp tests
-    - name: Test with pytest
+    - name: Test with pytest (coverage)
       run: |
-        pytest
+        pytest --cov=yellhorn_mcp --cov=examples --cov-report=xml --cov-report=term
+    - name: Fail if coverage below threshold
+      run: |
+        python - <<'PY'
+        import xml.etree.ElementTree as ET, sys
+        tree = ET.parse('coverage.xml')
+        root = tree.getroot()
+        total = root.attrib.get('line-rate')
+        if float(total) < 0.90:
+            print(f"::error::Coverage too low: {float(total)*100:.2f}% (required 90%)")
+            sys.exit(1)
+        else:
+            print(f"Coverage passed: {float(total)*100:.2f}% (required ≥90%)")
+        PY

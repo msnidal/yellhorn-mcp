@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["black", "flake8", "isort", "pytest", "pytest-asyncio", "httpx"]
+dev = ["black", "flake8", "isort", "pytest", "pytest-asyncio", "httpx", "pytest-cov"]
 
 [project.scripts]
 yellhorn-mcp = "yellhorn_mcp.cli:main"

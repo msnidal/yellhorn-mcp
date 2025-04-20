@@ -181,6 +181,9 @@ pip install -e ".[dev]"
 
 # Run tests
 pytest
+
+# Run tests with coverage report
+pytest --cov=yellhorn_mcp --cov-report term-missing
 ```
 
 ### CI/CD

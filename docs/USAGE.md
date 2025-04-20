@@ -397,6 +397,7 @@ It performs the following steps:
 3. Runs linting with flake8
 4. Checks formatting with black
 5. Runs tests with pytest
+6. Checks test coverage against required thresholds (≥ 90% line coverage)
 
 The workflow configuration is in `.github/workflows/tests.yml`.
 
