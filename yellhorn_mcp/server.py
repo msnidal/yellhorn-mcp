@@ -34,6 +34,84 @@ from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import FileUrl
 
+# Pricing configuration for Gemini models (USD per 1M tokens)
+MODEL_PRICING = {
+    "gemini-2.5-pro-preview-03-25": {
+        "input": {
+            "default": 1.25,
+            "above_200k": 2.50
+        },
+        "output": {
+            "default": 10.00,
+            "above_200k": 15.00
+        }
+    },
+    "gemini-2.5-flash-preview-04-17": {
+        "input": {
+            "default": 0.15,
+            "above_200k": 0.15  # Flash doesn't have different pricing tiers
+        },
+        "output": {
+            "default": 3.50,
+            "above_200k": 3.50  # Flash doesn't have different pricing tiers
+        }
+    },
+    # Add other supported models as needed
+}
+
+
+def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
+    """
+    Calculates the estimated cost for a Gemini API call.
+
+    Args:
+        model: The Gemini model name.
+        input_tokens: Number of input tokens used.
+        output_tokens: Number of output tokens generated.
+
+    Returns:
+        The estimated cost in USD, or None if pricing is unavailable for the model.
+    """
+    pricing = MODEL_PRICING.get(model)
+    if not pricing:
+        return None
+
+    # Determine which pricing tier to use based on token count
+    input_tier = "above_200k" if input_tokens > 200_000 else "default"
+    output_tier = "above_200k" if output_tokens > 200_000 else "default"
+    
+    # Calculate costs (convert to millions for rate multiplication)
+    input_cost = (input_tokens / 1_000_000) * pricing["input"][input_tier]
+    output_cost = (output_tokens / 1_000_000) * pricing["output"][output_tier]
+    
+    return input_cost + output_cost
+
+
+def format_metrics_section(model: str, usage_metadata: dict) -> str:
+    """
+    Formats the completion metrics into a Markdown section.
+
+    Args:
+        model: The Gemini model name used for generation.
+        usage_metadata: Dictionary containing token usage information.
+
+    Returns:
+        Formatted Markdown section with completion metrics.
+    """
+    input_tokens = usage_metadata.get("prompt_token_count", 0)
+    output_tokens = usage_metadata.get("candidates_token_count", 0)
+    total_tokens = usage_metadata.get("total_token_count", input_tokens + output_tokens)
+
+    cost = calculate_cost(model, input_tokens, output_tokens)
+    cost_str = f"${cost:.4f}" if cost is not None else "N/A"
+
+    return f"""\n\n---\n## Completion Metrics
+*   **Model Used**: `{model}`
+*   **Input Tokens**: {input_tokens}
+*   **Output Tokens**: {output_tokens}
+*   **Total Tokens**: {total_tokens}
+*   **Estimated Cost**: {cost_str}"""
+
 
 class YellhornMCPError(Exception):
     """Custom exception for Yellhorn MCP server."""
@@ -721,6 +799,10 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         )
         response = await client.aio.models.generate_content(model=model, contents=prompt)
         workplan_content = response.text
+        
+        # Capture usage metadata
+        usage_metadata = getattr(response, "usage_metadata", {})
+        
         if not workplan_content:
             await update_github_issue(
                 repo_path,
@@ -729,14 +811,17 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             )
             return
 
-        # Add the title as header to the final body
-        full_body = f"# {title}\n\n{workplan_content}"
+        # Format metrics section
+        metrics_section = format_metrics_section(model, usage_metadata)
+        
+        # Add the title as header and append metrics to the final body
+        full_body = f"# {title}\n\n{workplan_content}{metrics_section}"
 
-        # Update the GitHub issue with the generated workplan
+        # Update the GitHub issue with the generated workplan and metrics
         await update_github_issue(repo_path, issue_number, full_body)
         await ctx.log(
             level="info",
-            message=f"Successfully updated GitHub issue #{issue_number} with generated workplan",
+            message=f"Successfully updated GitHub issue #{issue_number} with generated workplan and metrics",
         )
 
     except Exception as e:
@@ -1162,6 +1247,8 @@ async def process_judgement_async(
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison.
         workplan_issue_number: Optional GitHub issue number with the original workplan.
         ctx: Server context.
+        base_commit_hash: Optional base commit hash for better reference in the output.
+        head_commit_hash: Optional head commit hash for better reference in the output.
 
     Returns:
         The judgement content and URL of the created sub-issue.
@@ -1222,10 +1309,15 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Call Gemini API
         response = await client.aio.models.generate_content(model=model, contents=prompt)
 
-        # Extract judgement
+        # Extract judgement and usage metadata
         judgement_content = response.text
+        usage_metadata = getattr(response, "usage_metadata", {})
+        
         if not judgement_content:
             raise YellhornMCPError("Received an empty response from Gemini API.")
+
+        # Format metrics section
+        metrics_section = format_metrics_section(model, usage_metadata)
 
         if workplan_issue_number:
             # Create a title for the sub-issue
@@ -1240,7 +1332,9 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             base_hash_info = f" (`{base_commit_hash}`)" if base_commit_hash else ""
             head_hash_info = f" (`{head_commit_hash}`)" if head_commit_hash else ""
             metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`{base_hash_info}\n- Head ref: `{head_ref}`{head_hash_info}\n- Workplan: #{workplan_issue_number}\n\n"
-            judgement_with_metadata = metadata + judgement_content
+            
+            # Combine metadata, judgement content and metrics
+            judgement_with_metadata_and_metrics = metadata + judgement_content + metrics_section
 
             # Create a sub-issue
             await ctx.log(
@@ -1251,14 +1345,15 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 repo_path,
                 workplan_issue_number,
                 judgement_title,
-                judgement_with_metadata,
+                judgement_with_metadata_and_metrics,
                 ["yellhorn-mcp"],
             )
 
             # Return both the judgement content and the sub-issue URL
             return f"Judgement sub-issue created: {subissue_url}\n\n{judgement_content}"
         else:
-            return judgement_content
+            # For direct output, include metrics
+            return f"{judgement_content}{metrics_section}"
 
     except Exception as e:
         error_message = f"Failed to generate judgement: {str(e)}"
