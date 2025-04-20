@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any
 
 from google import genai
-from google.genai.types import GenerateContentResponseUsageMetadata
 
 # OpenAI is imported conditionally inside app_lifespan when needed
 from mcp import Resource
@@ -106,10 +105,9 @@ def format_metrics_section(model: str, usage_metadata: Any) -> str:
     Formats the completion metrics into a Markdown section.
 
     Args:
-        model: The model name used for generation (Gemini or OpenAI).
+        model: The Gemini model name used for generation.
         usage_metadata: Object containing token usage information.
-                        Could be a GenerateContentResponseUsageMetadata object for Gemini
-                        or a CompletionUsage object for OpenAI.
+                        Could be a dict or a GenerateContentResponseUsageMetadata object.
 
     Returns:
         Formatted Markdown section with completion metrics.
@@ -131,21 +129,9 @@ def format_metrics_section(model: str, usage_metadata: Any) -> str:
         output_tokens = usage_metadata.completion_tokens
         total_tokens = usage_metadata.total_tokens
     else:  # Gemini models
-        # Check if we have a proper GenerateContentResponseUsageMetadata object
-        if not hasattr(usage_metadata, "prompt_token_count") or not hasattr(
-            usage_metadata, "candidates_token_count"
-        ):
-            return na_metrics
-
         input_tokens = usage_metadata.prompt_token_count
         output_tokens = usage_metadata.candidates_token_count
-
-        # Handle case where total_token_count is missing
-        if hasattr(usage_metadata, "total_token_count"):
-            total_tokens = usage_metadata.total_token_count
-        else:
-            # Calculate total if not provided
-            total_tokens = input_tokens + output_tokens
+        total_tokens = usage_metadata.total_token_count
 
     if input_tokens is None or output_tokens is None or total_tokens is None:
         return na_metrics
