@@ -1,3 +1,3 @@
-"""Yellhorn MCP server for Claude Code to interact with the Gemini 2.5 Pro API."""
+"""Yellhorn MCP server for Claude Code to interact with the Gemini 2.5 Pro and OpenAI APIs."""
 
-__version__ = "0.2.7"
+__version__ = "0.3.0"

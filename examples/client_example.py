@@ -158,7 +158,9 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
         env={
             # Pass environment variables for the server
             "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY", ""),
+            "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
             "REPO_PATH": os.environ.get("REPO_PATH", os.getcwd()),
+            "YELLHORN_MCP_MODEL": os.environ.get("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25"),
         },
     )
 
@@ -321,16 +323,20 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    # Ensure GEMINI_API_KEY is set for commands that require it
-    if not os.environ.get("GEMINI_API_KEY") and args.command in [
-        "plan",
-        "worktree",
-        "getplan",
-        "judge",
-    ]:
-        print("Error: GEMINI_API_KEY environment variable is not set")
-        print("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
-        sys.exit(1)
+    # Check model type from environment and validate appropriate API key
+    model = os.environ.get("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
+    is_openai_model = model.startswith("gpt-")
+    
+    # Ensure appropriate API keys are set for commands that require them
+    if args.command in ["plan", "worktree", "getplan", "judge"]:
+        if is_openai_model and not os.environ.get("OPENAI_API_KEY"):
+            print(f"Error: OPENAI_API_KEY environment variable is required for model '{model}'")
+            print("Please set the OPENAI_API_KEY environment variable with your OpenAI API key")
+            sys.exit(1)
+        elif not is_openai_model and not os.environ.get("GEMINI_API_KEY"):
+            print(f"Error: GEMINI_API_KEY environment variable is required for model '{model}'")
+            print("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
+            sys.exit(1)
 
     # Run the client
     asyncio.run(run_client(args.command, args))

@@ -36,7 +36,8 @@ def main():
         "--model",
         dest="model",
         default=os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25"),
-        help="Gemini model to use (e.g., gemini-2.5-pro-preview-03-25, gemini-2.5-flash-preview-04-17). Default: gemini-2.5-pro-preview-03-25 or YELLHORN_MCP_MODEL env var.",
+        help="Model to use (e.g., gemini-2.5-pro-preview-03-25, gemini-2.5-flash-preview-04-17, "
+        "gpt-4o, gpt-4o-mini). Default: gemini-2.5-pro-preview-03-25 or YELLHORN_MCP_MODEL env var.",
     )
 
     parser.add_argument(
@@ -56,12 +57,24 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate API key
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("Error: GEMINI_API_KEY environment variable is not set")
-        print("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
-        sys.exit(1)
+    # Validate API keys based on model
+    model = args.model
+    is_openai_model = model.startswith("gpt-")
+    
+    # For Gemini models
+    if not is_openai_model:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            print("Error: GEMINI_API_KEY environment variable is not set")
+            print("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
+            sys.exit(1)
+    # For OpenAI models
+    else:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("Error: OPENAI_API_KEY environment variable is not set")
+            print("Please set the OPENAI_API_KEY environment variable with your OpenAI API key")
+            sys.exit(1)
 
     # Set environment variables for the server
     os.environ["REPO_PATH"] = args.repo_path

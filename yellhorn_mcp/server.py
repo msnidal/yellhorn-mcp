@@ -2,7 +2,7 @@
 Yellhorn MCP server implementation.
 
 This module provides a Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro
-capabilities to Claude Code for software development tasks. It offers these primary tools:
+and OpenAI capabilities to Claude Code for software development tasks. It offers these primary tools:
 
 1. create_workplan: Creates GitHub issues with detailed implementation plans based on
    your codebase and task description. The workplan is generated asynchronously and the
@@ -31,12 +31,14 @@ from typing import Any
 
 from google import genai
 from google.genai.types import GenerateContentResponseUsageMetadata
+# OpenAI is imported conditionally inside app_lifespan when needed
 from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import FileUrl
 
-# Pricing configuration for Gemini models (USD per 1M tokens)
+# Pricing configuration for models (USD per 1M tokens)
 MODEL_PRICING = {
+    # Gemini models
     "gemini-2.5-pro-preview-03-25": {
         "input": {"default": 1.25, "above_200k": 2.50},
         "output": {"default": 10.00, "above_200k": 15.00},
@@ -51,16 +53,24 @@ MODEL_PRICING = {
             "above_200k": 3.50,  # Flash doesn't have different pricing tiers
         },
     },
-    # Add other supported models as needed
+    # OpenAI models
+    "gpt-4o": {
+        "input": {"default": 5.00},  # $5 per 1M input tokens
+        "output": {"default": 15.00},  # $15 per 1M output tokens
+    },
+    "gpt-4o-mini": {
+        "input": {"default": 0.15},  # $0.15 per 1M input tokens
+        "output": {"default": 0.60},  # $0.60 per 1M output tokens
+    },
 }
 
 
 def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
     """
-    Calculates the estimated cost for a Gemini API call.
+    Calculates the estimated cost for a model API call.
 
     Args:
-        model: The Gemini model name.
+        model: The model name (Gemini or OpenAI).
         input_tokens: Number of input tokens used.
         output_tokens: Number of output tokens generated.
 
@@ -82,27 +92,50 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float |
     return input_cost + output_cost
 
 
-def format_metrics_section(model: str, usage_metadata: GenerateContentResponseUsageMetadata | None) -> str:
+def format_metrics_section(model: str, usage_metadata: Any) -> str:
     """
     Formats the completion metrics into a Markdown section.
 
     Args:
-        model: The Gemini model name used for generation.
+        model: The model name used for generation (Gemini or OpenAI).
         usage_metadata: Object containing token usage information.
-                        Could be a dict or a GenerateContentResponseUsageMetadata object.
+                        Could be a GenerateContentResponseUsageMetadata object for Gemini
+                        or a CompletionUsage object for OpenAI.
 
     Returns:
         Formatted Markdown section with completion metrics.
     """
+    na_metrics = "\n\n---\n## Completion Metrics\n*   **Model Used**: N/A\n*   **Input Tokens**: N/A\n*   **Output Tokens**: N/A\n*   **Total Tokens**: N/A\n*   **Estimated Cost**: N/A"
+    
     if usage_metadata is None:
-        return "\n\n---\n## Completion Metrics\n*   **Model Used**: N/A\n*   **Input Tokens**: N/A\n*   **Output Tokens**: N/A\n*   **Total Tokens**: N/A\n*   **Estimated Cost**: N/A"
+        return na_metrics
 
-    input_tokens = usage_metadata.prompt_token_count
-    output_tokens = usage_metadata.candidates_token_count
-    total_tokens = usage_metadata.total_token_count
+    # Handle different attribute names between Gemini and OpenAI usage metadata
+    if model.startswith("gpt-"):  # OpenAI models
+        # Check if we have a proper CompletionUsage object
+        if not hasattr(usage_metadata, "prompt_tokens") or not hasattr(usage_metadata, "completion_tokens"):
+            return na_metrics
+            
+        input_tokens = usage_metadata.prompt_tokens
+        output_tokens = usage_metadata.completion_tokens
+        total_tokens = usage_metadata.total_tokens
+    else:  # Gemini models
+        # Check if we have a proper GenerateContentResponseUsageMetadata object
+        if not hasattr(usage_metadata, "prompt_token_count") or not hasattr(usage_metadata, "candidates_token_count"):
+            return na_metrics
+            
+        input_tokens = usage_metadata.prompt_token_count
+        output_tokens = usage_metadata.candidates_token_count
+        
+        # Handle case where total_token_count is missing
+        if hasattr(usage_metadata, "total_token_count"):
+            total_tokens = usage_metadata.total_token_count
+        else:
+            # Calculate total if not provided
+            total_tokens = input_tokens + output_tokens
 
     if input_tokens is None or output_tokens is None or total_tokens is None:
-        return "\n\n---\n## Completion Metrics\n*   **Model Used**: N/A\n*   **Input Tokens**: N/A\n*   **Output Tokens**: N/A\n*   **Total Tokens**: N/A\n*   **Estimated Cost**: N/A"
+        return na_metrics
 
     cost = calculate_cost(model, input_tokens, output_tokens)
     cost_str = f"${cost:.4f}" if cost is not None else "N/A"
@@ -128,18 +161,36 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         server: The FastMCP server instance.
 
     Yields:
-        Dict with repository path and Gemini model.
+        Dict with repository path, AI clients, and model.
 
     Raises:
-        ValueError: If GEMINI_API_KEY is not set or the repository is not valid.
+        ValueError: If required API keys are not set or the repository is not valid.
     """
     # Get configuration from environment variables
     repo_path = os.getenv("REPO_PATH", ".")
-    api_key = os.getenv("GEMINI_API_KEY")
-    gemini_model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
-
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY is required")
+    model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
+    is_openai_model = model.startswith("gpt-")
+    
+    # Initialize clients based on the model type
+    gemini_client = None
+    openai_client = None
+    
+    # For Gemini models, require Gemini API key
+    if not is_openai_model:
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
+            raise ValueError("GEMINI_API_KEY is required for Gemini models")
+        # Configure Gemini API
+        gemini_client = genai.Client(api_key=gemini_api_key)
+    # For OpenAI models, require OpenAI API key
+    else:
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise ValueError("OPENAI_API_KEY is required for OpenAI models")
+        # Import here to avoid loading the module if not needed
+        import openai
+        # Configure OpenAI API
+        openai_client = openai.AsyncOpenAI(api_key=openai_api_key)
 
     # Validate repository path
     repo_path = Path(repo_path).resolve()
@@ -150,11 +201,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     if not is_git_repository(repo_path):
         raise ValueError(f"{repo_path} is not a Git repository")
 
-    # Configure Gemini API
-    client = genai.Client(api_key=api_key)
-
     try:
-        yield {"repo_path": repo_path, "client": client, "model": gemini_model}
+        yield {
+            "repo_path": repo_path, 
+            "gemini_client": gemini_client, 
+            "openai_client": openai_client,
+            "model": model
+        }
     finally:
         pass
 
@@ -162,7 +215,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
 # Create the MCP server
 mcp = FastMCP(
     name="yellhorn-mcp",
-    dependencies=["google-genai~=1.8.0", "aiohttp~=3.11.14", "pydantic~=2.11.1"],
+    dependencies=["google-genai~=1.8.0", "aiohttp~=3.11.14", "pydantic~=2.11.1", "openai~=1.23.6"],
     lifespan=app_lifespan,
 )
 
@@ -726,7 +779,8 @@ async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: st
 
 async def process_workplan_async(
     repo_path: Path,
-    client: genai.Client,
+    gemini_client: genai.Client | None,
+    openai_client: Any | None,
     model: str,
     title: str,
     issue_number: str,
@@ -738,8 +792,9 @@ async def process_workplan_async(
 
     Args:
         repo_path: Path to the repository.
-        client: Gemini API client.
-        model: Gemini model name.
+        gemini_client: Gemini API client (None for OpenAI models).
+        openai_client: OpenAI API client (None for Gemini models).
+        model: Model name to use (Gemini or OpenAI).
         title: Title for the workplan.
         issue_number: GitHub issue number to update.
         ctx: Server context.
@@ -795,21 +850,52 @@ The workplan should be comprehensive enough that a developer or AI assistant cou
 
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
-        await ctx.log(
-            level="info",
-            message=f"Generating workplan with Gemini API for title: {title} with model {model}",
-        )
-        response = await client.aio.models.generate_content(model=model, contents=prompt)
-        workplan_content = response.text
-
-        # Capture usage metadata
-        usage_metadata = getattr(response, "usage_metadata", {})
+        is_openai_model = model.startswith("gpt-")
+        
+        # Call the appropriate API based on the model type
+        if is_openai_model:
+            if not openai_client:
+                raise YellhornMCPError("OpenAI client not initialized. Is OPENAI_API_KEY set?")
+                
+            await ctx.log(
+                level="info",
+                message=f"Generating workplan with OpenAI API for title: {title} with model {model}",
+            )
+            
+            # Convert the prompt to OpenAI messages format
+            messages = [{"role": "user", "content": prompt}]
+            
+            # Call OpenAI API
+            response = await openai_client.chat.completions.create(
+                model=model,
+                messages=messages,
+            )
+            
+            # Extract content and usage
+            workplan_content = response.choices[0].message.content
+            usage_metadata = response.usage  # OpenAI usage object
+        else:
+            if gemini_client is None:
+                raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
+                
+            await ctx.log(
+                level="info",
+                message=f"Generating workplan with Gemini API for title: {title} with model {model}",
+            )
+            
+            # Call Gemini API
+            response = await gemini_client.aio.models.generate_content(model=model, contents=prompt)
+            workplan_content = response.text
+            
+            # Capture usage metadata
+            usage_metadata = getattr(response, "usage_metadata", {})
 
         if not workplan_content:
+            api_name = "OpenAI" if is_openai_model else "Gemini"
             await update_github_issue(
                 repo_path,
                 issue_number,
-                "Failed to generate workplan: Received an empty response from Gemini API.",
+                f"Failed to generate workplan: Received an empty response from {api_name} API.",
             )
             return
 
@@ -1046,7 +1132,7 @@ async def create_workplan(
     Args:
         title: Title for the GitHub issue (will be used as issue title and header).
         detailed_description: Detailed description for the workplan.
-        ctx: Server context with repository path and Gemini model.
+        ctx: Server context with repository path and model.
 
     Returns:
         JSON string containing the GitHub issue URL.
@@ -1055,7 +1141,8 @@ async def create_workplan(
         YellhornMCPError: If there's an error creating the workplan.
     """
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-    client: genai.Client = ctx.request_context.lifespan_context["client"]
+    gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
+    openai_client = ctx.request_context.lifespan_context.get("openai_client")
     model: str = ctx.request_context.lifespan_context["model"]
 
     try:
@@ -1091,7 +1178,8 @@ async def create_workplan(
         asyncio.create_task(
             process_workplan_async(
                 repo_path,
-                client,
+                gemini_client,
+                openai_client,
                 model,
                 title,
                 issue_number,
@@ -1225,7 +1313,8 @@ async def get_workplan(
 
 async def process_judgement_async(
     repo_path: Path,
-    client: genai.Client,
+    gemini_client: genai.Client | None,
+    openai_client: Any | None,
     model: str,
     workplan: str,
     diff: str,
@@ -1241,8 +1330,9 @@ async def process_judgement_async(
 
     Args:
         repo_path: Path to the repository.
-        client: Gemini API client.
-        model: Gemini model name.
+        gemini_client: Gemini API client (None for OpenAI models).
+        openai_client: OpenAI API client (None for Gemini models).
+        model: Model name to use (Gemini or OpenAI).
         workplan: The original workplan.
         diff: The code diff to judge.
         base_ref: Base Git ref (commit SHA, branch name, tag) for comparison.
@@ -1303,20 +1393,49 @@ If the implementation intentionally deviates from the workplan for good reasons,
 
 IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
-        await ctx.log(
-            level="info",
-            message=f"Generating judgement with Gemini API model {model}",
-        )
-
-        # Call Gemini API
-        response = await client.aio.models.generate_content(model=model, contents=prompt)
-
-        # Extract judgement and usage metadata
-        judgement_content = response.text
-        usage_metadata = response.usage_metadata
+        is_openai_model = model.startswith("gpt-")
+        
+        # Call the appropriate API based on the model type
+        if is_openai_model:
+            if not openai_client:
+                raise YellhornMCPError("OpenAI client not initialized. Is OPENAI_API_KEY set?")
+                
+            await ctx.log(
+                level="info",
+                message=f"Generating judgement with OpenAI API model {model}",
+            )
+            
+            # Convert the prompt to OpenAI messages format
+            messages = [{"role": "user", "content": prompt}]
+            
+            # Call OpenAI API
+            response = await openai_client.chat.completions.create(
+                model=model,
+                messages=messages,
+            )
+            
+            # Extract content and usage
+            judgement_content = response.choices[0].message.content
+            usage_metadata = response.usage  # OpenAI usage object
+        else:
+            if gemini_client is None:
+                raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
+                
+            await ctx.log(
+                level="info",
+                message=f"Generating judgement with Gemini API model {model}",
+            )
+            
+            # Call Gemini API
+            response = await gemini_client.aio.models.generate_content(model=model, contents=prompt)
+            
+            # Extract judgement and usage metadata
+            judgement_content = response.text
+            usage_metadata = getattr(response, "usage_metadata", {})
 
         if not judgement_content:
-            raise YellhornMCPError("Received an empty response from Gemini API.")
+            api_name = "OpenAI" if is_openai_model else "Gemini"
+            raise YellhornMCPError(f"Received an empty response from {api_name} API.")
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
@@ -1414,13 +1533,15 @@ async def judge_workplan(
             return f"No differences found between {base_ref} ({base_commit_hash}) and {head_ref} ({head_commit_hash}). Nothing to judge."
 
         # Trigger the judgement asynchronously
-        client = ctx.request_context.lifespan_context["client"]
+        gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
+        openai_client = ctx.request_context.lifespan_context.get("openai_client") 
         model = ctx.request_context.lifespan_context["model"]
 
         asyncio.create_task(
             process_judgement_async(
                 current_path,
-                client,
+                gemini_client,
+                openai_client,
                 model,
                 workplan,
                 diff,
