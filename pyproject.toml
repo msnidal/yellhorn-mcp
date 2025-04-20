@@ -24,7 +24,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+<<<<<<< HEAD
 dev = ["black", "flake8", "isort", "pytest", "pytest-asyncio", "httpx", "pytest-cov"]
+=======
+dev = ["black", "flake8", "isort", "pytest", "pytest-asyncio", "httpx"]
+>>>>>>> df6abbc (Openai model support (#41))
 
 [project.scripts]
 yellhorn-mcp = "yellhorn_mcp.cli:main"
