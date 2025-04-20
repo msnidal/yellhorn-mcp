@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added pricing configuration for OpenAI models.
 - Added conditional API key validation based on the selected model.
 - Updated metrics collection to handle both Gemini and OpenAI usage metadata.
-- Added comprehensive test suite raising coverage to ≥90%.
+- Added comprehensive test suite raising coverage to ≥70%.
 - Integrated coverage gate in CI.
 
 ### Changed

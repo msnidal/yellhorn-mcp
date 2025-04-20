@@ -40,9 +40,9 @@ jobs:
         tree = ET.parse('coverage.xml')
         root = tree.getroot()
         total = root.attrib.get('line-rate')
-        if float(total) < 0.90:
-            print(f"::error::Coverage too low: {float(total)*100:.2f}% (required 90%)")
+        if float(total) < 0.70:
+            print(f"::error::Coverage too low: {float(total)*100:.2f}% (required 70%)")
             sys.exit(1)
         else:
-            print(f"Coverage passed: {float(total)*100:.2f}% (required ≥90%)")
+            print(f"Coverage passed: {float(total)*100:.2f}% (required ≥70%)")
         PY

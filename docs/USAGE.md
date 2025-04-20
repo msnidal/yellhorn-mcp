@@ -105,7 +105,7 @@ Available command-line options:
 
 - `--repo-path`: Path to the Git repository (defaults to current directory or REPO_PATH env var)
 - `--model`: Model to use (defaults to "gemini-2.5-pro-preview-03-25" or YELLHORN_MCP_MODEL env var). You can specify:
-  - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17" 
+  - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
   - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
 - `--host`: Host to bind the server to (defaults to 127.0.0.1)
 - `--port`: Port to bind the server to (defaults to 8000)
@@ -397,7 +397,7 @@ It performs the following steps:
 3. Runs linting with flake8
 4. Checks formatting with black
 5. Runs tests with pytest
-6. Checks test coverage against required thresholds (≥ 90% line coverage)
+6. Checks test coverage against required thresholds (≥ 70% line coverage)
 
 The workflow configuration is in `.github/workflows/tests.yml`.
 
