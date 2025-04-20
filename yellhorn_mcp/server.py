@@ -201,8 +201,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY is required for OpenAI models")
         # Import here to avoid loading the module if not needed
-        import openai
         import httpx
+        import openai
 
         # Configure OpenAI API with a custom httpx client to avoid proxy issues
         http_client = httpx.AsyncClient()
