@@ -31,6 +31,7 @@ from typing import Any
 
 from google import genai
 from google.genai.types import GenerateContentResponseUsageMetadata
+
 # OpenAI is imported conditionally inside app_lifespan when needed
 from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
@@ -106,27 +107,31 @@ def format_metrics_section(model: str, usage_metadata: Any) -> str:
         Formatted Markdown section with completion metrics.
     """
     na_metrics = "\n\n---\n## Completion Metrics\n*   **Model Used**: N/A\n*   **Input Tokens**: N/A\n*   **Output Tokens**: N/A\n*   **Total Tokens**: N/A\n*   **Estimated Cost**: N/A"
-    
+
     if usage_metadata is None:
         return na_metrics
 
     # Handle different attribute names between Gemini and OpenAI usage metadata
     if model.startswith("gpt-"):  # OpenAI models
         # Check if we have a proper CompletionUsage object
-        if not hasattr(usage_metadata, "prompt_tokens") or not hasattr(usage_metadata, "completion_tokens"):
+        if not hasattr(usage_metadata, "prompt_tokens") or not hasattr(
+            usage_metadata, "completion_tokens"
+        ):
             return na_metrics
-            
+
         input_tokens = usage_metadata.prompt_tokens
         output_tokens = usage_metadata.completion_tokens
         total_tokens = usage_metadata.total_tokens
     else:  # Gemini models
         # Check if we have a proper GenerateContentResponseUsageMetadata object
-        if not hasattr(usage_metadata, "prompt_token_count") or not hasattr(usage_metadata, "candidates_token_count"):
+        if not hasattr(usage_metadata, "prompt_token_count") or not hasattr(
+            usage_metadata, "candidates_token_count"
+        ):
             return na_metrics
-            
+
         input_tokens = usage_metadata.prompt_token_count
         output_tokens = usage_metadata.candidates_token_count
-        
+
         # Handle case where total_token_count is missing
         if hasattr(usage_metadata, "total_token_count"):
             total_tokens = usage_metadata.total_token_count
@@ -170,11 +175,11 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     repo_path = os.getenv("REPO_PATH", ".")
     model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
     is_openai_model = model.startswith("gpt-")
-    
+
     # Initialize clients based on the model type
     gemini_client = None
     openai_client = None
-    
+
     # For Gemini models, require Gemini API key
     if not is_openai_model:
         gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -189,6 +194,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             raise ValueError("OPENAI_API_KEY is required for OpenAI models")
         # Import here to avoid loading the module if not needed
         import openai
+
         # Configure OpenAI API
         openai_client = openai.AsyncOpenAI(api_key=openai_api_key)
 
@@ -203,10 +209,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
 
     try:
         yield {
-            "repo_path": repo_path, 
-            "gemini_client": gemini_client, 
+            "repo_path": repo_path,
+            "gemini_client": gemini_client,
             "openai_client": openai_client,
-            "model": model
+            "model": model,
         }
     finally:
         pass
@@ -851,42 +857,42 @@ The workplan should be comprehensive enough that a developer or AI assistant cou
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
         is_openai_model = model.startswith("gpt-")
-        
+
         # Call the appropriate API based on the model type
         if is_openai_model:
             if not openai_client:
                 raise YellhornMCPError("OpenAI client not initialized. Is OPENAI_API_KEY set?")
-                
+
             await ctx.log(
                 level="info",
                 message=f"Generating workplan with OpenAI API for title: {title} with model {model}",
             )
-            
+
             # Convert the prompt to OpenAI messages format
             messages = [{"role": "user", "content": prompt}]
-            
+
             # Call OpenAI API
             response = await openai_client.chat.completions.create(
                 model=model,
                 messages=messages,
             )
-            
+
             # Extract content and usage
             workplan_content = response.choices[0].message.content
             usage_metadata = response.usage  # OpenAI usage object
         else:
             if gemini_client is None:
                 raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
-                
+
             await ctx.log(
                 level="info",
                 message=f"Generating workplan with Gemini API for title: {title} with model {model}",
             )
-            
+
             # Call Gemini API
             response = await gemini_client.aio.models.generate_content(model=model, contents=prompt)
             workplan_content = response.text
-            
+
             # Capture usage metadata
             usage_metadata = getattr(response, "usage_metadata", {})
 
@@ -1394,41 +1400,41 @@ If the implementation intentionally deviates from the workplan for good reasons,
 IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
         is_openai_model = model.startswith("gpt-")
-        
+
         # Call the appropriate API based on the model type
         if is_openai_model:
             if not openai_client:
                 raise YellhornMCPError("OpenAI client not initialized. Is OPENAI_API_KEY set?")
-                
+
             await ctx.log(
                 level="info",
                 message=f"Generating judgement with OpenAI API model {model}",
             )
-            
+
             # Convert the prompt to OpenAI messages format
             messages = [{"role": "user", "content": prompt}]
-            
+
             # Call OpenAI API
             response = await openai_client.chat.completions.create(
                 model=model,
                 messages=messages,
             )
-            
+
             # Extract content and usage
             judgement_content = response.choices[0].message.content
             usage_metadata = response.usage  # OpenAI usage object
         else:
             if gemini_client is None:
                 raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
-                
+
             await ctx.log(
                 level="info",
                 message=f"Generating judgement with Gemini API model {model}",
             )
-            
+
             # Call Gemini API
             response = await gemini_client.aio.models.generate_content(model=model, contents=prompt)
-            
+
             # Extract judgement and usage metadata
             judgement_content = response.text
             usage_metadata = getattr(response, "usage_metadata", {})
@@ -1534,7 +1540,7 @@ async def judge_workplan(
 
         # Trigger the judgement asynchronously
         gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
-        openai_client = ctx.request_context.lifespan_context.get("openai_client") 
+        openai_client = ctx.request_context.lifespan_context.get("openai_client")
         model = ctx.request_context.lifespan_context["model"]
 
         asyncio.create_task(

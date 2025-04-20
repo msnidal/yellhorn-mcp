@@ -650,7 +650,7 @@ def test_format_metrics_section():
     metadata.prompt_token_count = 1000
     metadata.candidates_token_count = 500
     metadata.total_token_count = 1500
-    
+
     model = "gemini-2.5-pro-preview-03-25"
 
     with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
@@ -675,13 +675,13 @@ def test_format_metrics_section():
             self.prompt_token_count = 2000
             self.candidates_token_count = 800
             # Intentionally not setting total_token_count attribute
-        
+
         def __getattr__(self, name):
             if name == "total_token_count":
                 # Simulate missing attribute
                 raise AttributeError("'CustomMetadata' object has no attribute 'total_token_count'")
             return super().__getattr__(name)
-    
+
     metadata2 = CustomMetadata()
 
     with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:

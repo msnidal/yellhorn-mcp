@@ -60,7 +60,7 @@ def main():
     # Validate API keys based on model
     model = args.model
     is_openai_model = model.startswith("gpt-")
-    
+
     # For Gemini models
     if not is_openai_model:
         api_key = os.getenv("GEMINI_API_KEY")

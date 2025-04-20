@@ -102,7 +102,7 @@ def test_main_missing_openai_api_key(mock_mcp_run, mock_getenv, mock_exit, capsy
     # Mock environment variables without OpenAI API key
     mock_getenv.side_effect = lambda x, default=None: {
         "REPO_PATH": "/mock/repo",
-        "GEMINI_API_KEY": "mock-gemini-api-key", 
+        "GEMINI_API_KEY": "mock-gemini-api-key",
     }.get(x, default)
 
     # Run the main function, expecting it to exit
