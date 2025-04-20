@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-04-19
+
+### Added
+- Added support for OpenAI `gpt-4o`, `gpt-4o-mini`, `o4-mini`, and `o3` models.
+- Added OpenAI SDK dependency with async client support.
+- Added pricing configuration for OpenAI models.
+- Added conditional API key validation based on the selected model.
+- Updated metrics collection to handle both Gemini and OpenAI usage metadata.
+
+### Changed
+- Modified `app_lifespan` to conditionally initialize either Gemini or OpenAI clients based on the selected model.
+- Updated client references in `process_workplan_async` and `process_judgement_async` functions.
+- Updated documentation and help text to reflect the new model options.
+
 ## [0.2.7] - 2025-04-19
 
 ### Added

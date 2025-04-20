@@ -2,7 +2,7 @@
 
 ![Yellhorn Logo](assets/yellhorn.png)
 
-A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro capabilities to Claude Code for software development tasks using your entire codebase in the prompt. This pattern is highly useful for defining work to be done by code assistants like Claude Code or other MCP compatible coding agents, and reviewing the results ensuring they meet the exactly specified original requirements.
+A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro and OpenAI capabilities to Claude Code for software development tasks using your entire codebase in the prompt. This pattern is highly useful for defining work to be done by code assistants like Claude Code or other MCP compatible coding agents, and reviewing the results ensuring they meet the exactly specified original requirements.
 
 ## Features
 
@@ -29,9 +29,12 @@ pip install -e .
 
 The server requires the following environment variables:
 
-- `GEMINI_API_KEY`: Your Gemini API key (required)
+- `GEMINI_API_KEY`: Your Gemini API key (required for Gemini models)
+- `OPENAI_API_KEY`: Your OpenAI API key (required for OpenAI models)
 - `REPO_PATH`: Path to your repository (defaults to current directory)
-- `YELLHORN_MCP_MODEL`: Gemini model to use (defaults to "gemini-2.5-pro-preview-03-25"). You can also use "gemini-2.5-flash-preview-04-17" for lower latency.
+- `YELLHORN_MCP_MODEL`: Model to use (defaults to "gemini-2.5-pro-preview-03-25"). Available options:
+  - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
+  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
 
 The server also requires the GitHub CLI (`gh`) to be installed and authenticated.
 

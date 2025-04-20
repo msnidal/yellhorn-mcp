@@ -236,7 +236,8 @@ def mock_request_context():
     mock_ctx = MagicMock(spec=Context)
     mock_ctx.request_context.lifespan_context = {
         "repo_path": Path("/mock/repo"),
-        "client": MagicMock(spec=genai.Client),
+        "gemini_client": MagicMock(spec=genai.Client),
+        "openai_client": None,
         "model": "gemini-2.5-pro-preview-03-25",
     }
     return mock_ctx
@@ -645,11 +646,11 @@ def test_calculate_cost():
 def test_format_metrics_section():
     """Test the format_metrics_section function with different metadata."""
     # Test with all metadata provided
-    metadata = {
-        "prompt_token_count": 1000,
-        "candidates_token_count": 500,
-        "total_token_count": 1500,
-    }
+    metadata = MagicMock()
+    metadata.prompt_token_count = 1000
+    metadata.candidates_token_count = 500
+    metadata.total_token_count = 1500
+
     model = "gemini-2.5-pro-preview-03-25"
 
     with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
@@ -668,13 +669,26 @@ def test_format_metrics_section():
         # Check the calculate_cost was called with the right parameters
         mock_calculate_cost.assert_called_once_with(model, 1000, 500)
 
-    # Test with missing total_token_count (should sum input and output)
-    metadata = {"prompt_token_count": 2000, "candidates_token_count": 800}
+    # Create a custom dict-like object instead of MagicMock
+    class CustomMetadata:
+        def __init__(self):
+            self.prompt_token_count = 2000
+            self.candidates_token_count = 800
+            # Intentionally not setting total_token_count attribute
+
+        def __getattr__(self, name):
+            if name == "total_token_count":
+                # Simulate missing attribute
+                raise AttributeError("'CustomMetadata' object has no attribute 'total_token_count'")
+            # Use proper attribute error for unknown attributes
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+    metadata2 = CustomMetadata()
 
     with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
         mock_calculate_cost.return_value = 0.035
 
-        result = format_metrics_section(model, metadata)
+        result = format_metrics_section(model, metadata2)
 
         # Check that the total is calculated
         assert "**Total Tokens**: 2800" in result
@@ -891,7 +905,8 @@ async def test_update_github_issue():
 async def test_process_workplan_async(mock_request_context, mock_genai_client):
     """Test processing workplan asynchronously."""
     # Set the mock client in the context
-    mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["openai_client"] = None
 
     with (
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
@@ -918,6 +933,7 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         await process_workplan_async(
             Path("/mock/repo"),
             mock_genai_client,
+            None,  # No OpenAI client
             "gemini-model",
             "Feature Implementation Plan",
             "123",
@@ -1228,7 +1244,8 @@ async def test_create_github_subissue():
 async def test_process_judgement_async(mock_request_context, mock_genai_client):
     """Test processing judgement asynchronously."""
     # Set the mock client in the context
-    mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["openai_client"] = None
 
     with (
         patch("yellhorn_mcp.server.create_github_subissue") as mock_create_subissue,
@@ -1261,6 +1278,7 @@ async def test_process_judgement_async(mock_request_context, mock_genai_client):
         response = await process_judgement_async(
             mock_request_context.request_context.lifespan_context["repo_path"],
             mock_genai_client,
+            None,  # No OpenAI client
             "gemini-model",
             workplan,
             diff,
@@ -1314,6 +1332,7 @@ async def test_process_judgement_async(mock_request_context, mock_genai_client):
         response = await process_judgement_async(
             mock_request_context.request_context.lifespan_context["repo_path"],
             mock_genai_client,
+            None,  # No OpenAI client
             "gemini-model",
             workplan,
             diff,

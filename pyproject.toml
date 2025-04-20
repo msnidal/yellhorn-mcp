@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yellhorn-mcp"
-version = "0.2.7"
+version = "0.3.0"
 authors = [{ name = "Author" }]
-description = "Yellhorn offers MCP tools to generate detailed workplans with Gemini 2.5 Pro and to review diffs against them using your entire codebase as context."
+description = "Yellhorn offers MCP tools to generate detailed workplans with Gemini 2.5 Pro or OpenAI models and to review diffs against them using your entire codebase as context."
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
@@ -20,10 +20,11 @@ dependencies = [
     "google-genai~=1.8.0",
     "aiohttp~=3.11.14",
     "pydantic~=2.11.1",
+    "openai~=1.23.6",
 ]
 
 [project.optional-dependencies]
-dev = ["black", "flake8", "isort", "pytest", "pytest-asyncio"]
+dev = ["black", "flake8", "isort", "pytest", "pytest-asyncio", "httpx"]
 
 [project.scripts]
 yellhorn-mcp = "yellhorn_mcp.cli:main"

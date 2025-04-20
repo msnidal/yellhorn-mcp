@@ -2,7 +2,7 @@
 
 ## Overview
 
-Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro API for software development tasks. It provides these main tools:
+Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro and OpenAI API for software development tasks. It provides these main tools:
 
 1. **Create workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
 2. **Create worktree**: Creates a git worktree with a linked branch for isolated development from an existing workplan issue.
@@ -25,9 +25,12 @@ pip install -e .
 
 The server requires the following environment variables:
 
-- `GEMINI_API_KEY` (required): Your Gemini API key
+- `GEMINI_API_KEY` (required for Gemini models): Your Gemini API key
+- `OPENAI_API_KEY` (required for OpenAI models): Your OpenAI API key
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
-- `YELLHORN_MCP_MODEL` (optional): Gemini model to use (defaults to "gemini-2.5-pro-preview-03-25"). You can also use "gemini-2.5-flash-preview-04-17" for lower latency.
+- `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro-preview-03-25"). Available options:
+  - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
+  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
 
 ### Excludes with .yellhornignore
 
@@ -76,10 +79,15 @@ gh auth login
 ```
 
 ```bash
-# Set environment variables
-export GEMINI_API_KEY=your_api_key_here
+# Set environment variables for Gemini models
+export GEMINI_API_KEY=your_gemini_api_key_here
 export REPO_PATH=/path/to/your/repo
 export YELLHORN_MCP_MODEL=gemini-2.5-pro-preview-03-25
+
+# OR for OpenAI models
+export OPENAI_API_KEY=your_openai_api_key_here
+export REPO_PATH=/path/to/your/repo
+export YELLHORN_MCP_MODEL=gpt-4o
 ```
 
 ## Running the Server
@@ -96,7 +104,9 @@ yellhorn-mcp --repo-path /path/to/repo --host 127.0.0.1 --port 8000
 Available command-line options:
 
 - `--repo-path`: Path to the Git repository (defaults to current directory or REPO_PATH env var)
-- `--model`: Gemini model to use (defaults to "gemini-2.5-pro-preview-03-25" or YELLHORN_MCP_MODEL env var)
+- `--model`: Model to use (defaults to "gemini-2.5-pro-preview-03-25" or YELLHORN_MCP_MODEL env var). You can specify:
+  - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17" 
+  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
 - `--host`: Host to bind the server to (defaults to 127.0.0.1)
 - `--port`: Port to bind the server to (defaults to 8000)
 

@@ -22,7 +22,8 @@ def test_main_success(
     """Test successful execution of the CLI main function."""
     # Mock environment variables
     mock_getenv.side_effect = lambda x, default=None: {
-        "GEMINI_API_KEY": "mock-api-key",
+        "GEMINI_API_KEY": "mock-gemini-api-key",
+        "OPENAI_API_KEY": "mock-openai-api-key",
         "REPO_PATH": "/mock/repo",
         "YELLHORN_MCP_MODEL": "gemini-2.5-pro-preview-03-25",
     }.get(x, default)
@@ -59,14 +60,16 @@ def test_main_success(
 @patch("sys.exit")
 @patch("os.getenv")
 @patch("yellhorn_mcp.server.mcp.run")
-def test_main_missing_api_key(mock_mcp_run, mock_getenv, mock_exit, capsys):
-    """Test execution with missing API key."""
+def test_main_missing_gemini_api_key(mock_mcp_run, mock_getenv, mock_exit, capsys):
+    """Test execution with missing Gemini API key."""
     # Set up sys.exit to actually exit the function
     mock_exit.side_effect = SystemExit
 
-    # Mock environment variables without API key
+    # Mock environment variables without Gemini API key
     mock_getenv.side_effect = lambda x, default=None: {
         "REPO_PATH": "/mock/repo",
+        "OPENAI_API_KEY": "mock-openai-api-key",
+        "YELLHORN_MCP_MODEL": "gemini-2.5-pro-preview-03-25",
     }.get(x, default)
 
     # Run the main function, expecting it to exit
@@ -78,6 +81,39 @@ def test_main_missing_api_key(mock_mcp_run, mock_getenv, mock_exit, capsys):
     # Check that the error message was printed
     captured = capsys.readouterr()
     error_msg = "Error: GEMINI_API_KEY environment variable is not set"
+    assert error_msg in captured.out
+
+    # Check that sys.exit was called with exit code 1
+    mock_exit.assert_any_call(1)
+
+    # Ensure mcp.run was not called
+    mock_mcp_run.assert_not_called()
+
+
+@patch("sys.argv", ["yellhorn-mcp", "--model", "gpt-4o"])
+@patch("sys.exit")
+@patch("os.getenv")
+@patch("yellhorn_mcp.server.mcp.run")
+def test_main_missing_openai_api_key(mock_mcp_run, mock_getenv, mock_exit, capsys):
+    """Test execution with missing OpenAI API key when using OpenAI model."""
+    # Set up sys.exit to actually exit the function
+    mock_exit.side_effect = SystemExit
+
+    # Mock environment variables without OpenAI API key
+    mock_getenv.side_effect = lambda x, default=None: {
+        "REPO_PATH": "/mock/repo",
+        "GEMINI_API_KEY": "mock-gemini-api-key",
+    }.get(x, default)
+
+    # Run the main function, expecting it to exit
+    try:
+        main()
+    except SystemExit:
+        pass  # Expected behavior
+
+    # Check that the error message was printed
+    captured = capsys.readouterr()
+    error_msg = "Error: OPENAI_API_KEY environment variable is not set"
     assert error_msg in captured.out
 
     # Check that sys.exit was called with exit code 1
