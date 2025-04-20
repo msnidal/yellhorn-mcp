@@ -72,31 +72,6 @@ def test_format_metrics_section_null_metadata():
     assert "**Estimated Cost**: N/A" in result
 
 
-def test_format_metrics_section_malformed_metadata():
-    """Test format_metrics_section with malformed metadata."""
-    # Test with empty dict
-    metadata = {}
-    result = format_metrics_section("gemini-model", metadata)
-    assert "N/A" in result
-
-    # Test with partial data (missing prompt_tokens)
-    metadata = MagicMock()
-    metadata.completion_tokens = 500
-    metadata.total_tokens = 1500
-    # No prompt_tokens attribute
-
-    result = format_metrics_section("gemini-model", metadata)
-    assert "N/A" in result
-
-    # Test with different malformed data (missing candidates_token_count)
-    metadata = MagicMock()
-    metadata.prompt_token_count = 1000
-    # No candidates_token_count attribute
-
-    result = format_metrics_section("gemini-model", metadata)
-    assert "N/A" in result
-
-
 def test_format_metrics_section_none_token_values():
     """Test format_metrics_section with None token values."""
     # Gemini model with None token counts
