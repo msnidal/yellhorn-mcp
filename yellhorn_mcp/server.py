@@ -37,24 +37,18 @@ from pydantic import FileUrl
 # Pricing configuration for Gemini models (USD per 1M tokens)
 MODEL_PRICING = {
     "gemini-2.5-pro-preview-03-25": {
-        "input": {
-            "default": 1.25,
-            "above_200k": 2.50
-        },
-        "output": {
-            "default": 10.00,
-            "above_200k": 15.00
-        }
+        "input": {"default": 1.25, "above_200k": 2.50},
+        "output": {"default": 10.00, "above_200k": 15.00},
     },
     "gemini-2.5-flash-preview-04-17": {
         "input": {
             "default": 0.15,
-            "above_200k": 0.15  # Flash doesn't have different pricing tiers
+            "above_200k": 0.15,  # Flash doesn't have different pricing tiers
         },
         "output": {
             "default": 3.50,
-            "above_200k": 3.50  # Flash doesn't have different pricing tiers
-        }
+            "above_200k": 3.50,  # Flash doesn't have different pricing tiers
+        },
     },
     # Add other supported models as needed
 }
@@ -79,11 +73,11 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float |
     # Determine which pricing tier to use based on token count
     input_tier = "above_200k" if input_tokens > 200_000 else "default"
     output_tier = "above_200k" if output_tokens > 200_000 else "default"
-    
+
     # Calculate costs (convert to millions for rate multiplication)
     input_cost = (input_tokens / 1_000_000) * pricing["input"][input_tier]
     output_cost = (output_tokens / 1_000_000) * pricing["output"][output_tier]
-    
+
     return input_cost + output_cost
 
 
@@ -799,10 +793,10 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         )
         response = await client.aio.models.generate_content(model=model, contents=prompt)
         workplan_content = response.text
-        
+
         # Capture usage metadata
         usage_metadata = getattr(response, "usage_metadata", {})
-        
+
         if not workplan_content:
             await update_github_issue(
                 repo_path,
@@ -813,7 +807,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
-        
+
         # Add the title as header and append metrics to the final body
         full_body = f"# {title}\n\n{workplan_content}{metrics_section}"
 
@@ -1312,7 +1306,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Extract judgement and usage metadata
         judgement_content = response.text
         usage_metadata = getattr(response, "usage_metadata", {})
-        
+
         if not judgement_content:
             raise YellhornMCPError("Received an empty response from Gemini API.")
 
@@ -1332,7 +1326,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             base_hash_info = f" (`{base_commit_hash}`)" if base_commit_hash else ""
             head_hash_info = f" (`{head_commit_hash}`)" if head_commit_hash else ""
             metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`{base_hash_info}\n- Head ref: `{head_ref}`{head_hash_info}\n- Workplan: #{workplan_issue_number}\n\n"
-            
+
             # Combine metadata, judgement content and metrics
             judgement_with_metadata_and_metrics = metadata + judgement_content + metrics_section
 

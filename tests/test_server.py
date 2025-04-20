@@ -621,22 +621,22 @@ def test_calculate_cost():
     cost = calculate_cost("gemini-2.5-pro-preview-03-25", 100_000, 50_000)
     # Expected: (100,000 / 1M) * 1.25 + (50,000 / 1M) * 10.00 = 0.125 + 0.5 = 0.625
     assert cost == 0.625
-    
+
     # Test with standard model and higher tier (above 200k tokens)
     cost = calculate_cost("gemini-2.5-pro-preview-03-25", 250_000, 300_000)
     # Expected: (250,000 / 1M) * 2.50 + (300,000 / 1M) * 15.00 = 0.625 + 4.5 = 5.125
     assert cost == 5.125
-    
+
     # Test with standard model and mixed tiers
     cost = calculate_cost("gemini-2.5-pro-preview-03-25", 150_000, 250_000)
     # Expected: (150,000 / 1M) * 1.25 + (250,000 / 1M) * 15.00 = 0.1875 + 3.75 = 3.9375
     assert cost == 3.9375
-    
+
     # Test with flash model (same pricing across tiers)
     cost = calculate_cost("gemini-2.5-flash-preview-04-17", 150_000, 50_000)
     # Expected: (150,000 / 1M) * 0.15 + (50,000 / 1M) * 3.50 = 0.0225 + 0.175 = 0.1975
     assert cost == 0.1975
-    
+
     # Test with unknown model
     cost = calculate_cost("unknown-model", 100_000, 50_000)
     assert cost is None
@@ -648,15 +648,15 @@ def test_format_metrics_section():
     metadata = {
         "prompt_token_count": 1000,
         "candidates_token_count": 500,
-        "total_token_count": 1500
+        "total_token_count": 1500,
     }
     model = "gemini-2.5-pro-preview-03-25"
-    
+
     with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
         mock_calculate_cost.return_value = 0.0175
-        
+
         result = format_metrics_section(model, metadata)
-        
+
         # Check that it contains all the expected sections
         assert "\n\n---\n## Completion Metrics" in result
         assert f"**Model Used**: `{model}`" in result
@@ -664,39 +664,33 @@ def test_format_metrics_section():
         assert "**Output Tokens**: 500" in result
         assert "**Total Tokens**: 1500" in result
         assert "**Estimated Cost**: $0.0175" in result
-        
+
         # Check the calculate_cost was called with the right parameters
         mock_calculate_cost.assert_called_once_with(model, 1000, 500)
-    
+
     # Test with missing total_token_count (should sum input and output)
-    metadata = {
-        "prompt_token_count": 2000,
-        "candidates_token_count": 800
-    }
-    
+    metadata = {"prompt_token_count": 2000, "candidates_token_count": 800}
+
     with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
         mock_calculate_cost.return_value = 0.035
-        
+
         result = format_metrics_section(model, metadata)
-        
+
         # Check that the total is calculated
         assert "**Total Tokens**: 2800" in result
-        
+
         # Check the calculate_cost was called with the right parameters
         mock_calculate_cost.assert_called_once_with(model, 2000, 800)
-    
+
     # Test with unknown model (cost should be N/A)
-    metadata = {
-        "prompt_token_count": 1000,
-        "candidates_token_count": 500
-    }
+    metadata = {"prompt_token_count": 1000, "candidates_token_count": 500}
     unknown_model = "unknown-model"
-    
+
     with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
         mock_calculate_cost.return_value = None
-        
+
         result = format_metrics_section(unknown_model, metadata)
-        
+
         # Check that cost is N/A
         assert "**Estimated Cost**: N/A" in result
 
@@ -908,14 +902,16 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
 
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
-        mock_format_metrics.return_value = "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
-        
+        mock_format_metrics.return_value = (
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+        )
+
         # Set usage metadata on the response
         mock_response = mock_genai_client.aio.models.generate_content.return_value
         mock_response.usage_metadata = {
             "prompt_token_count": 1000,
             "candidates_token_count": 500,
-            "total_token_count": 1500
+            "total_token_count": 1500,
         }
 
         # Test with required parameters
@@ -961,7 +957,10 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         args, kwargs = mock_update.call_args
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
-        assert args[2] == "# Feature Implementation Plan\n\nMock response text\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+        assert (
+            args[2]
+            == "# Feature Implementation Plan\n\nMock response text\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+        )
 
 
 @pytest.mark.asyncio
@@ -1240,14 +1239,16 @@ async def test_process_judgement_async(mock_request_context, mock_genai_client):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
         mock_create_subissue.return_value = "https://github.com/user/repo/issues/456"
-        mock_format_metrics.return_value = "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
-        
+        mock_format_metrics.return_value = (
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+        )
+
         # Set usage metadata on the response
         mock_response = mock_genai_client.aio.models.generate_content.return_value
         mock_response.usage_metadata = {
             "prompt_token_count": 2000,
             "candidates_token_count": 800,
-            "total_token_count": 2800
+            "total_token_count": 2800,
         }
 
         workplan = "1. Implement X\n2. Test X"
@@ -1323,7 +1324,10 @@ async def test_process_judgement_async(mock_request_context, mock_genai_client):
         )
 
         # Verify that metrics are included in the direct output
-        assert response == "Mock response text\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+        assert (
+            response
+            == "Mock response text\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+        )
         mock_genai_client.aio.models.generate_content.assert_called_once()
         mock_format_metrics.assert_called_once()
         mock_create_subissue.assert_not_called()
