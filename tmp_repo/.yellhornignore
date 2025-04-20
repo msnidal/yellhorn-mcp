@@ -1,0 +1,6 @@
+# Test .yellhornignore file
+*.log
+node_modules/
+dist/
+*.min.js
+test-dir/
