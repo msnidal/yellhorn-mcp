@@ -63,6 +63,14 @@ MODEL_PRICING = {
         "input": {"default": 0.15},  # $0.15 per 1M input tokens
         "output": {"default": 0.60},  # $0.60 per 1M output tokens
     },
+    "o4-mini": {
+        "input": {"default": 1.1},  # $1.1 per 1M input tokens
+        "output": {"default": 4.4},  # $4.4 per 1M output tokens
+    },
+    "o3": {
+        "input": {"default": 10.0},  # $10 per 1M input tokens
+        "output": {"default": 40.0},  # $40 per 1M output tokens
+    },
 }
 
 
@@ -112,7 +120,7 @@ def format_metrics_section(model: str, usage_metadata: Any) -> str:
         return na_metrics
 
     # Handle different attribute names between Gemini and OpenAI usage metadata
-    if model.startswith("gpt-"):  # OpenAI models
+    if model.startswith("gpt-") or model.startswith("o"):  # OpenAI models
         # Check if we have a proper CompletionUsage object
         if not hasattr(usage_metadata, "prompt_tokens") or not hasattr(
             usage_metadata, "completion_tokens"
@@ -174,7 +182,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     # Get configuration from environment variables
     repo_path = os.getenv("REPO_PATH", ".")
     model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
-    is_openai_model = model.startswith("gpt-")
+    is_openai_model = model.startswith("gpt-") or model.startswith("o")
 
     # Initialize clients based on the model type
     gemini_client = None
@@ -194,9 +202,11 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             raise ValueError("OPENAI_API_KEY is required for OpenAI models")
         # Import here to avoid loading the module if not needed
         import openai
+        import httpx
 
-        # Configure OpenAI API
-        openai_client = openai.AsyncOpenAI(api_key=openai_api_key)
+        # Configure OpenAI API with a custom httpx client to avoid proxy issues
+        http_client = httpx.AsyncClient()
+        openai_client = openai.AsyncOpenAI(api_key=openai_api_key, http_client=http_client)
 
     # Validate repository path
     repo_path = Path(repo_path).resolve()
@@ -856,7 +866,7 @@ The workplan should be comprehensive enough that a developer or AI assistant cou
 
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
-        is_openai_model = model.startswith("gpt-")
+        is_openai_model = model.startswith("gpt-") or model.startswith("o")
 
         # Call the appropriate API based on the model type
         if is_openai_model:
@@ -1399,7 +1409,7 @@ If the implementation intentionally deviates from the workplan for good reasons,
 
 IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
-        is_openai_model = model.startswith("gpt-")
+        is_openai_model = model.startswith("gpt-") or model.startswith("o")
 
         # Call the appropriate API based on the model type
         if is_openai_model:

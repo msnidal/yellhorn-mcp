@@ -70,6 +70,16 @@ def test_calculate_cost_openai_models():
     # Expected: (1000 / 1M) * 0.15 + (500 / 1M) * 0.60 = 0.00015 + 0.0003 = 0.00045
     assert cost == 0.00045
 
+    # Test with o4-mini
+    cost = calculate_cost("o4-mini", 1000, 500)
+    # Expected: (1000 / 1M) * 1.1 + (500 / 1M) * 4.4 = 0.0011 + 0.0022 = 0.0033
+    assert cost == 0.0033
+
+    # Test with o3
+    cost = calculate_cost("o3", 1000, 500)
+    # Expected: (1000 / 1M) * 10.0 + (500 / 1M) * 40.0 = 0.01 + 0.02 = 0.03
+    assert cost == 0.03
+
 
 def test_format_metrics_section_openai():
     """Test the format_metrics_section function with OpenAI usage data."""

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2025-04-19
 
 ### Added
-- Added support for OpenAI `gpt-4o` and `gpt-4o-mini` models.
+- Added support for OpenAI `gpt-4o`, `gpt-4o-mini`, `o4-mini`, and `o3` models.
 - Added OpenAI SDK dependency with async client support.
 - Added pricing configuration for OpenAI models.
 - Added conditional API key validation based on the selected model.

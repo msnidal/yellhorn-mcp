@@ -46,7 +46,7 @@ async def create_workplan(session: ClientSession, title: str, detailed_descripti
     # Parse the JSON response
     import json
 
-    return json.loads(result)
+    return json.loads(str(result))
 
 
 async def create_worktree(
@@ -72,7 +72,7 @@ async def create_worktree(
     # Parse the JSON response
     import json
 
-    return json.loads(result)
+    return json.loads(str(result))
 
 
 async def get_workplan(
@@ -93,7 +93,7 @@ async def get_workplan(
     """
     # Call the get_workplan tool
     result = await session.call_tool("get_workplan", arguments={"issue_number": issue_number})
-    return result
+    return str(result)
 
 
 async def judge_workplan(
@@ -122,7 +122,7 @@ async def judge_workplan(
 
     # Call the judge_workplan tool
     result = await session.call_tool("judge_workplan", arguments=arguments)
-    return result
+    return str(result)
 
 
 async def list_tools(session: ClientSession) -> None:
@@ -135,11 +135,20 @@ async def list_tools(session: ClientSession) -> None:
     tools = await session.list_tools()
     print("Available tools:")
     for tool in tools:
-        print(f"- {tool.name}: {tool.description}")
+        # Tools are returned as tuples of (name, definition)
+        name, definition = tool
+        print(f"- {name}: {definition.get('description', 'No description')}")
         print("  Arguments:")
-        for arg in tool.arguments:
-            required = "(required)" if arg.required else "(optional)"
-            print(f"    - {arg.name}: {arg.description} {required}")
+        if "parameters" in definition and "properties" in definition["parameters"]:
+            for arg_name, arg_props in definition["parameters"]["properties"].items():
+                required = (
+                    "(required)"
+                    if arg_name in definition["parameters"].get("required", [])
+                    else "(optional)"
+                )
+                print(
+                    f"    - {arg_name}: {arg_props.get('description', 'No description')} {required}"
+                )
         print()
 
 
@@ -160,7 +169,9 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
             "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY", ""),
             "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
             "REPO_PATH": os.environ.get("REPO_PATH", os.getcwd()),
-            "YELLHORN_MCP_MODEL": os.environ.get("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25"),
+            "YELLHORN_MCP_MODEL": os.environ.get(
+                "YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25"
+            ),
         },
     )
 
@@ -231,11 +242,11 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 print(f"For workplan issue: {args.issue_number}")
 
                 try:
-                    result = await judge_workplan(
+                    result_str = await judge_workplan(
                         session, args.issue_number, args.base_ref, args.head_ref
                     )
                     print("\nJudgement Task:")
-                    print(result)
+                    print(result_str)
                     print(
                         "\nA judgement will be generated asynchronously and posted as a GitHub sub-issue."
                     )
@@ -326,7 +337,7 @@ def main():
     # Check model type from environment and validate appropriate API key
     model = os.environ.get("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
     is_openai_model = model.startswith("gpt-")
-    
+
     # Ensure appropriate API keys are set for commands that require them
     if args.command in ["plan", "worktree", "getplan", "judge"]:
         if is_openai_model and not os.environ.get("OPENAI_API_KEY"):

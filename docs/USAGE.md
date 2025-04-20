@@ -30,7 +30,7 @@ The server requires the following environment variables:
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro-preview-03-25"). Available options:
   - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
-  - OpenAI models: "gpt-4o", "gpt-4o-mini"
+  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
 
 ### Excludes with .yellhornignore
 
@@ -104,7 +104,9 @@ yellhorn-mcp --repo-path /path/to/repo --host 127.0.0.1 --port 8000
 Available command-line options:
 
 - `--repo-path`: Path to the Git repository (defaults to current directory or REPO_PATH env var)
-- `--model`: Model to use (defaults to "gemini-2.5-pro-preview-03-25" or YELLHORN_MCP_MODEL env var). You can specify Gemini models (e.g., "gemini-2.5-pro-preview-03-25") or OpenAI models (e.g., "gpt-4o")
+- `--model`: Model to use (defaults to "gemini-2.5-pro-preview-03-25" or YELLHORN_MCP_MODEL env var). You can specify:
+  - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17" 
+  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
 - `--host`: Host to bind the server to (defaults to 127.0.0.1)
 - `--port`: Port to bind the server to (defaults to 8000)
 

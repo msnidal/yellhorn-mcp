@@ -37,7 +37,7 @@ def main():
         dest="model",
         default=os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25"),
         help="Model to use (e.g., gemini-2.5-pro-preview-03-25, gemini-2.5-flash-preview-04-17, "
-        "gpt-4o, gpt-4o-mini). Default: gemini-2.5-pro-preview-03-25 or YELLHORN_MCP_MODEL env var.",
+        "gpt-4o, gpt-4o-mini, o4-mini, o3). Default: gemini-2.5-pro-preview-03-25 or YELLHORN_MCP_MODEL env var.",
     )
 
     parser.add_argument(
@@ -59,7 +59,7 @@ def main():
 
     # Validate API keys based on model
     model = args.model
-    is_openai_model = model.startswith("gpt-")
+    is_openai_model = model.startswith("gpt-") or model.startswith("o")
 
     # For Gemini models
     if not is_openai_model:

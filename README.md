@@ -34,7 +34,7 @@ The server requires the following environment variables:
 - `REPO_PATH`: Path to your repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL`: Model to use (defaults to "gemini-2.5-pro-preview-03-25"). Available options:
   - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
-  - OpenAI models: "gpt-4o", "gpt-4o-mini"
+  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
 
 The server also requires the GitHub CLI (`gh`) to be installed and authenticated.
 

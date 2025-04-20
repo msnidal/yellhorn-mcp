@@ -680,7 +680,8 @@ def test_format_metrics_section():
             if name == "total_token_count":
                 # Simulate missing attribute
                 raise AttributeError("'CustomMetadata' object has no attribute 'total_token_count'")
-            return super().__getattr__(name)
+            # Use proper attribute error for unknown attributes
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
     metadata2 = CustomMetadata()
 

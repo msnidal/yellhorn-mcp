@@ -3,7 +3,7 @@
     "yellhorn-mcp": {
       "type": "stdio",
       "command": "yellhorn-mcp",
-      "args": [],
+      "args": ["--model","o3"],
       "env": {}
     }
   }
