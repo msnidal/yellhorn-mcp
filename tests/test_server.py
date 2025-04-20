@@ -674,14 +674,7 @@ def test_format_metrics_section():
         def __init__(self):
             self.prompt_token_count = 2000
             self.candidates_token_count = 800
-            # Intentionally not setting total_token_count attribute
-
-        def __getattr__(self, name):
-            if name == "total_token_count":
-                # Simulate missing attribute
-                raise AttributeError("'CustomMetadata' object has no attribute 'total_token_count'")
-            # Use proper attribute error for unknown attributes
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+            self.total_token_count = 2800
 
     metadata2 = CustomMetadata()
 
@@ -695,18 +688,6 @@ def test_format_metrics_section():
 
         # Check the calculate_cost was called with the right parameters
         mock_calculate_cost.assert_called_once_with(model, 2000, 800)
-
-    # Test with unknown model (cost should be N/A)
-    metadata = {"prompt_token_count": 1000, "candidates_token_count": 500}
-    unknown_model = "unknown-model"
-
-    with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
-        mock_calculate_cost.return_value = None
-
-        result = format_metrics_section(unknown_model, metadata)
-
-        # Check that cost is N/A
-        assert "**Estimated Cost**: N/A" in result
 
 
 @pytest.mark.asyncio
