@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from google import genai
+from google.genai.types import GenerateContentResponseUsageMetadata
 from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import FileUrl
@@ -81,20 +82,27 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float |
     return input_cost + output_cost
 
 
-def format_metrics_section(model: str, usage_metadata: dict) -> str:
+def format_metrics_section(model: str, usage_metadata: GenerateContentResponseUsageMetadata | None) -> str:
     """
     Formats the completion metrics into a Markdown section.
 
     Args:
         model: The Gemini model name used for generation.
-        usage_metadata: Dictionary containing token usage information.
+        usage_metadata: Object containing token usage information.
+                        Could be a dict or a GenerateContentResponseUsageMetadata object.
 
     Returns:
         Formatted Markdown section with completion metrics.
     """
-    input_tokens = usage_metadata.get("prompt_token_count", 0)
-    output_tokens = usage_metadata.get("candidates_token_count", 0)
-    total_tokens = usage_metadata.get("total_token_count", input_tokens + output_tokens)
+    if usage_metadata is None:
+        return "\n\n---\n## Completion Metrics\n*   **Model Used**: N/A\n*   **Input Tokens**: N/A\n*   **Output Tokens**: N/A\n*   **Total Tokens**: N/A\n*   **Estimated Cost**: N/A"
+
+    input_tokens = usage_metadata.prompt_token_count
+    output_tokens = usage_metadata.candidates_token_count
+    total_tokens = usage_metadata.total_token_count
+
+    if input_tokens is None or output_tokens is None or total_tokens is None:
+        return "\n\n---\n## Completion Metrics\n*   **Model Used**: N/A\n*   **Input Tokens**: N/A\n*   **Output Tokens**: N/A\n*   **Total Tokens**: N/A\n*   **Estimated Cost**: N/A"
 
     cost = calculate_cost(model, input_tokens, output_tokens)
     cost_str = f"${cost:.4f}" if cost is not None else "N/A"
@@ -1305,7 +1313,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
         # Extract judgement and usage metadata
         judgement_content = response.text
-        usage_metadata = getattr(response, "usage_metadata", {})
+        usage_metadata = response.usage_metadata
 
         if not judgement_content:
             raise YellhornMCPError("Received an empty response from Gemini API.")
