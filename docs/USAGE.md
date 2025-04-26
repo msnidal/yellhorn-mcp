@@ -90,51 +90,51 @@ export REPO_PATH=/path/to/your/repo
 export YELLHORN_MCP_MODEL=gpt-4o
 ```
 
-## Running the Server
+### VSCode/Cursor Setup
 
-### Standalone Mode
+To configure Yellhorn MCP in VSCode or Cursor, create a `.vscode/mcp.json` file in your workspace root with the following content:
 
-The simplest way to run the server is as a standalone HTTP server:
-
-```bash
-# Run as a standalone HTTP server
-yellhorn-mcp --repo-path /path/to/repo --host 127.0.0.1 --port 8000
+```json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "gemini-api-key",
+      "description": "Gemini API Key"
+    }
+  ],
+  "servers": {
+    "yellhorn-mcp": {
+      "type": "stdio",
+      "command": "/Users/msnidal/.pyenv/shims/yellhorn-mcp",
+      "args": [],
+      "env": {
+        "GEMINI_API_KEY": "${input:gemini-api-key}",
+        "REPO_PATH": "${workspaceFolder}"
+      }
+    }
+  }
+}
 ```
 
-Available command-line options:
+### Claude Code Setup
 
-- `--repo-path`: Path to the Git repository (defaults to current directory or REPO_PATH env var)
-- `--model`: Model to use (defaults to "gemini-2.5-pro-preview-03-25" or YELLHORN_MCP_MODEL env var). You can specify:
-  - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
-  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
-- `--host`: Host to bind the server to (defaults to 127.0.0.1)
-- `--port`: Port to bind the server to (defaults to 8000)
+To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json` file in your project with the following content:
 
-### Development Mode
-
-The quickest way to test the server interactively is with the MCP Inspector:
-
-```bash
-# Run the server in development mode
-mcp dev yellhorn_mcp.server
+```json
+{
+  "mcpServers": {
+    "yellhorn-mcp": {
+      "type": "stdio",
+      "command": "yellhorn-mcp",
+      "args": ["--model","o3"],
+      "env": {}
+    }
+  }
+}
 ```
 
-### Claude Desktop Integration
-
-For persistent installation in Claude Desktop:
-
-```bash
-# Install the server permanently
-mcp install yellhorn_mcp.server
-
-# With environment variables
-mcp install yellhorn_mcp.server -v GEMINI_API_KEY=your_key_here -v REPO_PATH=/path/to/repo
-
-# From an environment file
-mcp install yellhorn_mcp.server -f .env
-```
-
-## Using with Claude Code
+## Getting Started
 
 Once the server is running, Claude Code can utilize the tools it exposes. Here's a typical workflow:
 

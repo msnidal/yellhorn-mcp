@@ -1296,8 +1296,8 @@ async def get_workplan(
         YellhornMCPError: If unable to fetch the issue content.
     """
     try:
-        # Get the current working directory
-        current_path = Path.cwd()
+        # Get the repository path from context
+        repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
 
         await ctx.log(
             level="info",
@@ -1305,7 +1305,7 @@ async def get_workplan(
         )
 
         # Fetch the issue content
-        workplan = await get_github_issue_body(current_path, issue_number)
+        workplan = await get_github_issue_body(repo_path, issue_number)
 
         return workplan
 
@@ -1514,8 +1514,8 @@ async def judge_workplan(
         YellhornMCPError: If errors occur during the judgement process.
     """
     try:
-        # Get the current working directory
-        current_path = Path.cwd()
+        # Get the repository path from context
+        repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
 
         await ctx.log(
             level="info",
@@ -1523,12 +1523,12 @@ async def judge_workplan(
         )
 
         # Resolve git references to commit hashes for better tracking
-        base_commit_hash = await run_git_command(current_path, ["rev-parse", base_ref])
-        head_commit_hash = await run_git_command(current_path, ["rev-parse", head_ref])
+        base_commit_hash = await run_git_command(repo_path, ["rev-parse", base_ref])
+        head_commit_hash = await run_git_command(repo_path, ["rev-parse", head_ref])
 
         # Fetch the workplan and generate diff for review
-        workplan = await get_github_issue_body(current_path, issue_number)
-        diff = await get_git_diff(current_path, base_ref, head_ref)
+        workplan = await get_github_issue_body(repo_path, issue_number)
+        diff = await get_git_diff(repo_path, base_ref, head_ref)
 
         # Check if diff is empty
         if not diff.strip():
@@ -1541,7 +1541,7 @@ async def judge_workplan(
 
         asyncio.create_task(
             process_judgement_async(
-                current_path,
+                repo_path,
                 gemini_client,
                 openai_client,
                 model,
