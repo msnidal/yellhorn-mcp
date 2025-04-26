@@ -40,63 +40,51 @@ The server also requires the GitHub CLI (`gh`) to be installed and authenticated
 
 ## Usage
 
-### Running the server
+### Getting Started
 
-```bash
-# As a standalone server
-yellhorn-mcp --repo-path /path/to/repo --host 127.0.0.1 --port 8000
+#### VSCode/Cursor Setup
 
-# Using the MCP CLI
-mcp dev yellhorn_mcp.server
+To configure Yellhorn MCP in VSCode or Cursor, create a `.vscode/mcp.json` file at the root of your workspace with the following content:
 
-# Install as a permanent MCP server for Claude Desktop
-mcp install yellhorn_mcp.server
-
-# Set environment variables during installation
-mcp install yellhorn_mcp.server -v GEMINI_API_KEY=your_key_here -v REPO_PATH=/path/to/repo
+```json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "gemini-api-key",
+      "description": "Gemini API Key"
+    }
+  ],
+  "servers": {
+    "yellhorn-mcp": {
+      "type": "stdio",
+      "command": "/Users/msnidal/.pyenv/shims/yellhorn-mcp",
+      "args": [],
+      "env": {
+        "GEMINI_API_KEY": "${input:gemini-api-key}",
+        "REPO_PATH": "${workspaceFolder}"
+      }
+    }
+  }
+}
 ```
 
-### Integration with Claude Code
+#### Claude Code Setup
 
-When working with Claude Code, you can use the Yellhorn MCP tools by:
+To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json` file in your project with the following content:
 
-1. Starting a project task:
-
-   ```
-   Please generate a workplan with title "[Your Title]" and detailed description "[Your detailed requirements]"
-   ```
-
-2. Create a worktree for the workplan (optional):
-
-   ```
-   Please create a worktree for issue #123
-   ```
-
-3. Navigate to the created worktree directory:
-
-   ```
-   cd [worktree_path]  # The path is returned in the response
-   ```
-
-4. View the workplan if needed:
-
-   ```
-   # You can run this from anywhere
-   Please get the workplan for issue #123
-   ```
-
-5. Make your changes, create a PR, and request a review:
-
-   ```
-   # First create a PR using your preferred method (Git CLI, GitHub CLI, or web UI)
-   git add .
-   git commit -m "Implement feature"
-   git push origin HEAD
-   gh pr create --title "[PR Title]" --body "[PR Description]"
-   
-   # You can run this from anywhere
-   Please judge the PR comparing "main" and "feature-branch" against the workplan in issue #123
-   ```
+```json
+{
+  "mcpServers": {
+    "yellhorn-mcp": {
+      "type": "stdio",
+      "command": "yellhorn-mcp",
+      "args": ["--model", "o3"],
+      "env": {}
+    }
+  }
+}
+```
 
 ## Tools
 
@@ -201,7 +189,7 @@ The project uses GitHub Actions for continuous integration and deployment:
 
 To release a new version:
 
-1. Update version in pyproject.toml and yellhorn_mcp/__init__.py
+1. Update version in pyproject.toml and yellhorn_mcp/\_\_init\_\_.py
 2. Update CHANGELOG.md with the new changes
 3. Commit changes: `git commit -am "Bump version to X.Y.Z"`
 4. Tag the commit: `git tag vX.Y.Z`
