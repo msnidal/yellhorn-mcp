@@ -963,48 +963,41 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
 @pytest.mark.asyncio
 async def test_get_workplan(mock_request_context):
     """Test getting the workplan with the required issue number."""
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/repo")
+    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+        mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-            mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
+        # Test getting the workplan with the required issue number
+        result = await get_workplan(mock_request_context, issue_number="123")
 
-            # Test getting the workplan with the required issue number
-            result = await get_workplan(mock_request_context, issue_number="123")
-
-            assert result == "# workplan\n\n1. Implement X\n2. Test X"
-            mock_cwd.assert_called_once()
-            mock_get_issue.assert_called_once_with(Path("/mock/repo"), "123")
+        assert result == "# workplan\n\n1. Implement X\n2. Test X"
+        mock_get_issue.assert_called_once_with(
+            mock_request_context.request_context.lifespan_context["repo_path"], "123"
+        )
 
     # Test error handling
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/repo")
+    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+        mock_get_issue.side_effect = Exception("Failed to get issue")
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-            mock_get_issue.side_effect = Exception("Failed to get issue")
-
-            with pytest.raises(YellhornMCPError, match="Failed to retrieve workplan"):
-                await get_workplan(mock_request_context, issue_number="123")
+        with pytest.raises(YellhornMCPError, match="Failed to retrieve workplan"):
+            await get_workplan(mock_request_context, issue_number="123")
 
 
 @pytest.mark.asyncio
 async def test_get_workplan_with_different_issue(mock_request_context):
     """Test getting the workplan with a different issue number."""
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/repo")
+    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+        mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-            mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
+        # Test with a different issue number
+        result = await get_workplan(
+            ctx=mock_request_context,
+            issue_number="456",
+        )
 
-            # Test with a different issue number
-            result = await get_workplan(
-                ctx=mock_request_context,
-                issue_number="456",
-            )
-
-            assert result == "# Different workplan\n\n1. Implement Y\n2. Test Y"
-            mock_cwd.assert_called()
-            mock_get_issue.assert_called_once_with(Path("/mock/repo"), "456")
+        assert result == "# Different workplan\n\n1. Implement Y\n2. Test Y"
+        mock_get_issue.assert_called_once_with(
+            mock_request_context.request_context.lifespan_context["repo_path"], "456"
+        )
 
 
 # This test is no longer needed because issue_number is now required
@@ -1019,98 +1012,90 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/repo")
+    with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+        # Mock the git rev-parse commands
+        mock_run_git.side_effect = ["abc1234", "def5678"]  # base_commit_hash, head_commit_hash
 
-        with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
-            # Mock the git rev-parse commands
-            mock_run_git.side_effect = ["abc1234", "def5678"]  # base_commit_hash, head_commit_hash
+        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+            mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
-            with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-                mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
+            with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
+                mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-                with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
-                    mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
-
-                    with patch("asyncio.create_task") as mock_create_task:
-                        # Test with default refs
-                        result = await judge_workplan(
-                            ctx=mock_request_context,
-                            issue_number="123",
-                        )
-
-                    # Check the result message
-                    assert (
-                        "Judgement task initiated comparing main (`abc1234`)..HEAD (`def5678`)"
-                        in result
-                    )
-                    assert "issue #123" in result
-                    assert "GitHub sub-issue" in result
-
-                    # Verify the function calls
-                    mock_cwd.assert_called()
-                    mock_get_issue.assert_called_once_with(Path("/mock/repo"), "123")
-                    mock_get_diff.assert_called_once_with(Path("/mock/repo"), "main", "HEAD")
-                    mock_create_task.assert_called_once()
-
-                    # Check process_judgement_async coroutine
-                    coroutine = mock_create_task.call_args[0][0]
-                    assert coroutine.__name__ == "process_judgement_async"
-
-                    # Reset mocks for next test
-                    mock_get_issue.reset_mock()
-                    mock_get_diff.reset_mock()
-                    mock_create_task.reset_mock()
-                    mock_run_git.reset_mock()
-
-                    # New mock values for custom refs
-                    mock_run_git.side_effect = [
-                        "v1.0-hash",
-                        "feature-hash",
-                    ]  # base_commit_hash, head_commit_hash
-
-                    # Test with custom refs
+                with patch("asyncio.create_task") as mock_create_task:
+                    # Test with default refs
                     result = await judge_workplan(
                         ctx=mock_request_context,
                         issue_number="123",
-                        base_ref="v1.0",
-                        head_ref="feature-branch",
                     )
 
-                    # Check custom refs were used
-                    assert (
-                        "Judgement task initiated comparing v1.0 (`v1.0-hash`)..feature-branch (`feature-hash`)"
-                        in result
-                    )
-                    mock_get_diff.assert_called_once_with(
-                        Path("/mock/repo"), "v1.0", "feature-branch"
-                    )
+                # Check the result message
+                assert (
+                    "Judgement task initiated comparing main (`abc1234`)..HEAD (`def5678`)"
+                    in result
+                )
+                assert "issue #123" in result
+                assert "GitHub sub-issue" in result
 
-    # Test error handling
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/repo")
+                # Verify the function calls
+                repo_path = mock_request_context.request_context.lifespan_context["repo_path"]
+                mock_get_issue.assert_called_once_with(repo_path, "123")
+                mock_get_diff.assert_called_once_with(repo_path, "main", "HEAD")
+                mock_create_task.assert_called_once()
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-            mock_get_issue.side_effect = Exception("Failed to get issue")
+                # Check process_judgement_async coroutine
+                coroutine = mock_create_task.call_args[0][0]
+                assert coroutine.__name__ == "process_judgement_async"
 
-            with pytest.raises(YellhornMCPError, match="Failed to trigger workplan judgement"):
-                await judge_workplan(ctx=mock_request_context, issue_number="123")
+                # Reset mocks for next test
+                mock_get_issue.reset_mock()
+                mock_get_diff.reset_mock()
+                mock_create_task.reset_mock()
+                mock_run_git.reset_mock()
 
-    # Test with invalid git ref
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/repo")
+                # New mock values for custom refs
+                mock_run_git.side_effect = [
+                    "v1.0-hash",
+                    "feature-hash",
+                ]  # base_commit_hash, head_commit_hash
 
-        with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
-            # Simulate error with invalid git ref
-            mock_run_git.side_effect = YellhornMCPError("Invalid git reference")
-
-            with pytest.raises(YellhornMCPError, match="Failed to trigger workplan judgement"):
-                await judge_workplan(
+                # Test with custom refs
+                result = await judge_workplan(
                     ctx=mock_request_context,
                     issue_number="123",
-                    base_ref="invalid-ref",
-                    head_ref="invalid-ref",
+                    base_ref="v1.0",
+                    head_ref="feature-branch",
                 )
+
+                # Check custom refs were used
+                assert (
+                    "Judgement task initiated comparing v1.0 (`v1.0-hash`)..feature-branch (`feature-hash`)"
+                    in result
+                )
+                repo_path = mock_request_context.request_context.lifespan_context["repo_path"]
+                mock_get_diff.assert_called_once_with(
+                    repo_path, "v1.0", "feature-branch"
+                )
+
+    # Test error handling
+    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+        mock_get_issue.side_effect = Exception("Failed to get issue")
+
+        with pytest.raises(YellhornMCPError, match="Failed to trigger workplan judgement"):
+            await judge_workplan(ctx=mock_request_context, issue_number="123")
+
+    # Test with invalid git ref
+    with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+        # Simulate error with invalid git ref
+        mock_run_git.side_effect = YellhornMCPError("Invalid git reference")
+
+        with pytest.raises(YellhornMCPError, match="Failed to trigger workplan judgement"):
+            await judge_workplan(
+                ctx=mock_request_context,
+                issue_number="123",
+                base_ref="invalid-ref",
+                head_ref="invalid-ref",
+            )
 
 
 @pytest.mark.asyncio
@@ -1119,52 +1104,49 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
-    with patch("pathlib.Path.cwd") as mock_cwd:
-        mock_cwd.return_value = Path("/mock/repo")
+    with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+        # Mock the git rev-parse commands
+        mock_run_git.side_effect = [
+            "v1.0-hash",
+            "feature-hash",
+        ]  # base_commit_hash, head_commit_hash
 
-        with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
-            # Mock the git rev-parse commands
-            mock_run_git.side_effect = [
-                "v1.0-hash",
-                "feature-hash",
-            ]  # base_commit_hash, head_commit_hash
+        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+            mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
 
-            with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
-                mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
+            with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
+                mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-                with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
-                    mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
+                with patch("asyncio.create_task") as mock_create_task:
+                    # Test with a different issue number and custom refs
+                    base_ref = "v1.0"
+                    head_ref = "feature-branch"
+                    result = await judge_workplan(
+                        ctx=mock_request_context,
+                        issue_number="456",
+                        base_ref=base_ref,
+                        head_ref=head_ref,
+                    )
 
-                    with patch("asyncio.create_task") as mock_create_task:
-                        # Test with a different issue number and custom refs
-                        base_ref = "v1.0"
-                        head_ref = "feature-branch"
-                        result = await judge_workplan(
-                            ctx=mock_request_context,
-                            issue_number="456",
-                            base_ref=base_ref,
-                            head_ref=head_ref,
-                        )
+                    # Check the result message
+                    assert (
+                        f"Judgement task initiated comparing {base_ref} (`v1.0-hash`)..{head_ref} (`feature-hash`)"
+                        in result
+                    )
+                    assert "issue #456" in result
+                    assert "GitHub sub-issue" in result
 
-                        # Check the result message
-                        assert (
-                            f"Judgement task initiated comparing {base_ref} (`v1.0-hash`)..{head_ref} (`feature-hash`)"
-                            in result
-                        )
-                        assert "issue #456" in result
-                        assert "GitHub sub-issue" in result
+                    # Verify the function calls
+                    repo_path = mock_request_context.request_context.lifespan_context["repo_path"]
+                    mock_get_issue.assert_called_once_with(repo_path, "456")
+                    mock_get_diff.assert_called_once_with(
+                        repo_path, base_ref, head_ref
+                    )
+                    mock_create_task.assert_called_once()
 
-                        # Verify the function calls
-                        mock_cwd.assert_called()
-                        mock_get_issue.assert_called_once_with(Path("/mock/repo"), "456")
-                        mock_get_diff.assert_called_once_with(
-                            Path("/mock/repo"), base_ref, head_ref
-                        )
-                        mock_create_task.assert_called_once()
-
-                        # Check process_judgement_async coroutine
-                        coroutine = mock_create_task.call_args[0][0]
-                        assert coroutine.__name__ == "process_judgement_async"
+                    # Check process_judgement_async coroutine
+                    coroutine = mock_create_task.call_args[0][0]
+                    assert coroutine.__name__ == "process_judgement_async"
 
 
 # This test is no longer needed because issue_number is now required
