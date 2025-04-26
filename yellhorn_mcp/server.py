@@ -1297,7 +1297,9 @@ async def get_workplan(
     """
     try:
         # Get the current working directory
-        current_path = Path.cwd()
+        # Determine repository path from REPO_PATH environment or current directory
+        repo_env = os.getenv("REPO_PATH")
+        current_path = Path(repo_env) if repo_env else Path.cwd()
 
         await ctx.log(
             level="info",
@@ -1515,7 +1517,8 @@ async def judge_workplan(
     """
     try:
         # Get the current working directory
-        current_path = Path.cwd()
+        repo_env = os.getenv("REPO_PATH")
+        current_path = Path(repo_env) if repo_env else Path.cwd()
 
         await ctx.log(
             level="info",
