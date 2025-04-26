@@ -1073,9 +1073,7 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
                     in result
                 )
                 repo_path = mock_request_context.request_context.lifespan_context["repo_path"]
-                mock_get_diff.assert_called_once_with(
-                    repo_path, "v1.0", "feature-branch"
-                )
+                mock_get_diff.assert_called_once_with(repo_path, "v1.0", "feature-branch")
 
     # Test error handling
     with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
@@ -1139,9 +1137,7 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
                     # Verify the function calls
                     repo_path = mock_request_context.request_context.lifespan_context["repo_path"]
                     mock_get_issue.assert_called_once_with(repo_path, "456")
-                    mock_get_diff.assert_called_once_with(
-                        repo_path, base_ref, head_ref
-                    )
+                    mock_get_diff.assert_called_once_with(repo_path, base_ref, head_ref)
                     mock_create_task.assert_called_once()
 
                     # Check process_judgement_async coroutine
