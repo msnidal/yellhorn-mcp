@@ -203,16 +203,12 @@ from yellhorn_mcp.server import (
     YellhornMCPError,
     add_github_issue_comment,
     calculate_cost,
-    create_git_worktree,
     create_github_subissue,
     create_workplan,
-    create_worktree,
     ensure_label_exists,
     format_codebase_for_prompt,
     format_metrics_section,
-    generate_branch_name,
     get_codebase_snapshot,
-    get_current_branch_and_issue,
     get_default_branch,
     get_git_diff,
     get_github_issue_body,
@@ -395,30 +391,6 @@ async def test_format_codebase_for_prompt():
 
 
 @pytest.mark.asyncio
-async def test_generate_branch_name():
-    """Test generating a branch name from an issue title and number."""
-    # Test with a simple title
-    branch_name = await generate_branch_name("Feature Implementation Plan", "123")
-    assert branch_name == "issue-123-feature-implementation-plan"
-
-    # Test with a complex title requiring slugification
-    branch_name = await generate_branch_name(
-        "Add support for .yellhornignore & other features", "456"
-    )
-    # Instead of an exact match, check for the start of the string and general pattern
-    assert branch_name.startswith("issue-456-add-support-for-yellhornignore")
-    # Also check that special characters were removed
-    assert "&" not in branch_name
-    assert branch_name.count("-") >= 5  # Should have several hyphens from slugification
-
-    # Test with a very long title that needs truncation
-    long_title = "This is an extremely long title that should be truncated because it exceeds the maximum length for a branch name in Git which is typically around 100 characters but we want to be safe"
-    branch_name = await generate_branch_name(long_title, "789")
-    assert len(branch_name) <= 50
-    assert branch_name.startswith("issue-789-")
-
-
-@pytest.mark.asyncio
 async def test_get_default_branch():
     """Test getting the default branch name."""
     # Test when symbolic-ref works
@@ -490,131 +462,6 @@ def test_is_git_repository():
         with patch("pathlib.Path.is_dir", return_value=False):
             with patch("pathlib.Path.is_file", return_value=False):
                 assert is_git_repository(Path("/mock/strange_repo")) is False
-
-
-@pytest.mark.asyncio
-async def test_get_current_branch_and_issue():
-    """Test getting the current branch and issue number."""
-    # Test successful case
-    with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.return_value = "issue-123-feature-implementation"
-
-            branch_name, issue_number = await get_current_branch_and_issue(Path("/mock/worktree"))
-
-            assert branch_name == "issue-123-feature-implementation"
-            assert issue_number == "123"
-            mock_git.assert_called_once_with(
-                Path("/mock/worktree"), ["rev-parse", "--abbrev-ref", "HEAD"]
-            )
-
-    # Test with invalid branch name format
-    with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.return_value = "feature-branch"
-
-            with pytest.raises(YellhornMCPError, match="does not match expected format"):
-                await get_current_branch_and_issue(Path("/mock/worktree"))
-
-    # Test when not in a git repository
-    with patch("yellhorn_mcp.server.is_git_repository", return_value=False):
-        with pytest.raises(YellhornMCPError, match="Not in a git repository"):
-            await get_current_branch_and_issue(Path("/mock/worktree"))
-
-    # Test with git command failure
-    with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.side_effect = YellhornMCPError("not a git repository")
-
-            with pytest.raises(YellhornMCPError, match="Not in a git repository"):
-                await get_current_branch_and_issue(Path("/mock/worktree"))
-
-
-@pytest.mark.asyncio
-async def test_create_git_worktree():
-    """Test creating a git worktree."""
-    with patch("yellhorn_mcp.server.get_default_branch") as mock_get_default:
-        mock_get_default.return_value = "main"
-
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
-                # Test successful worktree creation
-                result = await create_git_worktree(Path("/mock/repo"), "issue-123-feature", "123")
-
-                assert result == Path("/mock/repo-worktree-123")
-                mock_get_default.assert_called_once_with(Path("/mock/repo"))
-
-                # Check GitHub issue develop call with the new parameters
-                mock_gh.assert_called_with(
-                    Path("/mock/repo"),
-                    [
-                        "issue",
-                        "develop",
-                        "123",
-                        "--name",
-                        "issue-123-feature",
-                        "--base-branch",
-                        "main",
-                    ],
-                )
-
-                # Check worktree creation command
-                mock_git.assert_called_with(
-                    Path("/mock/repo"),
-                    [
-                        "worktree",
-                        "add",
-                        "--track",
-                        "-b",
-                        "issue-123-feature",
-                        str(Path("/mock/repo-worktree-123")),
-                        "main",
-                    ],
-                )
-
-
-@pytest.mark.asyncio
-async def test_create_worktree(mock_request_context):
-    """Test creating a worktree from an issue number."""
-    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
-        # Mock the issue view command
-        mock_gh.side_effect = [
-            '{"title": "Feature Implementation Plan", "url": "https://github.com/user/repo/issues/123"}',
-            # Second call result will be used for GitHub issue develop
-        ]
-
-        with patch("yellhorn_mcp.server.generate_branch_name") as mock_generate_branch:
-            mock_generate_branch.return_value = "issue-123-feature-implementation-plan"
-
-            with patch("yellhorn_mcp.server.create_git_worktree") as mock_create_worktree:
-                mock_create_worktree.return_value = Path("/mock/repo-worktree-123")
-
-                # Test with required issue_number
-                response = await create_worktree(
-                    issue_number="123",
-                    ctx=mock_request_context,
-                )
-
-                # Parse response as JSON and check contents
-                import json
-
-                result = json.loads(response)
-                assert result["worktree_path"] == "/mock/repo-worktree-123"
-                assert result["branch_name"] == "issue-123-feature-implementation-plan"
-                assert result["issue_url"] == "https://github.com/user/repo/issues/123"
-
-                # Check that the issue details were fetched
-                mock_gh.assert_any_call(
-                    Path("/mock/repo"), ["issue", "view", "123", "--json", "title,url"]
-                )
-
-                # Check branch name generation with the correct title
-                mock_generate_branch.assert_called_once_with("Feature Implementation Plan", "123")
-
-                # Check worktree creation with the correct parameters
-                mock_create_worktree.assert_called_once_with(
-                    Path("/mock/repo"), "issue-123-feature-implementation-plan", "123"
-                )
 
 
 def test_calculate_cost():

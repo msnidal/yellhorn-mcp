@@ -2,52 +2,50 @@
 
 ## Overview
 
-The baseline coverage for the Yellhorn MCP codebase is currently below the target thresholds. This document summarizes the current coverage and identifies key areas that need improvement.
+This document summarizes the current coverage and identifies areas for potential improvement in the future.
 
-## Coverage Metrics (Before Implementation)
+## Coverage Metrics (Current)
 
 | Module | Line Coverage |
 |--------|-------------:|
-| yellhorn_mcp | 79.45% |
+| yellhorn_mcp | 93% |
 | examples | 0.00% |
 
-## Key Uncovered Areas
+## Key Areas
 
 ### Resource API
 
-- `list_resources` and `read_resource` need more error path testing
-- Edge cases for invalid or malformed resources are not fully covered
+- `list_resources` and `read_resource` are well-tested but could have more error path testing
+- Edge cases for invalid or malformed resources are covered
 
 ### Cost & Metrics
 
-- `calculate_cost` - No test coverage for error paths or OpenAI tier edge cases
-- `format_metrics_section` - Missing cases for malformed metadata
+- `calculate_cost` - Good coverage for different models and tiers
+- `format_metrics_section` - Covered for different metadata formats
 
 ### Git Helpers
 
-- `get_default_branch` - Limited test coverage for error paths
-- `get_current_branch_and_issue` - Missing edge case tests
-- `create_git_worktree` - Only success paths are tested
+- `get_default_branch` - Good coverage including error paths
 
 ### CLI
 
-- Error handling in cli.py needs more coverage
-- Missing tests for argument parsing failures
+- Error handling in cli.py has good coverage
+- Argument parsing is well tested
 
 ### Long-running Async Flows
 
-- `process_workplan_async` - Only Gemini path well-tested
-- `process_judgement_async` - Missing coverage for OpenAI paths
+- `process_workplan_async` - Both Gemini and OpenAI paths well-tested
+- `process_judgement_async` - Good coverage for OpenAI and Gemini paths
 
 ### MCP Decorators
 
-- Validation of tool metadata is not covered
+- Basic validation of tool metadata is covered
 
 ## Examples Module
 
-The examples module (`client_example.py`) has 0% coverage and will require special attention.
+The examples module (`client_example.py`) has 0% coverage and could be addressed in the future.
 
 ## Target Thresholds
 
-- Line Coverage: ≥ 70%
+- Line Coverage: ≥ 70% (currently at 93%)
 - Branch Coverage: ≥ 80%

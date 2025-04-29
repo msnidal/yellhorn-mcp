@@ -5,9 +5,8 @@
 Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro and OpenAI API for software development tasks. It provides these main tools:
 
 1. **Create workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
-2. **Create worktree**: Creates a git worktree with a linked branch for isolated development from an existing workplan issue.
-3. **Get workplan**: Retrieves the workplan content from a worktree's associated GitHub issue.
-4. **Judge workplan**: Triggers an asynchronous code judgement for a Pull Request against its original workplan issue.
+2. **Get workplan**: Retrieves the workplan content from a GitHub issue.
+3. **Judge workplan**: Triggers an asynchronous code judgement for a Pull Request against its original workplan issue.
 
 ## Installation
 
@@ -61,7 +60,7 @@ This feature is useful for:
 
 The codebase snapshot already respects `.gitignore` by default, and `.yellhornignore` provides additional filtering.
 
-Additionally, the server requires GitHub CLI (`gh`) to be installed and authenticated:
+The server requires GitHub CLI (`gh`) to be installed and authenticated:
 
 ```bash
 # Install GitHub CLI (if not already installed)
@@ -146,34 +145,17 @@ Please generate a workplan for implementing a user authentication system in my a
 
 This will use the `create_workplan` tool to analyze your codebase, create a GitHub issue, and populate it with a detailed implementation plan. The tool will return the issue URL and number. The issue will initially show a placeholder message and will be updated asynchronously once the plan is generated.
 
-### 2. Creating a worktree (optional)
-
-```
-Please create a worktree for issue #123.
-```
-
-This will use the `create_worktree` tool to create a Git worktree with a linked branch for isolated development. The tool will return the worktree path, branch name, and issue URL.
-
-### 3. Navigate to the Worktree
-
-```
-cd /path/to/worktree
-```
-
-Switch to the worktree directory that was created by `create_worktree`.
-
-### 4. View the workplan (if needed)
+### 2. View the workplan
 
 To view a workplan, use the following command:
 
 ```
-# You can run this from anywhere
 Please retrieve the workplan for issue #123.
 ```
 
 This will use the `get_workplan` tool to fetch the latest content of the GitHub issue.
 
-### 5. Make Changes and Create a PR
+### 3. Make Changes and Create a PR
 
 After making changes to implement the workplan, create a PR using your preferred method:
 
@@ -187,12 +169,11 @@ git push origin HEAD
 gh pr create --title "Implement User Authentication" --body "This PR adds JWT authentication with bcrypt password hashing."
 ```
 
-### 6. Request a Judgement
+### 4. Request a Judgement
 
 Once your PR is created, you can request a judgement against the original workplan:
 
 ```
-# You can run this from anywhere
 Please judge the PR comparing "main" and "feature-branch" against the workplan in issue #456.
 ```
 
@@ -222,24 +203,10 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 
 If AI enhancement fails when using `codebase_reasoning="full"`, a comment will be added to the issue with the error details, but the original issue body with title and description will be preserved.
 
-### create_worktree
-
-Creates a git worktree with a linked branch for isolated development from an existing workplan issue.
-
-**Input**:
-
-- `issue_number`: The GitHub issue number for the workplan
-
-**Output**:
-
-- JSON string containing:
-  - `worktree_path`: Path to the created Git worktree directory
-  - `branch_name`: Name of the branch created for the worktree
-  - `issue_url`: URL to the associated GitHub issue
 
 ### get_workplan
 
-Retrieves the workplan content (GitHub issue body) associated with a workplan.
+Retrieves the workplan content (GitHub issue body) associated with a specified GitHub issue.
 
 **Input**:
 
@@ -330,10 +297,6 @@ curl -X POST http://127.0.0.1:8000/tools/create_workplan \
   -H "Content-Type: application/json" \
   -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing", "codebase_reasoning": "none"}'
 
-# Call a tool (create_worktree)
-curl -X POST http://127.0.0.1:8000/tools/create_worktree \
-  -H "Content-Type: application/json" \
-  -d '{"issue_number": "123"}'
 
 # Call a tool (get_workplan)
 curl -X POST http://127.0.0.1:8000/tools/get_workplan \
@@ -360,8 +323,6 @@ python -m examples.client_example plan --title "User Authentication System" --de
 # Generate a basic workplan without AI enhancement
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing" --codebase-reasoning none
 
-# Create a worktree for an existing workplan issue
-python -m examples.client_example worktree --issue-number "123"
 
 # Get workplan
 python -m examples.client_example getplan --issue-number "123"

@@ -6,7 +6,6 @@ import pytest
 
 from yellhorn_mcp.server import (
     create_workplan,
-    create_worktree,
     get_workplan,
     judge_workplan,
 )
@@ -20,11 +19,6 @@ def test_mcp_tool_annotations():
     assert callable(create_workplan)
     assert "title" in inspect.signature(create_workplan).parameters
     assert "detailed_description" in inspect.signature(create_workplan).parameters
-
-    # Test create_worktree
-    assert callable(create_worktree)
-    assert "issue_number" in inspect.signature(create_worktree).parameters
-    assert "ctx" in inspect.signature(create_worktree).parameters
 
     # Test get_workplan
     assert callable(get_workplan)
@@ -47,11 +41,6 @@ def test_mcp_tool_signatures():
     assert "codebase_reasoning" in signature.parameters
     # Check that codebase_reasoning has a default value of "full"
     assert signature.parameters["codebase_reasoning"].default == "full"
-
-    # Test create_worktree parameters
-    signature = inspect.signature(create_worktree)
-    assert "issue_number" in signature.parameters
-    assert "ctx" in signature.parameters
 
     # Test get_workplan parameters
     signature = inspect.signature(get_workplan)
