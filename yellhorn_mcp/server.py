@@ -8,13 +8,10 @@ and OpenAI capabilities to Claude Code for software development tasks. It offers
    your codebase and task description. The workplan is generated asynchronously and the
    issue is updated once it's ready.
 
-2. create_worktree: Creates a git worktree with a linked branch for isolated development
-   from an existing workplan issue.
+2. get_workplan: Retrieves the workplan content (GitHub issue body) associated with
+   a specified issue number.
 
-3. get_workplan: Retrieves the workplan content (GitHub issue body) associated with the
-   current Git worktree or specified issue number.
-
-4. judge_workplan: Triggers an asynchronous code judgement for a Pull Request against its
+3. judge_workplan: Triggers an asynchronous code judgement for a Pull Request against its
    original workplan issue.
 
 The server requires GitHub CLI to be installed and authenticated for GitHub operations.
@@ -23,7 +20,6 @@ The server requires GitHub CLI to be installed and authenticated for GitHub oper
 import asyncio
 import json
 import os
-import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -1018,19 +1014,15 @@ async def get_default_branch(repo_path: Path) -> str:
 
 def is_git_repository(path: Path) -> bool:
     """
-    Check if a path is a Git repository (either standard or worktree).
+    Check if a path is a Git repository.
 
     Args:
         path: Path to check.
 
     Returns:
-        True if the path is a Git repository (either standard or worktree), False otherwise.
+        True if the path is a Git repository, False otherwise.
     """
     git_path = path / ".git"
-
-    # Debug information could be logged here if needed
-    # print(f"Checking git repo status for {path}. .git path: {git_path}")
-    # print(f"Exists: {git_path.exists()}. Is file: {git_path.is_file() if git_path.exists() else False}. Is dir: {git_path.is_dir() if git_path.exists() else False}")
 
     # Not a git repo if .git doesn't exist
     if not git_path.exists():
@@ -1045,132 +1037,6 @@ def is_git_repository(path: Path) -> bool:
         return True
 
     return False
-
-
-async def get_current_branch_and_issue(worktree_path: Path) -> tuple[str, str]:
-    """
-    Get the current branch name and associated issue number from a worktree.
-
-    Args:
-        worktree_path: Path to the worktree.
-
-    Returns:
-        Tuple of (branch_name, issue_number).
-
-    Raises:
-        YellhornMCPError: If not in a git repository, or branch name doesn't match expected format.
-    """
-    try:
-        # Verify this is a git repository (either standard or worktree)
-        if not is_git_repository(worktree_path):
-            raise YellhornMCPError(
-                "Not in a git repository. Please run this command from within a worktree created by create_workplan."
-            )
-
-        # Get the current branch name
-        branch_name = await run_git_command(worktree_path, ["rev-parse", "--abbrev-ref", "HEAD"])
-
-        # Extract issue number from branch name (format: issue-{number}-{title})
-        match = re.match(r"issue-(\d+)-", branch_name)
-        if not match:
-            raise YellhornMCPError(
-                f"Branch name '{branch_name}' does not match expected format 'issue-NUMBER-description'."
-            )
-
-        issue_number = match.group(1)
-        return branch_name, issue_number
-    except YellhornMCPError as e:
-        if "not a git repository" in str(e).lower():
-            raise YellhornMCPError(
-                "Not in a git repository. Please run this command from within a worktree created by create_workplan."
-            )
-        raise
-
-
-async def create_git_worktree(repo_path: Path, branch_name: str, issue_number: str) -> Path:
-    """
-    Create a git worktree for the specified branch.
-
-    Args:
-        repo_path: Path to the main repository.
-        branch_name: Name of the branch to create in the worktree.
-        issue_number: Issue number associated with the branch.
-
-    Returns:
-        Path to the created worktree.
-
-    Raises:
-        YellhornMCPError: If there's an error creating the worktree.
-    """
-    try:
-        # Generate a unique worktree path alongside the main repo
-        worktree_path = Path(f"{repo_path}-worktree-{issue_number}")
-
-        # Get the default branch to create the new branch from
-        default_branch = await get_default_branch(repo_path)
-
-        # Use gh issue develop to create and link the branch to the issue
-        # This ensures proper association in the GitHub UI's 'Development' section
-        await run_github_command(
-            repo_path,
-            [
-                "issue",
-                "develop",
-                issue_number,
-                "--name",
-                branch_name,
-                "--base-branch",
-                default_branch,
-            ],
-        )
-
-        # Now create the worktree with that branch
-        await run_git_command(
-            repo_path,
-            ["worktree", "add", "--track", "-b", branch_name, str(worktree_path), default_branch],
-        )
-
-        # Log for debugging purposes if needed
-        # print(f"Created worktree at {worktree_path}")
-        # git_path = worktree_path / ".git"
-        # print(f"Git path: {git_path}, Exists: {git_path.exists()}, Is file: {git_path.is_file()}, Is dir: {git_path.is_dir()}")
-
-        return worktree_path
-    except Exception as e:
-        raise YellhornMCPError(f"Failed to create git worktree: {str(e)}")
-
-
-async def generate_branch_name(title: str, issue_number: str) -> str:
-    """
-    Generate a suitable branch name from an issue title and number.
-
-    Args:
-        title: The title of the issue.
-        issue_number: The issue number.
-
-    Returns:
-        A slugified branch name in the format 'issue-{number}-{slugified-title}'.
-    """
-    # Convert title to lowercase
-    slug = title.lower()
-
-    # Replace spaces and special characters with hyphens
-    import re
-
-    slug = re.sub(r"[^a-z0-9]+", "-", slug)
-
-    # Remove leading and trailing hyphens
-    slug = slug.strip("-")
-
-    # Truncate if too long (leave room for the prefix)
-    max_length = 50 - len(f"issue-{issue_number}-")
-    if len(slug) > max_length:
-        slug = slug[:max_length]
-
-    # Assemble the branch name
-    branch_name = f"issue-{issue_number}-{slug}"
-
-    return branch_name
 
 
 @mcp.tool(
@@ -1282,76 +1148,6 @@ async def create_workplan(
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to create GitHub issue: {str(e)}")
-
-
-@mcp.tool(
-    name="create_worktree",
-    description="Creates a git worktree with a linked branch for isolated development from a workplan issue.",
-)
-async def create_worktree(
-    issue_number: str,
-    ctx: Context,
-) -> str:
-    """
-    Create a git worktree with a linked branch for isolated development from a workplan issue.
-
-    Args:
-        issue_number: The GitHub issue number for the workplan.
-        ctx: Server context with repository path.
-
-    Returns:
-        JSON string containing the worktree path and branch name.
-
-    Raises:
-        YellhornMCPError: If there's an error creating the worktree.
-    """
-    repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-
-    try:
-        # Fetch the issue details
-        try:
-            issue_data = await run_github_command(
-                repo_path, ["issue", "view", issue_number, "--json", "title,url"]
-            )
-            import json
-
-            issue_json = json.loads(issue_data)
-            issue_title = issue_json.get("title", "")
-            issue_url = issue_json.get("url", "")
-        except Exception as e:
-            raise YellhornMCPError(
-                f"Failed to fetch issue details for issue #{issue_number}: {str(e)}"
-            )
-
-        # Generate a branch name for the issue
-        branch_name = await generate_branch_name(issue_title, issue_number)
-
-        # Create a git worktree with the branch
-        try:
-            await ctx.log(
-                level="info",
-                message=f"Creating worktree with branch '{branch_name}' for issue #{issue_number}",
-            )
-            worktree_path = await create_git_worktree(repo_path, branch_name, issue_number)
-            await ctx.log(
-                level="info",
-                message=f"Worktree created at '{worktree_path}' with branch '{branch_name}' for issue #{issue_number}",
-            )
-        except Exception as e:
-            raise YellhornMCPError(f"Failed to create worktree for issue #{issue_number}: {str(e)}")
-
-        # Return the worktree path and branch name as JSON
-        result = {
-            "worktree_path": str(worktree_path),
-            "branch_name": branch_name,
-            "issue_url": issue_url,
-        }
-        return json.dumps(result)
-
-    except Exception as e:
-        if isinstance(e, YellhornMCPError):
-            raise
-        raise YellhornMCPError(f"Failed to create worktree: {str(e)}")
 
 
 @mcp.tool(

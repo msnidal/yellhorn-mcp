@@ -8,8 +8,7 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro and OpenAI cap
 
 - **Create Workplans**: Creates detailed implementation plans based on a prompt and taking into consideration your entire codebase, posting them as GitHub issues and exposing them as MCP resources for your coding agent
 - **Judge Code Diffs**: Provides a tool to evaluate git diffs against the original workplan with full codebase context and provides detailed feedback, ensuring the implementation does not deviate from the original requirements and providing guidance on what to change to do so
-- **Isolated Development Environments**: Creates Git worktrees and linked branches for streamlined, isolated development workflow (can be done separately from workplan generation), allowing parallel development with multiple agents
-- **Seamless GitHub Integration**: Automatically creates labeled issues with proper branch linking in the GitHub UI, posts judgement sub-issues with references to original workplan issues.
+- **Seamless GitHub Integration**: Automatically creates labeled issues, posts judgement sub-issues with references to original workplan issues
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
 - **MCP Resources**: Exposes workplans as standard MCP resources for easy listing and retrieval
 
@@ -106,20 +105,6 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
   - `issue_url`: URL to the created GitHub issue
   - `issue_number`: The GitHub issue number
 
-### create_worktree
-
-Creates a git worktree with a linked branch for isolated development from an existing workplan issue.
-
-**Input**:
-
-- `issue_number`: The GitHub issue number for the workplan
-
-**Output**:
-
-- JSON string containing:
-  - `worktree_path`: Path to the created Git worktree directory
-  - `branch_name`: Name of the branch created for the worktree
-  - `issue_url`: URL to the associated GitHub issue
 
 ### get_workplan
 
