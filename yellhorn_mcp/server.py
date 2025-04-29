@@ -559,11 +559,15 @@ async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str
     Raises:
         YellhornMCPError: If there's an error adding the comment.
     """
+    import tempfile
+
     try:
         # Create a temporary file to hold the comment body
-        temp_file = repo_path / f"issue_{issue_number}_comment.md"
-        with open(temp_file, "w", encoding="utf-8") as f:
-            f.write(body)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as temp:
+            temp.write(body)
+            temp_file = Path(temp.name)
 
         try:
             # Add the comment using the temp file
@@ -590,11 +594,15 @@ async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> 
     Raises:
         YellhornMCPError: If there's an error updating the issue.
     """
+    import tempfile
+
     try:
         # Create a temporary file to hold the issue body
-        temp_file = repo_path / f"issue_{issue_number}_update.md"
-        with open(temp_file, "w", encoding="utf-8") as f:
-            f.write(body)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as temp:
+            temp.write(body)
+            temp_file = Path(temp.name)
 
         try:
             # Update the issue using the temp file
@@ -730,6 +738,8 @@ async def create_github_subissue(
     Raises:
         YellhornMCPError: If there's an error creating the sub-issue.
     """
+    import tempfile
+
     try:
         # Ensure the yellhorn-judgement-subissue label exists
         await ensure_label_exists(
@@ -740,9 +750,11 @@ async def create_github_subissue(
         body_with_reference = f"Parent Workplan: #{parent_issue_number}\n\n{body}"
 
         # Create a temporary file to hold the issue body
-        temp_file = repo_path / f"subissue_{parent_issue_number}_judgement.md"
-        with open(temp_file, "w", encoding="utf-8") as f:
-            f.write(body_with_reference)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as temp:
+            temp.write(body_with_reference)
+            temp_file = Path(temp.name)
 
         try:
             # Create the issue with all specified labels plus the judgement subissue label
@@ -787,14 +799,18 @@ async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: st
     Raises:
         YellhornMCPError: If there's an error posting the review.
     """
+    import tempfile
+
     try:
         # Extract PR number from URL
         pr_number = pr_url.split("/")[-1]
 
         # Create a temporary file to hold the review content
-        temp_file = repo_path / f"pr_{pr_number}_review.md"
-        with open(temp_file, "w", encoding="utf-8") as f:
-            f.write(review_content)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as temp:
+            temp.write(review_content)
+            temp_file = Path(temp.name)
 
         try:
             # Post the review using GitHub CLI
@@ -1201,7 +1217,14 @@ async def create_workplan(
                 level="info",
                 message="Skipping AI workplan enhancement as per codebase_reasoning='none'.",
             )
-        else:  # Default is "full"
+        elif codebase_reasoning == "full":
+            initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
+        else:
+            # If codebase_reasoning is neither "full" nor "none", default to "full" with a log message
+            await ctx.log(
+                level="info",
+                message=f"Unrecognized codebase_reasoning value '{codebase_reasoning}', defaulting to 'full'.",
+            )
             initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
 
         # Create a GitHub issue with the yellhorn-mcp label
@@ -1227,7 +1250,7 @@ async def create_workplan(
         issue_number = issue_url.split("/")[-1]
 
         # Only start async processing if full reasoning is requested
-        if codebase_reasoning == "full":
+        if codebase_reasoning != "none":
             await ctx.log(
                 level="info",
                 message=f"Initiating AI workplan enhancement for issue #{issue_number}.",
