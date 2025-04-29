@@ -81,6 +81,10 @@ def _private_func():
 
 class PublicClass:
     \"\"\"Class docstring.\"\"\"
+    name: str
+    age: int = 30
+    is_active = True
+    _private_attr = "hidden"
     
     def __init__(self):
         pass
@@ -98,15 +102,22 @@ class PublicClass:
             signatures = extract_python_api(Path("/mock/file.py"))
 
             # Check extracted signatures - use specific indices and exact matches
-            assert len(signatures) == 3  # public_func, PublicClass, and PublicClass.public_method
+            assert len(signatures) == 6  # public_func, PublicClass, 3 attrs, and PublicClass.public_method
             assert (
                 signatures[0]
                 == "def public_func(arg1, arg2)  # This is a public function docstring."
             )
             assert signatures[1] == "class PublicClass  # Class docstring."
-            assert (
-                signatures[2]
-                == "    def PublicClass.public_method(self)  # Public method docstring."
+            
+            # Check class attributes
+            assert "    name: str" in signatures
+            assert "    age: int" in signatures
+            assert "    is_active" in signatures
+            
+            # Check method
+            assert any(
+                "    def PublicClass.public_method(self)  # Public method docstring."
+                == sig for sig in signatures
             )
 
             # Check private items are excluded
@@ -156,31 +167,62 @@ def broken_function(
 async def test_get_lsp_snapshot():
     """Test getting an LSP-style snapshot of the codebase."""
     with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
-        mock_snapshot.return_value = (["file1.py", "file2.py", "other.txt"], {})
+        mock_snapshot.return_value = (["file1.py", "file2.py", "file3.go", "other.txt"], {})
 
-        with patch("yellhorn_mcp.lsp_utils.extract_python_api") as mock_extract:
-            # Mock signature extraction
-            mock_extract.side_effect = [
-                ["def func1()", "class Class1"],  # signatures for file1.py
+        with patch("yellhorn_mcp.lsp_utils.extract_python_api") as mock_extract_py:
+            # Mock Python signature extraction
+            mock_extract_py.side_effect = [
+                [
+                    "def func1()", 
+                    "class User",
+                    "    name: str",
+                    "    age: int",
+                    "    def User.get_name(self)"
+                ],  # signatures for file1.py
                 ["def func2()"],  # signatures for file2.py
             ]
+            
+            with patch("yellhorn_mcp.lsp_utils.extract_go_api") as mock_extract_go:
+                # Mock Go signature extraction
+                mock_extract_go.return_value = [
+                    "func Handler",
+                    "struct Person { Name string; Age int }"
+                ]
 
-            with patch("pathlib.Path.is_file", return_value=True):
-                file_paths, file_contents = await get_lsp_snapshot(Path("/mock/repo"))
+                with patch("pathlib.Path.is_file", return_value=True):
+                    file_paths, file_contents = await get_lsp_snapshot(Path("/mock/repo"))
 
-                # Check paths
-                assert "file1.py" in file_paths
-                assert "file2.py" in file_paths
-                assert "other.txt" in file_paths
+                    # Check paths
+                    assert "file1.py" in file_paths
+                    assert "file2.py" in file_paths
+                    assert "file3.go" in file_paths
+                    assert "other.txt" in file_paths
 
-                # Check contents (only Python files should have content)
-                assert "file1.py" in file_contents
-                assert "file2.py" in file_contents
-                assert "other.txt" not in file_contents
+                    # Check contents (only Python/Go files should have content)
+                    assert "file1.py" in file_contents
+                    assert "file2.py" in file_contents
+                    assert "file3.go" in file_contents
+                    assert "other.txt" not in file_contents
 
-                # Check formatted content
-                assert file_contents["file1.py"] == "```py\ndef func1()\nclass Class1\n```"
-                assert file_contents["file2.py"] == "```py\ndef func2()\n```"
+                    # Check formatted content with class attributes
+                    assert file_contents["file1.py"] == (
+                        "```py\n"
+                        "def func1()\n"
+                        "class User\n"
+                        "    name: str\n"
+                        "    age: int\n"
+                        "    def User.get_name(self)\n"
+                        "```"
+                    )
+                    assert file_contents["file2.py"] == "```py\ndef func2()\n```"
+                    
+                    # Check Go content with struct fields
+                    assert file_contents["file3.go"] == (
+                        "```go\n"
+                        "func Handler\n"
+                        "struct Person { Name string; Age int }\n"
+                        "```"
+                    )
 
 
 @pytest.mark.asyncio

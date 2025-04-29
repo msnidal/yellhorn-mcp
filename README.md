@@ -97,7 +97,7 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 - `detailed_description`: Detailed description for the workplan
 - `codebase_reasoning`: (optional) Control whether AI enhancement is performed:
   - `"full"`: (default) Use AI to enhance the workplan with full codebase context
-  - `"lsp"`: Use AI with lightweight codebase context (only function/method signatures for Python and Go)
+  - `"lsp"`: Use AI with lightweight codebase context (function/method signatures, class attributes and struct fields for Python and Go)
   - `"none"`: Skip AI enhancement, use the provided description as-is
 
 **Output**:

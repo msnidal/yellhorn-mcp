@@ -1,11 +1,12 @@
 """
 LSP-style utilities for extracting function signatures and docstrings.
 
-This module provides functions to extract Python function signatures and docstrings
-using AST parsing (with fallback to jedi) for use in the "lsp" codebase reasoning mode.
-This mode gathers only function/method signatures and their docstrings for supported 
-languages (Python, Go), plus the full contents of files that appear in diffs, to create 
-a more lightweight but still useful codebase snapshot for AI processing.
+This module provides functions to extract Python function signatures, class signatures,
+class attributes, and docstrings using AST parsing (with fallback to jedi) for use in
+the "lsp" codebase reasoning mode. This mode gathers function/method signatures, class
+attributes, Go struct fields, and docstrings for supported languages (Python, Go), plus
+the full contents of files that appear in diffs, to create a more lightweight but still
+useful codebase snapshot for AI processing.
 """
 
 import ast
@@ -15,6 +16,36 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
+
+
+def _class_attributes_from_ast(node: ast.ClassDef) -> list[str]:
+    """
+    Extract class attributes from an AST ClassDef node.
+
+    Handles regular assignments, type annotations, dataclass fields,
+    and Pydantic model fields. Skips private attributes (starting with "_").
+
+    Args:
+        node: AST ClassDef node to extract attributes from
+
+    Returns:
+        List of attribute strings with type annotations when available
+    """
+    attrs = []
+    for stmt in node.body:
+        # AnnAssign  => typed attribute  e.g. age: int = 0
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            name = stmt.target.id
+            if not name.startswith("_"):
+                annotation = getattr(stmt.annotation, "id", "Any")
+                attrs.append(f"{name}: {annotation}")
+        # Assign      => untyped attr e.g. name = "foo"
+        elif isinstance(stmt, ast.Assign):
+            if len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+                name = stmt.targets[0].id
+                if not name.startswith("_"):
+                    attrs.append(name)
+    return attrs
 
 
 def _sig_from_ast(node: ast.AST) -> str | None:
@@ -106,8 +137,13 @@ def extract_python_api(file_path: Path) -> list[str]:
                 doc_summary = f"  # {doc.splitlines()[0]}" if doc else ""
                 sigs.append(f"{sig}{doc_summary}")
 
-                # For classes, also process methods
+                # For classes, also process methods and attributes
                 if isinstance(node, ast.ClassDef):
+                    # Extract class attributes
+                    for attr in _class_attributes_from_ast(node):
+                        sigs.append(f"    {attr}")
+
+                    # Process methods
                     for method in node.body:
                         # Skip private methods
                         if hasattr(method, "name") and (
@@ -160,7 +196,7 @@ def extract_python_api(file_path: Path) -> list[str]:
 
 def extract_go_api(file_path: Path) -> list[str]:
     """
-    Extract Go API (function, type, interface signatures) from a file.
+    Extract Go API (function, type, interface signatures, struct fields) from a file.
 
     Uses regex-based parsing for basic extraction, with fallback to gopls
     when available for higher fidelity.
@@ -194,8 +230,28 @@ def extract_go_api(file_path: Path) -> list[str]:
                     kind = symbol.get("kind", "")
 
                     if name and name[0].isupper():
-                        if kind in ["function", "method", "interface", "struct", "type"]:
+                        if kind in ["function", "method", "interface", "type"]:
                             sigs.append(f"{kind} {name}")
+                        elif kind == "struct":
+                            # For structs, check for fields
+                            children = symbol.get("children", [])
+                            if children:
+                                # Extract field names from children where kind is "field"
+                                fields = []
+                                for child in children:
+                                    if child.get("kind") == "field":
+                                        child_name = child.get("name", "")
+                                        child_detail = child.get("detail", "")
+                                        fields.append(f"{child_name} {child_detail}")
+
+                                # Add struct with fields
+                                if fields:
+                                    fields_str = "; ".join(fields)
+                                    sigs.append(f"struct {name} {{ {fields_str} }}")
+                                else:
+                                    sigs.append(f"struct {name}")
+                            else:
+                                sigs.append(f"struct {name}")
 
                 return sorted(sigs)
         except (subprocess.SubprocessError, json.JSONDecodeError, Exception):
@@ -211,11 +267,48 @@ def extract_go_api(file_path: Path) -> list[str]:
         # Matches: func Name, type Name, type Name interface, type Name struct
         GO_SIG_RE = re.compile(r"^(func|type)\s+([A-Z]\w*)", re.MULTILINE)
 
+        # Find interface definitions
+        INTERFACE_RE = re.compile(r"type\s+([A-Z]\w*)\s+interface", re.MULTILINE)
+
+        # Find struct definitions with their fields
+        STRUCT_RE = re.compile(
+            r"type\s+([A-Z]\w*)\s+struct\s*\{([^}]*)\}", re.MULTILINE | re.DOTALL
+        )
+
+        # Regular symbols
         matches = GO_SIG_RE.findall(content)
         sigs = []
 
         for kind, name in matches:
-            sigs.append(f"{kind} {name}")
+            if kind == "func":
+                sigs.append(f"{kind} {name}")
+            # type will be handled by STRUCT_RE if it's a struct
+
+        # Extract interfaces
+        interface_matches = INTERFACE_RE.findall(content)
+        for name in interface_matches:
+            sigs.append(f"type {name}")
+
+        # Extract structs and their fields
+        struct_matches = STRUCT_RE.findall(content)
+        for name, fields in struct_matches:
+            # Clean up fields: remove comments, strip whitespace, join lines
+            # Replace newlines and extra spaces with a single space
+            cleaned_fields = re.sub(r"\s+", " ", fields).strip()
+            # Remove comments (// and /* ... */)
+            cleaned_fields = re.sub(r"//.*", "", cleaned_fields)
+            cleaned_fields = re.sub(r"/\*.*?\*/", "", cleaned_fields, flags=re.DOTALL)
+
+            # Format fields for output, limiting length
+            if cleaned_fields:
+                # Truncate if too long
+                max_length = 120
+                if len(cleaned_fields) > max_length:
+                    cleaned_fields = cleaned_fields[: max_length - 3] + "..."
+
+                sigs.append(f"struct {name} {{ {cleaned_fields} }}")
+            else:
+                sigs.append(f"struct {name}")
 
         return sorted(sigs)
     except Exception:
@@ -224,8 +317,10 @@ def extract_go_api(file_path: Path) -> list[str]:
 
 async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
     """
-    Get an LSP-style snapshot of the codebase, extracting only function signatures and docstrings.
+    Get an LSP-style snapshot of the codebase, extracting API information.
 
+    Extracts function signatures, class signatures, class attributes, struct fields,
+    and docstrings to create a lightweight representation of the codebase structure.
     Respects both .gitignore and .yellhornignore files, just like the full snapshot function.
     Supports Python and Go files for API extraction.
 
@@ -234,7 +329,7 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
 
     Returns:
         Tuple of (file list, file contents dictionary), where contents contain
-        only function/class signatures and docstrings
+        API signatures, class attributes, and docstrings
     """
     from yellhorn_mcp.server import get_codebase_snapshot
 

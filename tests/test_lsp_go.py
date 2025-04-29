@@ -60,24 +60,34 @@ def test_extract_go_api_regex(sample_go_content):
 
     # Should only include exported symbols (capitalized)
     assert "func PublicFunction" in result
-    assert "type User" in result
-    assert "type Logger" in result
+    
+    # Should include struct with fields
+    assert any("struct User" in item for item in result)
+    assert any("Name" in item and "string" in item for item in result)
+    assert any("Age" in item and "int" in item for item in result)
+    
+    # For interface, we only extract the type name, not the methods
+    assert any("type Logger" in item for item in result)
 
     # Should not include private symbols
     assert not any("privateFunction" in item for item in result)
     assert not any("privateType" in item for item in result)
 
-    # Check order (should be sorted)
-    assert len(result) == 3
+    # Check ordering
     assert sorted(result) == result
 
 
 def test_extract_go_api_gopls():
     """Test extraction of Go API using gopls when available."""
-    # Mock gopls JSON output
+    # Mock gopls JSON output with struct fields
     gopls_output = """[
         {"name": "PublicFunction", "kind": "function", "description": "func PublicFunction(name string) string"},
-        {"name": "User", "kind": "struct", "description": "type User struct"},
+        {"name": "User", "kind": "struct", "description": "type User struct",
+         "children": [
+            {"name": "Name", "kind": "field", "detail": "string"},
+            {"name": "Age", "kind": "field", "detail": "int"}
+         ]
+        },
         {"name": "Logger", "kind": "interface", "description": "type Logger interface"},
         {"name": "privateFunc", "kind": "function", "description": "func privateFunc()"}
     ]"""
@@ -92,14 +102,18 @@ def test_extract_go_api_gopls():
 
     # Should include exported symbols (capitalized) with kind
     assert "function PublicFunction" in result
-    assert "struct User" in result
+    
+    # Should include struct with fields
+    assert any("struct User {" in item for item in result)
+    assert any("Name string" in item for item in result)
+    assert any("Age int" in item for item in result)
+    
     assert "interface Logger" in result
 
     # Should not include private symbols
     assert not any("privateFunc" in item for item in result)
 
     # Check order (should be sorted)
-    assert len(result) == 3
     assert sorted(result) == result
 
 

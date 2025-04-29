@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added optional gopls integration for higher-fidelity Go API extraction when available
 - Added jedi dependency for robust Python code analysis with graceful fallback
 - Added full content extraction for files affected by diffs in judge_workplan
+- Added Python class attribute extraction to LSP mode for regular classes, dataclasses, and Pydantic models
+- Added Go struct field extraction to LSP mode for better API representation
 - Updated CLI, documentation, and example client to support the new mode
 
 ## [0.3.3] - 2025-04-28
