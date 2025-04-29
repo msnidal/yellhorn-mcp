@@ -99,6 +99,7 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
   - `"full"`: (default) Use AI to enhance the workplan with full codebase context
   - `"lsp"`: Use AI with lightweight codebase context (function/method signatures, class attributes and struct fields for Python and Go)
   - `"none"`: Skip AI enhancement, use the provided description as-is
+- `debug`: (optional) If set to `true`, adds a comment to the issue with the full prompt used for generation
 
 **Output**:
 
@@ -132,6 +133,7 @@ Triggers an asynchronous code judgement comparing two git refs (branches or comm
   - `"full"`: (default) Use full codebase context
   - `"lsp"`: Use lighter codebase context (only function signatures for Python and Go, plus full diff files)
   - `"none"`: Skip codebase context completely for fastest processing
+- `debug`: (optional) If set to `true`, adds a comment to the sub-issue with the full prompt used for generation
 
 **Output**:
 

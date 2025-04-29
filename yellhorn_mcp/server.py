@@ -851,6 +851,7 @@ async def process_workplan_async(
     issue_number: str,
     ctx: Context,
     detailed_description: str,
+    debug: bool = False,
 ) -> None:
     """
     Process workplan generation asynchronously and update the GitHub issue.
@@ -864,6 +865,7 @@ async def process_workplan_async(
         issue_number: GitHub issue number to update.
         ctx: Server context.
         detailed_description: Detailed description for the workplan.
+        debug: If True, add a comment with the full prompt used for generation.
     """
     try:
         # Get codebase snapshot based on reasoning mode
@@ -989,6 +991,23 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             level="info",
             message=f"Successfully updated GitHub issue #{issue_number} with generated workplan and metrics",
         )
+        
+        # If debug mode is enabled, add a comment with the full prompt
+        if debug:
+            debug_comment = f"""
+## Debug Information - Prompt Used for Generation
+
+```
+{prompt}
+```
+
+*This debug information is provided to help evaluate and improve prompt engineering.*
+"""
+            await add_github_issue_comment(repo_path, issue_number, debug_comment)
+            await ctx.log(
+                level="info",
+                message=f"Added debug information (prompt) as comment to issue #{issue_number}",
+            )
 
     except Exception as e:
         error_message_log = f"Failed to generate workplan: {str(e)}"
@@ -1069,13 +1088,14 @@ def is_git_repository(path: Path) -> bool:
 
 @mcp.tool(
     name="create_workplan",
-    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full', 'lsp', or 'none').",
+    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full', 'lsp', or 'none'). Set debug=True to see the full prompt.",
 )
 async def create_workplan(
     title: str,
     detailed_description: str,
     ctx: Context,
     codebase_reasoning: str = "full",
+    debug: bool = False,
 ) -> str:
     """
     Create a workplan based on the provided title and detailed description.
@@ -1089,6 +1109,8 @@ async def create_workplan(
             - "full": (default) Use AI to enhance the workplan with full codebase context
             - "lsp": Use AI with lighter codebase context (only function/method signatures)
             - "none": Skip AI enhancement, use the provided description as-is
+        debug: If True, adds a comment to the issue with the full prompt used for generation.
+               Useful for debugging and improving prompt engineering.
 
     Returns:
         JSON string containing the GitHub issue URL.
@@ -1165,6 +1187,7 @@ async def create_workplan(
                     issue_number,
                     ctx,
                     detailed_description=detailed_description,
+                    debug=debug,
                 )
             )
         else:
@@ -1239,6 +1262,7 @@ async def process_judgement_async(
     ctx: Context,
     base_commit_hash: str | None = None,
     head_commit_hash: str | None = None,
+    debug: bool = False,
 ) -> str:
     """
     Process the judgement of a workplan and diff asynchronously, creating a GitHub sub-issue.
@@ -1256,6 +1280,8 @@ async def process_judgement_async(
         ctx: Server context.
         base_commit_hash: Optional base commit hash for better reference in the output.
         head_commit_hash: Optional head commit hash for better reference in the output.
+        debug: If True, adds a comment to the issue with the full prompt used for generation.
+               Useful for debugging and improving prompt engineering.
 
     Returns:
         The judgement content and URL of the created sub-issue.
@@ -1401,6 +1427,26 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 judgement_with_metadata_and_metrics,
                 ["yellhorn-mcp"],
             )
+            
+            # If debug mode is enabled, add a comment with the full prompt
+            if debug:
+                # Extract the sub-issue number
+                subissue_number = subissue_url.split("/")[-1]
+                
+                debug_comment = f"""
+## Debug Information - Prompt Used for Judgement
+
+```
+{prompt}
+```
+
+*This debug information is provided to help evaluate and improve prompt engineering.*
+"""
+                await add_github_issue_comment(repo_path, subissue_number, debug_comment)
+                await ctx.log(
+                    level="info",
+                    message=f"Added debug information (prompt) as comment to judgement sub-issue #{subissue_number}",
+                )
 
             # Return both the judgement content and the sub-issue URL
             return f"Judgement sub-issue created: {subissue_url}\n\n{judgement_content}"
@@ -1416,7 +1462,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
 @mcp.tool(
     name="judge_workplan",
-    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background).",
+    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background). Set debug=True to see the full prompt.",
 )
 async def judge_workplan(
     ctx: Context,
@@ -1424,6 +1470,7 @@ async def judge_workplan(
     base_ref: str = "main",
     head_ref: str = "HEAD",
     codebase_reasoning: str = "full",
+    debug: bool = False,
 ) -> str:
     """
     Trigger an asynchronous code judgement comparing two git refs against a workplan.
@@ -1441,6 +1488,8 @@ async def judge_workplan(
             - "full": (default) Use full codebase context
             - "lsp": Use lighter codebase context (only function/method signatures, plus full diff files)
             - "none": Skip codebase context completely for fastest processing
+        debug: If True, adds a comment to the sub-issue with the full prompt used for generation.
+               Useful for debugging and improving prompt engineering.
 
     Returns:
         A confirmation message that the judgement task has been initiated.
@@ -1509,6 +1558,7 @@ async def judge_workplan(
                 ctx,
                 base_commit_hash=base_commit_hash,
                 head_commit_hash=head_commit_hash,
+                debug=debug,
             )
         )
 

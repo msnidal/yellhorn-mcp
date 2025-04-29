@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added full content extraction for files affected by diffs in judge_workplan
 - Added Python class attribute extraction to LSP mode for regular classes, dataclasses, and Pydantic models
 - Added Go struct field extraction to LSP mode for better API representation
+- Added debug mode to create_workplan and judge_workplan tools to view the full prompt in a GitHub comment
 - Updated CLI, documentation, and example client to support the new mode
 
 ## [0.3.3] - 2025-04-28
