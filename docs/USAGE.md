@@ -202,18 +202,25 @@ This will use the `judge_workplan` tool to fetch the original workplan from the 
 
 ### create_workplan
 
-Creates a GitHub issue with a detailed workplan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously, with the issue being updated once it's ready.
+Creates a GitHub issue with a detailed workplan based on the title and detailed description. The issue is labeled with 'yellhorn-mcp' and the plan is generated asynchronously (with `codebase_reasoning="full"`), with the issue being updated once it's ready. For faster creation without AI enhancement, use `codebase_reasoning="none"`.
 
 **Input**:
 
 - `title`: Title for the GitHub issue (will be used as issue title and header)
 - `detailed_description`: Detailed description for the workplan
+- `codebase_reasoning`: (optional) Control whether AI enhancement is performed:
+  - `"full"`: (default) Use AI to enhance the workplan with codebase context
+  - `"none"`: Skip AI enhancement, use the provided description as-is
 
 **Output**:
 
 - JSON string containing:
   - `issue_url`: URL to the created GitHub issue
   - `issue_number`: The GitHub issue number
+
+**Error Handling**:
+
+If AI enhancement fails when using `codebase_reasoning="full"`, a comment will be added to the issue with the error details, but the original issue body with title and description will be preserved.
 
 ### create_worktree
 
@@ -316,7 +323,12 @@ curl http://127.0.0.1:8000/tools
 # Call a tool (create_workplan)
 curl -X POST http://127.0.0.1:8000/tools/create_workplan \
   -H "Content-Type: application/json" \
-  -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"}'
+  -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing", "codebase_reasoning": "full"}'
+
+# Call a tool (create_workplan without AI enhancement)
+curl -X POST http://127.0.0.1:8000/tools/create_workplan \
+  -H "Content-Type: application/json" \
+  -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing", "codebase_reasoning": "none"}'
 
 # Call a tool (create_worktree)
 curl -X POST http://127.0.0.1:8000/tools/create_worktree \
@@ -342,8 +354,11 @@ The package includes an example client that demonstrates how to interact with th
 # List available tools
 python -m examples.client_example list
 
-# Generate a workplan
+# Generate a workplan with AI enhancement (default)
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"
+
+# Generate a basic workplan without AI enhancement
+python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing" --codebase-reasoning none
 
 # Create a worktree for an existing workplan issue
 python -m examples.client_example worktree --issue-number "123"

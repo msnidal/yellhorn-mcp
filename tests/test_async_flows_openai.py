@@ -9,6 +9,7 @@ from mcp.server.fastmcp import Context
 from tests.helpers import DummyContext
 from yellhorn_mcp.server import (
     YellhornMCPError,
+    add_github_issue_comment,
     process_judgement_async,
     process_workplan_async,
 )
@@ -48,12 +49,12 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
     mock_ctx.log = AsyncMock()
 
     # Bypass the OpenAI client check by patching it directly
-    with patch("yellhorn_mcp.server.update_github_issue") as mock_update:
-        # Create a typical error flow: update_github_issue should be called with error message
+    with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+        # Create a typical error flow: add_github_issue_comment should be called with error message
         await process_workplan_async(
             Path("/mock/repo"),
             None,  # No Gemini client
-            None,  # No OpenAI client but we'll see the error in update_github_issue
+            None,  # No OpenAI client but we'll see the error in add_github_issue_comment
             "gpt-4o",  # OpenAI model
             "Feature Implementation Plan",
             "123",
@@ -61,16 +62,16 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
             detailed_description="Test description",
         )
 
-        # Verify error was propagated to update_github_issue
-        mock_update.assert_called_once()
-        args = mock_update.call_args[0]
-        assert "Error:" in args[2]
+        # Verify error was propagated to add_github_issue_comment
+        mock_add_comment.assert_called_once()
+        args = mock_add_comment.call_args[0]
+        assert "⚠️ AI workplan enhancement failed" in args[2]
 
     # Test with OpenAI API error
     with (
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -79,7 +80,7 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
         mock_client = MagicMock()
         mock_client.chat.completions.create = AsyncMock(side_effect=Exception("OpenAI API error"))
 
-        # Process should handle API error and update issue with error message
+        # Process should handle API error and add a comment to the issue with error message
         await process_workplan_async(
             Path("/mock/repo"),
             None,  # No Gemini client
@@ -96,13 +97,13 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
             level="error", message="Failed to generate workplan: OpenAI API error"
         )
 
-        # Verify issue was updated with error message
-        mock_update.assert_called_once()
-        args = mock_update.call_args[0]
+        # Verify comment was added with error message
+        mock_add_comment.assert_called_once()
+        args = mock_add_comment.call_args[0]
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
-        assert "Error:" in args[2]
-        assert "Failed to generate workplan" in args[2]
+        assert "⚠️ AI workplan enhancement failed" in args[2]
+        assert "OpenAI API error" in args[2]
 
 
 @pytest.mark.asyncio
@@ -114,7 +115,7 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
     with (
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -132,7 +133,7 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
         chat_completions.create = AsyncMock(return_value=response)
         client.chat = MagicMock(completions=chat_completions)
 
-        # Process should handle empty response and update issue
+        # Process should handle empty response and add comment to issue
         await process_workplan_async(
             Path("/mock/repo"),
             None,  # No Gemini client
@@ -144,10 +145,13 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
             detailed_description="Test description",
         )
 
-        # Verify issue was updated with error message
-        mock_update.assert_called_once()
-        args = mock_update.call_args[0]
-        assert "Failed to generate workplan: Received an empty response" in args[2]
+        # Verify comment was added with error message
+        mock_add_comment.assert_called_once()
+        args = mock_add_comment.call_args[0]
+        assert args[0] == Path("/mock/repo")
+        assert args[1] == "123"
+        assert "⚠️ AI workplan enhancement failed" in args[2]
+        assert "empty response" in args[2]
 
 
 @pytest.mark.asyncio

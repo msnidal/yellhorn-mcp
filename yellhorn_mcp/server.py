@@ -547,6 +547,41 @@ async def ensure_label_exists(repo_path: Path, label: str, description: str = ""
         # This is non-critical, so we don't raise an exception
 
 
+async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str) -> None:
+    """
+    Adds a comment to a specific GitHub issue.
+
+    Args:
+        repo_path: Path to the repository.
+        issue_number: The issue number to comment on.
+        body: The comment content to add.
+
+    Raises:
+        YellhornMCPError: If there's an error adding the comment.
+    """
+    import tempfile
+
+    try:
+        # Create a temporary file to hold the comment body
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as temp:
+            temp.write(body)
+            temp_file = Path(temp.name)
+
+        try:
+            # Add the comment using the temp file
+            await run_github_command(
+                repo_path, ["issue", "comment", issue_number, "--body-file", str(temp_file)]
+            )
+        finally:
+            # Clean up the temp file
+            if temp_file.exists():
+                temp_file.unlink()
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to add comment to GitHub issue: {str(e)}")
+
+
 async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> None:
     """
     Update a GitHub issue with new content.
@@ -559,11 +594,15 @@ async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> 
     Raises:
         YellhornMCPError: If there's an error updating the issue.
     """
+    import tempfile
+
     try:
         # Create a temporary file to hold the issue body
-        temp_file = repo_path / f"issue_{issue_number}_update.md"
-        with open(temp_file, "w", encoding="utf-8") as f:
-            f.write(body)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as temp:
+            temp.write(body)
+            temp_file = Path(temp.name)
 
         try:
             # Update the issue using the temp file
@@ -699,6 +738,8 @@ async def create_github_subissue(
     Raises:
         YellhornMCPError: If there's an error creating the sub-issue.
     """
+    import tempfile
+
     try:
         # Ensure the yellhorn-judgement-subissue label exists
         await ensure_label_exists(
@@ -709,9 +750,11 @@ async def create_github_subissue(
         body_with_reference = f"Parent Workplan: #{parent_issue_number}\n\n{body}"
 
         # Create a temporary file to hold the issue body
-        temp_file = repo_path / f"subissue_{parent_issue_number}_judgement.md"
-        with open(temp_file, "w", encoding="utf-8") as f:
-            f.write(body_with_reference)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as temp:
+            temp.write(body_with_reference)
+            temp_file = Path(temp.name)
 
         try:
             # Create the issue with all specified labels plus the judgement subissue label
@@ -756,14 +799,18 @@ async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: st
     Raises:
         YellhornMCPError: If there's an error posting the review.
     """
+    import tempfile
+
     try:
         # Extract PR number from URL
         pr_number = pr_url.split("/")[-1]
 
         # Create a temporary file to hold the review content
-        temp_file = repo_path / f"pr_{pr_number}_review.md"
-        with open(temp_file, "w", encoding="utf-8") as f:
-            f.write(review_content)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as temp:
+            temp.write(review_content)
+            temp_file = Path(temp.name)
 
         try:
             # Post the review using GitHub CLI
@@ -894,11 +941,16 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
 
         if not workplan_content:
             api_name = "OpenAI" if is_openai_model else "Gemini"
-            await update_github_issue(
-                repo_path,
-                issue_number,
-                f"Failed to generate workplan: Received an empty response from {api_name} API.",
+            error_message = (
+                f"Failed to generate workplan: Received an empty response from {api_name} API."
             )
+            await ctx.log(level="error", message=error_message)
+
+            # Add comment instead of overwriting
+            error_message_comment = (
+                f"⚠️ AI workplan enhancement failed: Received an empty response from {api_name} API."
+            )
+            await add_github_issue_comment(repo_path, issue_number, error_message_comment)
             return
 
         # Format metrics section
@@ -915,14 +967,17 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         )
 
     except Exception as e:
-        error_message = f"Failed to generate workplan: {str(e)}"
-        await ctx.log(level="error", message=error_message)
+        error_message_log = f"Failed to generate workplan: {str(e)}"
+        await ctx.log(level="error", message=error_message_log)
+
+        # Add a comment to the GitHub issue instead of overwriting the body
+        error_message_comment = f"⚠️ AI workplan enhancement failed:\n\n```\n{str(e)}\n```\n\nThe original description provided remains in the issue body."
         try:
-            await update_github_issue(repo_path, issue_number, f"Error: {error_message}")
-        except Exception as update_error:
+            await add_github_issue_comment(repo_path, issue_number, error_message_comment)
+        except Exception as comment_error:
             await ctx.log(
                 level="error",
-                message=f"Failed to update GitHub issue with error: {str(update_error)}",
+                message=f"Additionally failed to add error comment to issue #{issue_number}: {str(comment_error)}",
             )
 
 
@@ -1120,12 +1175,13 @@ async def generate_branch_name(title: str, issue_number: str) -> str:
 
 @mcp.tool(
     name="create_workplan",
-    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'.",
+    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full' or 'none').",
 )
 async def create_workplan(
     title: str,
     detailed_description: str,
     ctx: Context,
+    codebase_reasoning: str = "full",
 ) -> str:
     """
     Create a workplan based on the provided title and detailed description.
@@ -1135,6 +1191,9 @@ async def create_workplan(
         title: Title for the GitHub issue (will be used as issue title and header).
         detailed_description: Detailed description for the workplan.
         ctx: Server context with repository path and model.
+        codebase_reasoning: Control whether AI enhancement is performed:
+            - "full": (default) Use AI to enhance the workplan with codebase context
+            - "none": Skip AI enhancement, use the provided description as-is
 
     Returns:
         JSON string containing the GitHub issue URL.
@@ -1151,8 +1210,22 @@ async def create_workplan(
         # Ensure the yellhorn-mcp label exists
         await ensure_label_exists(repo_path, "yellhorn-mcp", "Issues created by yellhorn-mcp")
 
-        # Prepare initial body with the title and detailed description
-        initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan, please wait...*"
+        # Prepare initial body based on reasoning mode
+        if codebase_reasoning == "none":
+            initial_body = f"# {title}\n\n## Description\n{detailed_description}"
+            await ctx.log(
+                level="info",
+                message="Skipping AI workplan enhancement as per codebase_reasoning='none'.",
+            )
+        elif codebase_reasoning == "full":
+            initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
+        else:
+            # If codebase_reasoning is neither "full" nor "none", default to "full" with a log message
+            await ctx.log(
+                level="info",
+                message=f"Unrecognized codebase_reasoning value '{codebase_reasoning}', defaulting to 'full'.",
+            )
+            initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
 
         # Create a GitHub issue with the yellhorn-mcp label
         issue_url = await run_github_command(
@@ -1176,19 +1249,29 @@ async def create_workplan(
         )
         issue_number = issue_url.split("/")[-1]
 
-        # Start async processing
-        asyncio.create_task(
-            process_workplan_async(
-                repo_path,
-                gemini_client,
-                openai_client,
-                model,
-                title,
-                issue_number,
-                ctx,
-                detailed_description=detailed_description,
+        # Only start async processing if full reasoning is requested
+        if codebase_reasoning != "none":
+            await ctx.log(
+                level="info",
+                message=f"Initiating AI workplan enhancement for issue #{issue_number}.",
             )
-        )
+            asyncio.create_task(
+                process_workplan_async(
+                    repo_path,
+                    gemini_client,
+                    openai_client,
+                    model,
+                    title,
+                    issue_number,
+                    ctx,
+                    detailed_description=detailed_description,
+                )
+            )
+        else:
+            await ctx.log(
+                level="info",
+                message=f"Created basic workplan issue #{issue_number} without AI enhancement.",
+            )
 
         # Return the issue URL as JSON
         result = {

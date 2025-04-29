@@ -44,6 +44,9 @@ def test_mcp_tool_signatures():
     assert "title" in signature.parameters
     assert "detailed_description" in signature.parameters
     assert "ctx" in signature.parameters
+    assert "codebase_reasoning" in signature.parameters
+    # Check that codebase_reasoning has a default value of "full"
+    assert signature.parameters["codebase_reasoning"].default == "full"
 
     # Test create_worktree parameters
     signature = inspect.signature(create_worktree)
