@@ -97,7 +97,7 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 - `detailed_description`: Detailed description for the workplan
 - `codebase_reasoning`: (optional) Control whether AI enhancement is performed:
   - `"full"`: (default) Use AI to enhance the workplan with full codebase context
-  - `"lsp"`: Use AI with lightweight codebase context (only function/method signatures)
+  - `"lsp"`: Use AI with lightweight codebase context (only function/method signatures for Python and Go)
   - `"none"`: Skip AI enhancement, use the provided description as-is
 
 **Output**:
@@ -130,7 +130,7 @@ Triggers an asynchronous code judgement comparing two git refs (branches or comm
 - `head_ref`: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
 - `codebase_reasoning`: (optional) Control which codebase context is provided:
   - `"full"`: (default) Use full codebase context
-  - `"lsp"`: Use lighter codebase context (only function signatures, plus full diff files)
+  - `"lsp"`: Use lighter codebase context (only function signatures for Python and Go, plus full diff files)
   - `"none"`: Skip codebase context completely for fastest processing
 
 **Output**:

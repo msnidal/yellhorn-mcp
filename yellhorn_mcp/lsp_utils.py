@@ -3,12 +3,16 @@ LSP-style utilities for extracting function signatures and docstrings.
 
 This module provides functions to extract Python function signatures and docstrings
 using AST parsing (with fallback to jedi) for use in the "lsp" codebase reasoning mode.
-This mode gathers only Python function/method signatures and their docstrings, plus the
-full contents of files that appear in diffs, to create a more lightweight but still
-useful codebase snapshot for AI processing.
+This mode gathers only function/method signatures and their docstrings for supported 
+languages (Python, Go), plus the full contents of files that appear in diffs, to create 
+a more lightweight but still useful codebase snapshot for AI processing.
 """
 
 import ast
+import json
+import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -154,11 +158,76 @@ def extract_python_api(file_path: Path) -> list[str]:
             return []
 
 
+def extract_go_api(file_path: Path) -> list[str]:
+    """
+    Extract Go API (function, type, interface signatures) from a file.
+
+    Uses regex-based parsing for basic extraction, with fallback to gopls
+    when available for higher fidelity.
+
+    Args:
+        file_path: Path to the Go file
+
+    Returns:
+        List of Go API signature strings
+    """
+    # Check for gopls first - it provides the best extraction
+    if shutil.which("gopls"):
+        try:
+            # Run gopls to get symbols in JSON format
+            process = subprocess.run(
+                ["gopls", "symbols", "-format", "json", str(file_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=2.0,  # Reasonable timeout for gopls
+            )
+
+            if process.returncode == 0 and process.stdout:
+                # Parse JSON output
+                symbols = json.loads(process.stdout)
+                sigs = []
+
+                for symbol in symbols:
+                    # Filter for exported symbols only (uppercase first letter)
+                    name = symbol.get("name", "")
+                    kind = symbol.get("kind", "")
+
+                    if name and name[0].isupper():
+                        if kind in ["function", "method", "interface", "struct", "type"]:
+                            sigs.append(f"{kind} {name}")
+
+                return sorted(sigs)
+        except (subprocess.SubprocessError, json.JSONDecodeError, Exception):
+            # Fall back to regex if gopls fails
+            pass
+
+    # Regex-based extraction as fallback
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Find exported symbols (capitalized names)
+        # Matches: func Name, type Name, type Name interface, type Name struct
+        GO_SIG_RE = re.compile(r"^(func|type)\s+([A-Z]\w*)", re.MULTILINE)
+
+        matches = GO_SIG_RE.findall(content)
+        sigs = []
+
+        for kind, name in matches:
+            sigs.append(f"{kind} {name}")
+
+        return sorted(sigs)
+    except Exception:
+        return []
+
+
 async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
     """
     Get an LSP-style snapshot of the codebase, extracting only function signatures and docstrings.
 
     Respects both .gitignore and .yellhornignore files, just like the full snapshot function.
+    Supports Python and Go files for API extraction.
 
     Args:
         repo_path: Path to the repository
@@ -174,11 +243,14 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
     # only return file paths without reading contents
     file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths")
 
-    # Filter for Python files
+    # Filter for supported files
     py_files = [p for p in file_paths if p.endswith(".py")]
+    go_files = [p for p in file_paths if p.endswith(".go")]
 
-    # Extract signatures from each Python file
+    # Extract signatures from each file
     contents = {}
+
+    # Process Python files
     for file_path in py_files:
         full_path = repo_path / file_path
         if not full_path.is_file():
@@ -187,6 +259,16 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
         sigs = extract_python_api(full_path)
         if sigs:
             contents[file_path] = "```py\n" + "\n".join(sigs) + "\n```"
+
+    # Process Go files
+    for file_path in go_files:
+        full_path = repo_path / file_path
+        if not full_path.is_file():
+            continue
+
+        sigs = extract_go_api(full_path)
+        if sigs:
+            contents[file_path] = "```go\n" + "\n".join(sigs) + "\n```"
 
     return file_paths, contents
 

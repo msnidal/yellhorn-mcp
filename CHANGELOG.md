@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Added new "lsp" codebase reasoning mode that only extracts function signatures and docstrings, resulting in lighter prompts
+- Added directory tree visualization to all prompt formats for better codebase structure understanding
+- Added Go language support to LSP mode with exported function and type signatures
+- Added optional gopls integration for higher-fidelity Go API extraction when available
 - Added jedi dependency for robust Python code analysis with graceful fallback
 - Added full content extraction for files affected by diffs in judge_workplan
 - Updated CLI, documentation, and example client to support the new mode

@@ -471,8 +471,15 @@ async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[
     Returns:
         Formatted string for prompt inclusion.
     """
+    from yellhorn_mcp.tree_utils import build_tree
+
+    # Generate tree visualization
+    tree_view = build_tree(file_paths)
+
+    # Generate file list as plain text (keeping for backward compatibility)
     codebase_structure = "\n".join(file_paths)
 
+    # Format file contents
     contents_section = []
     for file_path, content in file_contents.items():
         # Determine language for syntax highlighting
@@ -483,7 +490,11 @@ async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[
 
     full_codebase_contents = "\n".join(contents_section)
 
-    return f"""<codebase_structure>
+    return f"""<codebase_tree>
+{tree_view}
+</codebase_tree>
+
+<codebase_structure>
 {codebase_structure}
 </codebase_structure>
 
