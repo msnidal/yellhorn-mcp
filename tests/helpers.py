@@ -17,6 +17,14 @@ class DummyContext:
         """
         self.__dict__.update(kwargs)
 
+        # Set up a request_context with lifespan_context for improved compatibility
+        # This is needed for the codebase_reasoning feature tests
+        class DummyRequestContext:
+            def __init__(self):
+                self.lifespan_context = {"codebase_reasoning": "full"}
+
+        self.request_context = DummyRequestContext()
+
     async def log(self, level=None, message=None):
         """
         Mock implementation of the log method.

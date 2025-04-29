@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.4.0] - 2025-04-30
+
+### Added
+- Added new "lsp" codebase reasoning mode that only extracts function signatures and docstrings, resulting in lighter prompts
+- Added directory tree visualization to all prompt formats for better codebase structure understanding
+- Added Go language support to LSP mode with exported function and type signatures
+- Added optional gopls integration for higher-fidelity Go API extraction when available
+- Added jedi dependency for robust Python code analysis with graceful fallback
+- Added full content extraction for files affected by diffs in judge_workplan
+- Added Python class attribute extraction to LSP mode for regular classes, dataclasses, and Pydantic models
+- Added Go struct field extraction to LSP mode for better API representation
+- Added debug mode to create_workplan and judge_workplan tools to view the full prompt in a GitHub comment
+- Added type annotations (parameter and return types) to function signatures in Python and Go LSP mode
+- Added Python Enum extraction in LSP mode
+- Added improved Go receiver methods extraction with support for pointers and generics
+- Added comprehensive E2E tests for LSP functionality
+- Updated CLI, documentation, and example client to support the new mode
+
+### Changed
+- Removed redundant `<codebase_structure>` section from prompt format to improve conciseness
+- Fixed code fence handling in LSP mode to prevent nested code fences (no more ```py inside another ```py)
+
 ## [0.3.3] - 2025-04-28
 
 ### Removed

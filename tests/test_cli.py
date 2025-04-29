@@ -26,6 +26,7 @@ def test_main_success(
         "OPENAI_API_KEY": "mock-openai-api-key",
         "REPO_PATH": "/mock/repo",
         "YELLHORN_MCP_MODEL": "gemini-2.5-pro-preview-03-25",
+        "YELLHORN_MCP_REASONING": "full",
     }.get(x, default)
 
     # Mock path checks
@@ -70,6 +71,7 @@ def test_main_missing_gemini_api_key(mock_mcp_run, mock_getenv, mock_exit, capsy
         "REPO_PATH": "/mock/repo",
         "OPENAI_API_KEY": "mock-openai-api-key",
         "YELLHORN_MCP_MODEL": "gemini-2.5-pro-preview-03-25",
+        "YELLHORN_MCP_REASONING": "full",
     }.get(x, default)
 
     # Run the main function, expecting it to exit
@@ -103,6 +105,7 @@ def test_main_missing_openai_api_key(mock_mcp_run, mock_getenv, mock_exit, capsy
     mock_getenv.side_effect = lambda x, default=None: {
         "REPO_PATH": "/mock/repo",
         "GEMINI_API_KEY": "mock-gemini-api-key",
+        "YELLHORN_MCP_REASONING": "full",
     }.get(x, default)
 
     # Run the main function, expecting it to exit
@@ -137,6 +140,7 @@ def test_main_invalid_repo_path(mock_mcp_run, mock_exists, mock_getenv, mock_exi
     mock_getenv.side_effect = lambda x, default=None: {
         "GEMINI_API_KEY": "mock-api-key",
         "REPO_PATH": "/nonexistent/repo",
+        "YELLHORN_MCP_REASONING": "full",
     }.get(x, default)
 
     # Mock path check to indicate the path doesn't exist
@@ -175,6 +179,7 @@ def test_main_not_git_repo(mock_mcp_run, mock_is_dir, mock_exists, mock_getenv, 
     mock_getenv.side_effect = lambda x, default=None: {
         "GEMINI_API_KEY": "mock-api-key",
         "REPO_PATH": "/mock/repo",
+        "YELLHORN_MCP_REASONING": "full",
     }.get(x, default)
 
     # Mock path checks to indicate it exists but is not a Git repo

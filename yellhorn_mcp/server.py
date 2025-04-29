@@ -363,7 +363,9 @@ async def run_git_command(repo_path: Path, command: list[str]) -> str:
         raise YellhornMCPError("Git executable not found. Please ensure Git is installed.")
 
 
-async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
+async def get_codebase_snapshot(
+    repo_path: Path, _mode: str = "full"
+) -> tuple[list[str], dict[str, str]]:
     """
     Get a snapshot of the codebase, including file list and contents.
 
@@ -373,6 +375,9 @@ async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, s
 
     Args:
         repo_path: Path to the repository.
+        _mode: Internal parameter to control the function mode:
+               - "full": (default) Return paths and full file contents
+               - "paths": Return only paths without reading file contents
 
     Returns:
         Tuple of (file list, file contents dictionary).
@@ -427,6 +432,10 @@ async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, s
                 filtered_paths.append(f)
         file_paths = filtered_paths
 
+    # If only paths are requested, return early
+    if _mode == "paths":
+        return file_paths, {}
+
     # Read file contents
     file_contents = {}
     for file_path in file_paths:
@@ -460,10 +469,14 @@ async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[
         file_contents: Dictionary mapping file paths to contents.
 
     Returns:
-        Formatted string for prompt inclusion.
+        Formatted string with codebase tree and file contents.
     """
-    codebase_structure = "\n".join(file_paths)
+    from yellhorn_mcp.tree_utils import build_tree
 
+    # Generate tree visualization
+    tree_view = build_tree(file_paths)
+
+    # Format file contents
     contents_section = []
     for file_path, content in file_contents.items():
         # Determine language for syntax highlighting
@@ -474,9 +487,9 @@ async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[
 
     full_codebase_contents = "\n".join(contents_section)
 
-    return f"""<codebase_structure>
-{codebase_structure}
-</codebase_structure>
+    return f"""<codebase_tree>
+{tree_view}
+</codebase_tree>
 
 <full_codebase_contents>
 {full_codebase_contents}
@@ -831,6 +844,7 @@ async def process_workplan_async(
     issue_number: str,
     ctx: Context,
     detailed_description: str,
+    debug: bool = False,
 ) -> None:
     """
     Process workplan generation asynchronously and update the GitHub issue.
@@ -844,10 +858,19 @@ async def process_workplan_async(
         issue_number: GitHub issue number to update.
         ctx: Server context.
         detailed_description: Detailed description for the workplan.
+        debug: If True, add a comment with the full prompt used for generation.
     """
     try:
-        # Get codebase snapshot
-        file_paths, file_contents = await get_codebase_snapshot(repo_path)
+        # Get codebase snapshot based on reasoning mode
+        codebase_reasoning = ctx.request_context.lifespan_context.get("codebase_reasoning", "full")
+
+        if codebase_reasoning == "lsp":
+            from yellhorn_mcp.lsp_utils import get_lsp_snapshot
+
+            file_paths, file_contents = await get_lsp_snapshot(repo_path)
+        else:
+            file_paths, file_contents = await get_codebase_snapshot(repo_path)
+
         codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct prompt
@@ -962,6 +985,23 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             message=f"Successfully updated GitHub issue #{issue_number} with generated workplan and metrics",
         )
 
+        # If debug mode is enabled, add a comment with the full prompt
+        if debug:
+            debug_comment = f"""
+## Debug Information - Prompt Used for Generation
+
+```
+{prompt}
+```
+
+*This debug information is provided to help evaluate and improve prompt engineering.*
+"""
+            await add_github_issue_comment(repo_path, issue_number, debug_comment)
+            await ctx.log(
+                level="info",
+                message=f"Added debug information (prompt) as comment to issue #{issue_number}",
+            )
+
     except Exception as e:
         error_message_log = f"Failed to generate workplan: {str(e)}"
         await ctx.log(level="error", message=error_message_log)
@@ -1041,13 +1081,14 @@ def is_git_repository(path: Path) -> bool:
 
 @mcp.tool(
     name="create_workplan",
-    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full' or 'none').",
+    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full', 'lsp', or 'none'). Set debug=True to see the full prompt.",
 )
 async def create_workplan(
     title: str,
     detailed_description: str,
     ctx: Context,
     codebase_reasoning: str = "full",
+    debug: bool = False,
 ) -> str:
     """
     Create a workplan based on the provided title and detailed description.
@@ -1058,8 +1099,11 @@ async def create_workplan(
         detailed_description: Detailed description for the workplan.
         ctx: Server context with repository path and model.
         codebase_reasoning: Control whether AI enhancement is performed:
-            - "full": (default) Use AI to enhance the workplan with codebase context
+            - "full": (default) Use AI to enhance the workplan with full codebase context
+            - "lsp": Use AI with lighter codebase context (only function/method signatures)
             - "none": Skip AI enhancement, use the provided description as-is
+        debug: If True, adds a comment to the issue with the full prompt used for generation.
+               Useful for debugging and improving prompt engineering.
 
     Returns:
         JSON string containing the GitHub issue URL.
@@ -1085,13 +1129,16 @@ async def create_workplan(
             )
         elif codebase_reasoning == "full":
             initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
+        elif codebase_reasoning == "lsp":
+            initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with lightweight codebase context (function signatures), please wait...*"
         else:
-            # If codebase_reasoning is neither "full" nor "none", default to "full" with a log message
+            # If codebase_reasoning is not recognized, default to "full" with a log message
             await ctx.log(
                 level="info",
                 message=f"Unrecognized codebase_reasoning value '{codebase_reasoning}', defaulting to 'full'.",
             )
             initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
+            codebase_reasoning = "full"  # Reset to full as the default
 
         # Create a GitHub issue with the yellhorn-mcp label
         issue_url = await run_github_command(
@@ -1115,12 +1162,14 @@ async def create_workplan(
         )
         issue_number = issue_url.split("/")[-1]
 
-        # Only start async processing if full reasoning is requested
+        # Only start async processing if AI enhancement is requested
         if codebase_reasoning != "none":
             await ctx.log(
                 level="info",
-                message=f"Initiating AI workplan enhancement for issue #{issue_number}.",
+                message=f"Initiating AI workplan enhancement for issue #{issue_number} with mode '{codebase_reasoning}'.",
             )
+            # Store the codebase_reasoning mode in the context for process_workplan_async
+            ctx.request_context.lifespan_context["codebase_reasoning"] = codebase_reasoning
             asyncio.create_task(
                 process_workplan_async(
                     repo_path,
@@ -1131,6 +1180,7 @@ async def create_workplan(
                     issue_number,
                     ctx,
                     detailed_description=detailed_description,
+                    debug=debug,
                 )
             )
         else:
@@ -1205,6 +1255,7 @@ async def process_judgement_async(
     ctx: Context,
     base_commit_hash: str | None = None,
     head_commit_hash: str | None = None,
+    debug: bool = False,
 ) -> str:
     """
     Process the judgement of a workplan and diff asynchronously, creating a GitHub sub-issue.
@@ -1222,13 +1273,32 @@ async def process_judgement_async(
         ctx: Server context.
         base_commit_hash: Optional base commit hash for better reference in the output.
         head_commit_hash: Optional head commit hash for better reference in the output.
+        debug: If True, adds a comment to the issue with the full prompt used for generation.
+               Useful for debugging and improving prompt engineering.
 
     Returns:
         The judgement content and URL of the created sub-issue.
     """
     try:
-        # Get codebase snapshot for better context
-        file_paths, file_contents = await get_codebase_snapshot(repo_path)
+        # Get codebase snapshot based on reasoning mode
+        codebase_reasoning = ctx.request_context.lifespan_context.get("codebase_reasoning", "full")
+
+        if codebase_reasoning == "lsp":
+            from yellhorn_mcp.lsp_utils import (
+                get_lsp_snapshot,
+                update_snapshot_with_full_diff_files,
+            )
+
+            # Get LSP snapshot (signatures only)
+            file_paths, file_contents = await get_lsp_snapshot(repo_path)
+            # Then update with full contents of diff-touched files
+            file_paths, file_contents = await update_snapshot_with_full_diff_files(
+                repo_path, base_ref, head_ref, file_paths, file_contents
+            )
+        else:
+            # Use full snapshot
+            file_paths, file_contents = await get_codebase_snapshot(repo_path)
+
         codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct a more structured prompt
@@ -1351,6 +1421,26 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 ["yellhorn-mcp"],
             )
 
+            # If debug mode is enabled, add a comment with the full prompt
+            if debug:
+                # Extract the sub-issue number
+                subissue_number = subissue_url.split("/")[-1]
+
+                debug_comment = f"""
+## Debug Information - Prompt Used for Judgement
+
+```
+{prompt}
+```
+
+*This debug information is provided to help evaluate and improve prompt engineering.*
+"""
+                await add_github_issue_comment(repo_path, subissue_number, debug_comment)
+                await ctx.log(
+                    level="info",
+                    message=f"Added debug information (prompt) as comment to judgement sub-issue #{subissue_number}",
+                )
+
             # Return both the judgement content and the sub-issue URL
             return f"Judgement sub-issue created: {subissue_url}\n\n{judgement_content}"
         else:
@@ -1365,13 +1455,15 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
 @mcp.tool(
     name="judge_workplan",
-    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background).",
+    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background). Set debug=True to see the full prompt.",
 )
 async def judge_workplan(
     ctx: Context,
     issue_number: str,
     base_ref: str = "main",
     head_ref: str = "HEAD",
+    codebase_reasoning: str = "full",
+    debug: bool = False,
 ) -> str:
     """
     Trigger an asynchronous code judgement comparing two git refs against a workplan.
@@ -1385,6 +1477,12 @@ async def judge_workplan(
         issue_number: The GitHub issue number for the workplan.
         base_ref: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
+        codebase_reasoning: Control which codebase context is provided:
+            - "full": (default) Use full codebase context
+            - "lsp": Use lighter codebase context (only function/method signatures, plus full diff files)
+            - "none": Skip codebase context completely for fastest processing
+        debug: If True, adds a comment to the sub-issue with the full prompt used for generation.
+               Useful for debugging and improving prompt engineering.
 
     Returns:
         A confirmation message that the judgement task has been initiated.
@@ -1418,6 +1516,27 @@ async def judge_workplan(
         openai_client = ctx.request_context.lifespan_context.get("openai_client")
         model = ctx.request_context.lifespan_context["model"]
 
+        # Validate codebase_reasoning
+        if codebase_reasoning not in ["full", "lsp", "none"]:
+            await ctx.log(
+                level="info",
+                message=f"Unrecognized codebase_reasoning value '{codebase_reasoning}', defaulting to 'full'.",
+            )
+            codebase_reasoning = "full"
+
+        # Store codebase_reasoning in context
+        ctx.request_context.lifespan_context["codebase_reasoning"] = codebase_reasoning
+
+        reasoning_mode_desc = {
+            "full": "full codebase",
+            "lsp": "function signatures",
+            "none": "no codebase",
+        }.get(codebase_reasoning, "full codebase")
+
+        await ctx.log(
+            level="info", message=f"Starting judgement with {reasoning_mode_desc} context"
+        )
+
         asyncio.create_task(
             process_judgement_async(
                 repo_path,
@@ -1432,6 +1551,7 @@ async def judge_workplan(
                 ctx,
                 base_commit_hash=base_commit_hash,
                 head_commit_hash=head_commit_hash,
+                debug=debug,
             )
         )
 

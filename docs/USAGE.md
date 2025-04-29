@@ -190,8 +190,10 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 - `title`: Title for the GitHub issue (will be used as issue title and header)
 - `detailed_description`: Detailed description for the workplan
 - `codebase_reasoning`: (optional) Control whether AI enhancement is performed:
-  - `"full"`: (default) Use AI to enhance the workplan with codebase context
+  - `"full"`: (default) Use AI to enhance the workplan with full codebase context
+  - `"lsp"`: Use AI with lightweight codebase context (function/method signatures, class attributes and struct fields for Python and Go)
   - `"none"`: Skip AI enhancement, use the provided description as-is
+- `debug`: (optional) If set to `true`, adds a comment to the issue with the full prompt used for generation
 
 **Output**:
 
@@ -225,6 +227,11 @@ Triggers an asynchronous code judgement comparing two git refs (branches or comm
 - `issue_number`: The GitHub issue number for the workplan.
 - `base_ref`: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
 - `head_ref`: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
+- `codebase_reasoning`: (optional) Control which codebase context is provided:
+  - `"full"`: (default) Use full codebase context
+  - `"lsp"`: Use lighter codebase context (function signatures, class attributes, etc. for Python and Go, plus full diff files)
+  - `"none"`: Skip codebase context completely for fastest processing
+- `debug`: (optional) If set to `true`, adds a comment to the sub-issue with the full prompt used for generation
 
 **Output**:
 
@@ -287,10 +294,15 @@ curl http://127.0.0.1:8000/openapi.json
 # List available tools
 curl http://127.0.0.1:8000/tools
 
-# Call a tool (create_workplan)
+# Call a tool (create_workplan with full codebase context)
 curl -X POST http://127.0.0.1:8000/tools/create_workplan \
   -H "Content-Type: application/json" \
   -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing", "codebase_reasoning": "full"}'
+
+# Call a tool (create_workplan with lightweight LSP context - function signatures only)
+curl -X POST http://127.0.0.1:8000/tools/create_workplan \
+  -H "Content-Type: application/json" \
+  -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing", "codebase_reasoning": "lsp"}'
 
 # Call a tool (create_workplan without AI enhancement)
 curl -X POST http://127.0.0.1:8000/tools/create_workplan \
@@ -303,10 +315,15 @@ curl -X POST http://127.0.0.1:8000/tools/get_workplan \
   -H "Content-Type: application/json" \
   -d '{"issue_number": "123"}'
 
-# Call a tool (judge_workplan)
+# Call a tool (judge_workplan with full codebase context - default)
 curl -X POST http://127.0.0.1:8000/tools/judge_workplan \
   -H "Content-Type: application/json" \
   -d '{"issue_number": "456", "base_ref": "main", "head_ref": "feature-branch"}'
+  
+# Call a tool (judge_workplan with lightweight LSP context)
+curl -X POST http://127.0.0.1:8000/tools/judge_workplan \
+  -H "Content-Type: application/json" \
+  -d '{"issue_number": "456", "base_ref": "main", "head_ref": "feature-branch", "codebase_reasoning": "lsp"}'
 ```
 
 ### Example Client
@@ -317,8 +334,11 @@ The package includes an example client that demonstrates how to interact with th
 # List available tools
 python -m examples.client_example list
 
-# Generate a workplan with AI enhancement (default)
+# Generate a workplan with full codebase context (default)
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"
+
+# Generate a workplan with lightweight LSP context (function signatures only)
+python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing" --codebase-reasoning lsp
 
 # Generate a basic workplan without AI enhancement
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing" --codebase-reasoning none
@@ -327,8 +347,11 @@ python -m examples.client_example plan --title "User Authentication System" --de
 # Get workplan
 python -m examples.client_example getplan --issue-number "123"
 
-# Judge work
+# Judge work with full codebase context (default)
 python -m examples.client_example judge --issue-number "456" --base-ref "main" --head-ref "feature-branch"
+
+# Judge work with lightweight LSP context (function signatures + full diff files)
+python -m examples.client_example judge --issue-number "456" --base-ref "main" --head-ref "feature-branch" --codebase-reasoning lsp
 ```
 
 The example client uses the MCP client API to interact with the server through stdio transport, which is the same approach Claude Code uses.
@@ -432,6 +455,70 @@ For advanced use cases, you can modify the server's behavior by editing the sour
 - Adjust the prompt templates in `process_workplan_async` and `process_judgement_async` functions
 - Modify the codebase preprocessing in `get_codebase_snapshot` and `format_codebase_for_prompt`
 - Change the Gemini model version with the `YELLHORN_MCP_MODEL` environment variable
+- Customize the directory tree representation in `tree_utils.py`
+- Add support for additional languages in the LSP mode by extending `lsp_utils.py`
+
+## LSP Mode Language Support
+
+The "lsp" codebase reasoning mode provides a lightweight representation of your codebase by extracting language constructs rather than including full file contents. This mode reduces token usage while still providing useful context for AI reasoning.
+
+### Python Language Features
+
+The LSP mode extracts the following Python language constructs:
+
+- **Function signatures** with parameter types and return types
+- **Class definitions** with inheritance information
+- **Class attributes** including type annotations when available
+- **Method signatures** with parameter types and return types
+- **Enum definitions** with their literal values
+- **Docstrings** (first line only) for functions, classes, and methods
+
+Example Python LSP extraction:
+
+```
+class Size(Enum)  # Pizza size options
+    SMALL
+    MEDIUM
+    LARGE
+class Pizza  # Delicious disc of dough
+    name: str
+    radius: float
+    toppings: List[T]
+    def Pizza.calculate_price(self, tax_rate: float = 0.1) -> float  # Calculate price with tax
+    def Pizza.add_topping(self, topping: T) -> None  # Add a topping
+def top_level_helper(x: int) -> int  # Helper function
+```
+
+### Go Language Features
+
+The LSP mode extracts the following Go language constructs:
+
+- **Function signatures** with parameter types and return types
+- **Struct definitions** with field names and types
+- **Interface definitions** 
+- **Type definitions** (e.g., type aliases)
+- **Receiver methods** with support for pointer receivers and generics
+
+Example Go LSP extraction:
+
+```
+type Size int
+struct Topping { Name string Price float64 Vegetarian bool }
+struct Oven { Temperature int ModelName string }
+func (o *Oven) Heat(temperature int) error
+func (o *Oven) Bake[T any](p Pizza[T]) (err error)
+func (p *Pizza[T]) AddTopping(t T)
+func Calculate(radius float64) float64
+```
+
+### Diff-aware Processing
+
+The LSP mode is aware of file differences when using the `judge_workplan` tool:
+
+1. It first extracts lightweight signatures for all files
+2. Then it identifies which files are included in the diff
+3. Those diff-affected files are included in full, rather than just their signatures
+4. This provides complete context for changed files while keeping the overall token count low
 
 ### Server Dependencies
 

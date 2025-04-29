@@ -41,6 +41,16 @@ def main():
     )
 
     parser.add_argument(
+        "--codebase-reasoning",
+        dest="codebase_reasoning",
+        default=os.getenv("YELLHORN_MCP_REASONING", "full"),
+        choices=["full", "lsp", "none"],
+        help="Control codebase context for AI processing: "
+        "'full' (all code), 'lsp' (function signatures only), 'none' (no code). "
+        "Default: full or YELLHORN_MCP_REASONING env var.",
+    )
+
+    parser.add_argument(
         "--host",
         dest="host",
         default="127.0.0.1",
@@ -79,6 +89,7 @@ def main():
     # Set environment variables for the server
     os.environ["REPO_PATH"] = args.repo_path
     os.environ["YELLHORN_MCP_MODEL"] = args.model
+    os.environ["YELLHORN_MCP_REASONING"] = args.codebase_reasoning
 
     # Validate repository path
     repo_path = Path(args.repo_path).resolve()
