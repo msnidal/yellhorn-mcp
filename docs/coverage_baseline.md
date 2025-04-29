@@ -6,9 +6,18 @@ This document summarizes the current coverage and identifies areas for potential
 
 ## Coverage Metrics (Current)
 
+| Module | Statements | Miss | Cover |
+|--------|------------|------|-------|
+| yellhorn_mcp/__init__.py | 1 | 0 | 100% |
+| yellhorn_mcp/cli.py | 44 | 1 | 98% |
+| yellhorn_mcp/lsp_utils.py | 272 | 50 | 82% |
+| yellhorn_mcp/server.py | 455 | 46 | 90% |
+| yellhorn_mcp/tree_utils.py | 36 | 0 | 100% |
+| **TOTAL** | **808** | **97** | **88%** |
+
 | Module | Line Coverage |
 |--------|-------------:|
-| yellhorn_mcp | 93% |
+| yellhorn_mcp | 88% |
 | examples | 0.00% |
 
 ## Key Areas
@@ -37,6 +46,12 @@ This document summarizes the current coverage and identifies areas for potential
 - `process_workplan_async` - Both Gemini and OpenAI paths well-tested
 - `process_judgement_async` - Good coverage for OpenAI and Gemini paths
 
+### LSP Mode
+
+- Base extractions for Python and Go are well-tested with rich examples
+- Edge cases like syntax errors and binary files are covered
+- Enum extraction and Go receiver methods with generics have strong test coverage
+
 ### MCP Decorators
 
 - Basic validation of tool metadata is covered
@@ -47,5 +62,5 @@ The examples module (`client_example.py`) has 0% coverage and could be addressed
 
 ## Target Thresholds
 
-- Line Coverage: ≥ 70% (currently at 93%)
+- Line Coverage: ≥ 70% (currently at 88%)
 - Branch Coverage: ≥ 80%

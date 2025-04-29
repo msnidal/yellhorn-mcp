@@ -23,7 +23,8 @@ def _class_attributes_from_ast(node: ast.ClassDef) -> list[str]:
     Extract class attributes from an AST ClassDef node.
 
     Handles regular assignments, type annotations, dataclass fields,
-    and Pydantic model fields. Skips private attributes (starting with "_").
+    Pydantic model fields, and Enum literals. Skips private attributes 
+    (starting with "_").
 
     Args:
         node: AST ClassDef node to extract attributes from
@@ -45,6 +46,22 @@ def _class_attributes_from_ast(node: ast.ClassDef) -> list[str]:
                 name = stmt.targets[0].id
                 if not name.startswith("_"):
                     attrs.append(name)
+    
+    # Handle Enum literals for classes that inherit from Enum
+    if node.bases and any(
+        isinstance(base, ast.Name) and base.id == "Enum" or
+        isinstance(base, ast.Attribute) and base.attr == "Enum"
+        for base in node.bases
+    ):
+        for stmt in node.body:
+            # Enum constants are typically defined as CLASS_NAME = value
+            if (isinstance(stmt, ast.Assign) and 
+                len(stmt.targets) == 1 and 
+                isinstance(stmt.targets[0], ast.Name)):
+                name = stmt.targets[0].id
+                if not name.startswith("_") and name.isupper():  # Most enum values are UPPERCASE
+                    attrs.append(f"{name}")
+    
     return attrs
 
 
@@ -323,6 +340,16 @@ def extract_go_api(file_path: Path) -> list[str]:
         # Enhanced regex for functions to capture parameters and return types
         FUNC_SIG_RE = re.compile(r"^func\s+([A-Z]\w*)\s*\(([^)]*)\)\s*([^{\n]*)", re.MULTILINE)
 
+        # Enhanced regex for receiver methods to handle pointers and generics
+        # This matches patterns like:
+        # - func (o *Oven) Heat(...)
+        # - func (p Pizza) Method(...)
+        # - func (s *Server[T]) Method(...)
+        RECEIVER_METHOD_RE = re.compile(
+            r"^func\s+\(([^)]*)\)\s+([A-Z]\w*)\s*(?:\[([^\]]*)\])?\s*\(([^)]*)\)\s*([^{\n]*)", 
+            re.MULTILINE
+        )
+
         # Find exported type definitions (interfaces, structs)
         TYPE_RE = re.compile(r"^type\s+([A-Z]\w*)\s+([^\s{]+)", re.MULTILINE)
 
@@ -347,6 +374,26 @@ def extract_go_api(file_path: Path) -> list[str]:
                 sigs.append(f"func {name}({params}) {returns}")
             else:
                 sigs.append(f"func {name}({params})")
+                
+        # Extract receiver methods (including pointers and generics)
+        receiver_matches = RECEIVER_METHOD_RE.findall(content)
+        for receiver, method_name, generics, params, returns in receiver_matches:
+            # Clean up components
+            receiver = receiver.strip()
+            params = params.strip()
+            returns = returns.strip()
+            
+            # Format signature with generics if present
+            if generics:
+                method_sig = f"func ({receiver}) {method_name}[{generics}]({params})"
+            else:
+                method_sig = f"func ({receiver}) {method_name}({params})"
+                
+            # Add return type if present
+            if returns:
+                method_sig = f"{method_sig} {returns}"
+                
+            sigs.append(method_sig)
 
         # Extract types that aren't structs or interfaces
         type_matches = TYPE_RE.findall(content)
