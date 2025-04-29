@@ -15,6 +15,10 @@
         "GEMINI_API_KEY": "${input:gemini-api-key}",
         "REPO_PATH": "${workspaceFolder}"
       }
+    },
+    "datapilot": {
+      "url": "http://localhost:7700/sse",
+      "type": "sse"
     }
   }
 }

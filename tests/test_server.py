@@ -201,6 +201,7 @@ from mcp.server.fastmcp import Context
 
 from yellhorn_mcp.server import (
     YellhornMCPError,
+    add_github_issue_comment,
     calculate_cost,
     create_git_worktree,
     create_github_subissue,
@@ -701,7 +702,7 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
             mock_gh.return_value = "https://github.com/user/repo/issues/123"
 
             with patch("asyncio.create_task") as mock_create_task:
-                # Test with required title and detailed description
+                # Test with required title and detailed description (default codebase_reasoning="full")
                 response = await create_workplan(
                     title="Feature Implementation Plan",
                     detailed_description="Create a new feature to support X",
@@ -735,11 +736,45 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
                 assert "# Feature Implementation Plan" in body_content
                 assert "## Description" in body_content
                 assert "Create a new feature to support X" in body_content
+                # Verify the placeholder message for AI processing is included
+                assert "Generating detailed workplan" in body_content
 
                 # Check that the process_workplan_async task is created with the correct parameters
                 args, kwargs = mock_create_task.call_args
                 coroutine = args[0]
                 assert coroutine.__name__ == "process_workplan_async"
+
+                # Reset mocks for next test
+                mock_ensure_label.reset_mock()
+                mock_gh.reset_mock()
+                mock_create_task.reset_mock()
+
+                # Test with codebase_reasoning="none"
+                response = await create_workplan(
+                    title="Basic Plan",
+                    detailed_description="Simple plan description",
+                    ctx=mock_request_context,
+                    codebase_reasoning="none",
+                )
+
+                # Parse response as JSON and check contents
+                result = json.loads(response)
+                assert result["issue_url"] == "https://github.com/user/repo/issues/123"
+                assert result["issue_number"] == "123"
+
+                mock_ensure_label.assert_called_once()
+                mock_gh.assert_called_once()
+                # Verify that no async task was created for AI processing
+                mock_create_task.assert_not_called()
+
+                # Check the body content again
+                body_index = mock_gh.call_args[0][1].index("--body") + 1
+                body_content = mock_gh.call_args[0][1][body_index]
+                assert "# Basic Plan" in body_content
+                assert "## Description" in body_content
+                assert "Simple plan description" in body_content
+                # Verify the placeholder message is NOT present
+                assert "Generating detailed workplan" not in body_content
 
 
 @pytest.mark.asyncio
@@ -866,6 +901,37 @@ async def test_post_github_pr_review():
 
 
 @pytest.mark.asyncio
+async def test_add_github_issue_comment():
+    """Test adding a comment to a GitHub issue."""
+    with (
+        patch("builtins.open", create=True),
+        patch("pathlib.Path.exists", return_value=True),
+        patch("pathlib.Path.unlink") as mock_unlink,
+        patch("yellhorn_mcp.server.run_github_command") as mock_gh,
+    ):
+        await add_github_issue_comment(Path("/mock/repo"), "123", "Comment content")
+
+        mock_gh.assert_called_once()
+        # Verify the issue number and command are correct
+        args, kwargs = mock_gh.call_args
+        assert args[0] == Path("/mock/repo")
+        assert "issue" in args[1]
+        assert "comment" in args[1]
+        assert "123" in args[1]
+        assert "--body-file" in args[1]
+        # Verify temp file is cleaned up
+        mock_unlink.assert_called_once()
+
+        # Test with error
+        mock_gh.reset_mock()
+        mock_unlink.reset_mock()
+        mock_gh.side_effect = Exception("Comment failed")
+
+        with pytest.raises(YellhornMCPError, match="Failed to add comment to GitHub issue"):
+            await add_github_issue_comment(Path("/mock/repo"), "123", "Comment content")
+
+
+@pytest.mark.asyncio
 async def test_update_github_issue():
     """Test updating a GitHub issue."""
     with (
@@ -958,6 +1024,93 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
             args[2]
             == "# Feature Implementation Plan\n\nMock response text\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
         )
+
+
+@pytest.mark.asyncio
+async def test_process_workplan_async_empty_response(mock_request_context, mock_genai_client):
+    """Test processing workplan asynchronously with empty API response."""
+    # Set the mock client in the context
+    mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["openai_client"] = None
+
+    with (
+        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
+    ):
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+
+        # Set empty response
+        mock_response = mock_genai_client.aio.models.generate_content.return_value
+        mock_response.text = ""
+
+        # Run the function
+        await process_workplan_async(
+            Path("/mock/repo"),
+            mock_genai_client,
+            None,  # No OpenAI client
+            "gemini-model",
+            "Feature Implementation Plan",
+            "123",
+            mock_request_context,
+            detailed_description="Create a new feature to support X",
+        )
+
+        # Check that add_github_issue_comment was called instead of update_github_issue
+        mock_add_comment.assert_called_once()
+        args, kwargs = mock_add_comment.call_args
+        assert args[0] == Path("/mock/repo")
+        assert args[1] == "123"
+        assert "⚠️ AI workplan enhancement failed" in args[2]
+        assert "empty response" in args[2]
+
+        # Verify update_github_issue was not called
+        mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_workplan_async_error(mock_request_context, mock_genai_client):
+    """Test processing workplan asynchronously with API error."""
+    # Set the mock client in the context
+    mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["openai_client"] = None
+
+    with (
+        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
+    ):
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+
+        # Mock API error
+        mock_genai_client.aio.models.generate_content.side_effect = Exception("API error occurred")
+
+        # Run the function
+        await process_workplan_async(
+            Path("/mock/repo"),
+            mock_genai_client,
+            None,  # No OpenAI client
+            "gemini-model",
+            "Feature Implementation Plan",
+            "123",
+            mock_request_context,
+            detailed_description="Create a new feature to support X",
+        )
+
+        # Check that add_github_issue_comment was called instead of update_github_issue
+        mock_add_comment.assert_called_once()
+        args, kwargs = mock_add_comment.call_args
+        assert args[0] == Path("/mock/repo")
+        assert args[1] == "123"
+        assert "⚠️ AI workplan enhancement failed" in args[2]
+        assert "API error occurred" in args[2]
+
+        # Verify update_github_issue was not called
+        mock_update.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -24,7 +24,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-async def create_workplan(session: ClientSession, title: str, detailed_description: str) -> dict:
+async def create_workplan(
+    session: ClientSession, title: str, detailed_description: str, codebase_reasoning: str = "full"
+) -> dict:
     """
     Create a workplan using the Yellhorn MCP server.
     Creates a GitHub issue with a detailed implementation plan.
@@ -33,6 +35,9 @@ async def create_workplan(session: ClientSession, title: str, detailed_descripti
         session: MCP client session.
         title: Title for the GitHub issue (will be used as issue title and header).
         detailed_description: Detailed description for the workplan.
+        codebase_reasoning: Control whether AI enhancement is performed:
+            - "full": (default) Use AI to enhance the workplan with codebase context
+            - "none": Skip AI enhancement, use the provided description as-is
 
     Returns:
         Dictionary containing the GitHub issue URL and issue number.
@@ -40,7 +45,11 @@ async def create_workplan(session: ClientSession, title: str, detailed_descripti
     # Call the create_workplan tool
     result = await session.call_tool(
         "create_workplan",
-        arguments={"title": title, "detailed_description": detailed_description},
+        arguments={
+            "title": title, 
+            "detailed_description": detailed_description,
+            "codebase_reasoning": codebase_reasoning
+        },
     )
 
     # Parse the JSON response
@@ -189,15 +198,21 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 # Create workplan
                 print(f"Creating workplan with title: {args.title}")
                 print(f"Detailed description: {args.description}")
-                result = await create_workplan(session, args.title, args.description)
+                print(f"Codebase reasoning: {args.codebase_reasoning}")
+                result = await create_workplan(session, args.title, args.description, args.codebase_reasoning)
 
                 print("\nGitHub Issue Created:")
                 print(result["issue_url"])
                 print(f"Issue Number: {result['issue_number']}")
 
-                print(
-                    "\nThe workplan is being generated asynchronously and will be updated in the GitHub issue."
-                )
+                if args.codebase_reasoning == "full":
+                    print(
+                        "\nThe workplan is being generated asynchronously and will be updated in the GitHub issue."
+                    )
+                else:
+                    print(
+                        "\nThe workplan has been created with the provided description (no AI enhancement)."
+                    )
                 print("To create a worktree for this issue, run:")
                 print(
                     f"python -m examples.client_example worktree --issue-number {result['issue_number']}"
@@ -278,6 +293,14 @@ def main():
         dest="description",
         required=True,
         help="Detailed description for the workplan",
+    )
+    plan_parser.add_argument(
+        "--codebase-reasoning",
+        dest="codebase_reasoning",
+        required=False,
+        default="full",
+        choices=["full", "none"],
+        help="Control AI enhancement: 'full' (default) uses AI, 'none' skips AI enhancement",
     )
 
     # Create worktree command

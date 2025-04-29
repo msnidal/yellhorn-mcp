@@ -96,6 +96,9 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 
 - `title`: Title for the GitHub issue (will be used as issue title and header)
 - `detailed_description`: Detailed description for the workplan
+- `codebase_reasoning`: (optional) Control whether AI enhancement is performed:
+  - `"full"`: (default) Use AI to enhance the workplan with codebase context
+  - `"none"`: Skip AI enhancement, use the provided description as-is
 
 **Output**:
 
