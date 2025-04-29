@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-04-30
+
 ### Added
 - Added new "lsp" codebase reasoning mode that only extracts function signatures and docstrings, resulting in lighter prompts
 - Added directory tree visualization to all prompt formats for better codebase structure understanding
@@ -18,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Go struct field extraction to LSP mode for better API representation
 - Added debug mode to create_workplan and judge_workplan tools to view the full prompt in a GitHub comment
 - Added type annotations (parameter and return types) to function signatures in Python and Go LSP mode
+- Added Python Enum extraction in LSP mode
+- Added improved Go receiver methods extraction with support for pointers and generics
+- Added comprehensive E2E tests for LSP functionality
 - Updated CLI, documentation, and example client to support the new mode
 
 ### Changed
