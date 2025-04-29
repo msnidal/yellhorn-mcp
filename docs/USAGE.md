@@ -190,7 +190,8 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 - `title`: Title for the GitHub issue (will be used as issue title and header)
 - `detailed_description`: Detailed description for the workplan
 - `codebase_reasoning`: (optional) Control whether AI enhancement is performed:
-  - `"full"`: (default) Use AI to enhance the workplan with codebase context
+  - `"full"`: (default) Use AI to enhance the workplan with full codebase context
+  - `"lsp"`: Use AI with lightweight codebase context (only function/method signatures)
   - `"none"`: Skip AI enhancement, use the provided description as-is
 
 **Output**:
@@ -225,6 +226,10 @@ Triggers an asynchronous code judgement comparing two git refs (branches or comm
 - `issue_number`: The GitHub issue number for the workplan.
 - `base_ref`: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
 - `head_ref`: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
+- `codebase_reasoning`: (optional) Control which codebase context is provided:
+  - `"full"`: (default) Use full codebase context
+  - `"lsp"`: Use lighter codebase context (only function signatures, plus full diff files)
+  - `"none"`: Skip codebase context completely for fastest processing
 
 **Output**:
 
@@ -287,10 +292,15 @@ curl http://127.0.0.1:8000/openapi.json
 # List available tools
 curl http://127.0.0.1:8000/tools
 
-# Call a tool (create_workplan)
+# Call a tool (create_workplan with full codebase context)
 curl -X POST http://127.0.0.1:8000/tools/create_workplan \
   -H "Content-Type: application/json" \
   -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing", "codebase_reasoning": "full"}'
+
+# Call a tool (create_workplan with lightweight LSP context - function signatures only)
+curl -X POST http://127.0.0.1:8000/tools/create_workplan \
+  -H "Content-Type: application/json" \
+  -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing", "codebase_reasoning": "lsp"}'
 
 # Call a tool (create_workplan without AI enhancement)
 curl -X POST http://127.0.0.1:8000/tools/create_workplan \
@@ -303,10 +313,15 @@ curl -X POST http://127.0.0.1:8000/tools/get_workplan \
   -H "Content-Type: application/json" \
   -d '{"issue_number": "123"}'
 
-# Call a tool (judge_workplan)
+# Call a tool (judge_workplan with full codebase context - default)
 curl -X POST http://127.0.0.1:8000/tools/judge_workplan \
   -H "Content-Type: application/json" \
   -d '{"issue_number": "456", "base_ref": "main", "head_ref": "feature-branch"}'
+  
+# Call a tool (judge_workplan with lightweight LSP context)
+curl -X POST http://127.0.0.1:8000/tools/judge_workplan \
+  -H "Content-Type: application/json" \
+  -d '{"issue_number": "456", "base_ref": "main", "head_ref": "feature-branch", "codebase_reasoning": "lsp"}'
 ```
 
 ### Example Client
@@ -317,8 +332,11 @@ The package includes an example client that demonstrates how to interact with th
 # List available tools
 python -m examples.client_example list
 
-# Generate a workplan with AI enhancement (default)
+# Generate a workplan with full codebase context (default)
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing"
+
+# Generate a workplan with lightweight LSP context (function signatures only)
+python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing" --codebase-reasoning lsp
 
 # Generate a basic workplan without AI enhancement
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing" --codebase-reasoning none
@@ -327,8 +345,11 @@ python -m examples.client_example plan --title "User Authentication System" --de
 # Get workplan
 python -m examples.client_example getplan --issue-number "123"
 
-# Judge work
+# Judge work with full codebase context (default)
 python -m examples.client_example judge --issue-number "456" --base-ref "main" --head-ref "feature-branch"
+
+# Judge work with lightweight LSP context (function signatures + full diff files)
+python -m examples.client_example judge --issue-number "456" --base-ref "main" --head-ref "feature-branch" --codebase-reasoning lsp
 ```
 
 The example client uses the MCP client API to interact with the server through stdio transport, which is the same approach Claude Code uses.

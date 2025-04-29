@@ -39,6 +39,7 @@ def test_cli_missing_gemini_api_key():
         args.repo_path = "/mock/repo"
         args.host = "127.0.0.1"
         args.port = 8000
+        args.codebase_reasoning = "full"
         mock_parse_args.return_value = args
 
         # Simulate missing API key
@@ -69,6 +70,7 @@ def test_cli_missing_openai_api_key():
         args.repo_path = "/mock/repo"
         args.host = "127.0.0.1"
         args.port = 8000
+        args.codebase_reasoning = "full"
         mock_parse_args.return_value = args
 
         # Simulate missing API key
@@ -101,6 +103,7 @@ def test_main_invalid_repo_path():
         args.repo_path = "/nonexistent/path"
         args.host = "127.0.0.1"
         args.port = 8000
+        args.codebase_reasoning = "full"
         mock_parse_args.return_value = args
 
         main()
@@ -134,6 +137,7 @@ def test_main_not_git_repo():
         args.repo_path = "/mock/path"
         args.host = "127.0.0.1"
         args.port = 8000
+        args.codebase_reasoning = "full"
         mock_parse_args.return_value = args
 
         main()

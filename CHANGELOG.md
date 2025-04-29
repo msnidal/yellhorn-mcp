@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Added new "lsp" codebase reasoning mode that only extracts function signatures and docstrings, resulting in lighter prompts
+- Added jedi dependency for robust Python code analysis with graceful fallback
+- Added full content extraction for files affected by diffs in judge_workplan
+- Updated CLI, documentation, and example client to support the new mode
+
 ## [0.3.3] - 2025-04-28
 
 ### Removed

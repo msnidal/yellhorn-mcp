@@ -363,7 +363,9 @@ async def run_git_command(repo_path: Path, command: list[str]) -> str:
         raise YellhornMCPError("Git executable not found. Please ensure Git is installed.")
 
 
-async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
+async def get_codebase_snapshot(
+    repo_path: Path, _mode: str = "full"
+) -> tuple[list[str], dict[str, str]]:
     """
     Get a snapshot of the codebase, including file list and contents.
 
@@ -373,6 +375,9 @@ async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, s
 
     Args:
         repo_path: Path to the repository.
+        _mode: Internal parameter to control the function mode:
+               - "full": (default) Return paths and full file contents
+               - "paths": Return only paths without reading file contents
 
     Returns:
         Tuple of (file list, file contents dictionary).
@@ -426,6 +431,10 @@ async def get_codebase_snapshot(repo_path: Path) -> tuple[list[str], dict[str, s
             if not is_ignored(f):
                 filtered_paths.append(f)
         file_paths = filtered_paths
+
+    # If only paths are requested, return early
+    if _mode == "paths":
+        return file_paths, {}
 
     # Read file contents
     file_contents = {}
@@ -846,8 +855,16 @@ async def process_workplan_async(
         detailed_description: Detailed description for the workplan.
     """
     try:
-        # Get codebase snapshot
-        file_paths, file_contents = await get_codebase_snapshot(repo_path)
+        # Get codebase snapshot based on reasoning mode
+        codebase_reasoning = ctx.request_context.lifespan_context.get("codebase_reasoning", "full")
+
+        if codebase_reasoning == "lsp":
+            from yellhorn_mcp.lsp_utils import get_lsp_snapshot
+
+            file_paths, file_contents = await get_lsp_snapshot(repo_path)
+        else:
+            file_paths, file_contents = await get_codebase_snapshot(repo_path)
+
         codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct prompt
@@ -1041,7 +1058,7 @@ def is_git_repository(path: Path) -> bool:
 
 @mcp.tool(
     name="create_workplan",
-    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full' or 'none').",
+    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full', 'lsp', or 'none').",
 )
 async def create_workplan(
     title: str,
@@ -1058,7 +1075,8 @@ async def create_workplan(
         detailed_description: Detailed description for the workplan.
         ctx: Server context with repository path and model.
         codebase_reasoning: Control whether AI enhancement is performed:
-            - "full": (default) Use AI to enhance the workplan with codebase context
+            - "full": (default) Use AI to enhance the workplan with full codebase context
+            - "lsp": Use AI with lighter codebase context (only function/method signatures)
             - "none": Skip AI enhancement, use the provided description as-is
 
     Returns:
@@ -1085,13 +1103,16 @@ async def create_workplan(
             )
         elif codebase_reasoning == "full":
             initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
+        elif codebase_reasoning == "lsp":
+            initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with lightweight codebase context (function signatures), please wait...*"
         else:
-            # If codebase_reasoning is neither "full" nor "none", default to "full" with a log message
+            # If codebase_reasoning is not recognized, default to "full" with a log message
             await ctx.log(
                 level="info",
                 message=f"Unrecognized codebase_reasoning value '{codebase_reasoning}', defaulting to 'full'.",
             )
             initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
+            codebase_reasoning = "full"  # Reset to full as the default
 
         # Create a GitHub issue with the yellhorn-mcp label
         issue_url = await run_github_command(
@@ -1115,12 +1136,14 @@ async def create_workplan(
         )
         issue_number = issue_url.split("/")[-1]
 
-        # Only start async processing if full reasoning is requested
+        # Only start async processing if AI enhancement is requested
         if codebase_reasoning != "none":
             await ctx.log(
                 level="info",
-                message=f"Initiating AI workplan enhancement for issue #{issue_number}.",
+                message=f"Initiating AI workplan enhancement for issue #{issue_number} with mode '{codebase_reasoning}'.",
             )
+            # Store the codebase_reasoning mode in the context for process_workplan_async
+            ctx.request_context.lifespan_context["codebase_reasoning"] = codebase_reasoning
             asyncio.create_task(
                 process_workplan_async(
                     repo_path,
@@ -1227,8 +1250,25 @@ async def process_judgement_async(
         The judgement content and URL of the created sub-issue.
     """
     try:
-        # Get codebase snapshot for better context
-        file_paths, file_contents = await get_codebase_snapshot(repo_path)
+        # Get codebase snapshot based on reasoning mode
+        codebase_reasoning = ctx.request_context.lifespan_context.get("codebase_reasoning", "full")
+
+        if codebase_reasoning == "lsp":
+            from yellhorn_mcp.lsp_utils import (
+                get_lsp_snapshot,
+                update_snapshot_with_full_diff_files,
+            )
+
+            # Get LSP snapshot (signatures only)
+            file_paths, file_contents = await get_lsp_snapshot(repo_path)
+            # Then update with full contents of diff-touched files
+            file_paths, file_contents = await update_snapshot_with_full_diff_files(
+                repo_path, base_ref, head_ref, file_paths, file_contents
+            )
+        else:
+            # Use full snapshot
+            file_paths, file_contents = await get_codebase_snapshot(repo_path)
+
         codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct a more structured prompt
@@ -1372,6 +1412,7 @@ async def judge_workplan(
     issue_number: str,
     base_ref: str = "main",
     head_ref: str = "HEAD",
+    codebase_reasoning: str = "full",
 ) -> str:
     """
     Trigger an asynchronous code judgement comparing two git refs against a workplan.
@@ -1385,6 +1426,10 @@ async def judge_workplan(
         issue_number: The GitHub issue number for the workplan.
         base_ref: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
+        codebase_reasoning: Control which codebase context is provided:
+            - "full": (default) Use full codebase context
+            - "lsp": Use lighter codebase context (only function/method signatures, plus full diff files)
+            - "none": Skip codebase context completely for fastest processing
 
     Returns:
         A confirmation message that the judgement task has been initiated.
@@ -1417,6 +1462,27 @@ async def judge_workplan(
         gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
         openai_client = ctx.request_context.lifespan_context.get("openai_client")
         model = ctx.request_context.lifespan_context["model"]
+
+        # Validate codebase_reasoning
+        if codebase_reasoning not in ["full", "lsp", "none"]:
+            await ctx.log(
+                level="info",
+                message=f"Unrecognized codebase_reasoning value '{codebase_reasoning}', defaulting to 'full'.",
+            )
+            codebase_reasoning = "full"
+
+        # Store codebase_reasoning in context
+        ctx.request_context.lifespan_context["codebase_reasoning"] = codebase_reasoning
+
+        reasoning_mode_desc = {
+            "full": "full codebase",
+            "lsp": "function signatures",
+            "none": "no codebase",
+        }.get(codebase_reasoning, "full codebase")
+
+        await ctx.log(
+            level="info", message=f"Starting judgement with {reasoning_mode_desc} context"
+        )
 
         asyncio.create_task(
             process_judgement_async(

@@ -21,6 +21,7 @@ dependencies = [
     "aiohttp~=3.11.14",
     "pydantic~=2.11.1",
     "openai~=1.23.6",
+    "jedi~=0.19",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,7 @@ dev = [
     "pytest-asyncio",
     "httpx",
     "pytest-cov",
+    "jedi~=0.19",
 ]
 
 [project.scripts]

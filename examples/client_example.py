@@ -85,6 +85,7 @@ async def judge_workplan(
     issue_number: str,
     base_ref: str = "main",
     head_ref: str = "HEAD",
+    codebase_reasoning: str = "full",
 ) -> str:
     """
     Trigger a judgement comparing two git refs against the original workplan.
@@ -97,12 +98,21 @@ async def judge_workplan(
         issue_number: The GitHub issue number for the workplan.
         base_ref: Base Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'main'.
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison. Defaults to 'HEAD'.
+        codebase_reasoning: Control which codebase context is provided:
+            - "full": (default) Use full codebase context
+            - "lsp": Use lighter codebase context (only function/method signatures, plus full diff files)
+            - "none": Skip codebase context completely for fastest processing
 
     Returns:
         A confirmation message that the judgement task has been initiated.
     """
     # Prepare arguments
-    arguments = {"issue_number": issue_number, "base_ref": base_ref, "head_ref": head_ref}
+    arguments = {
+        "issue_number": issue_number, 
+        "base_ref": base_ref, 
+        "head_ref": head_ref,
+        "codebase_reasoning": codebase_reasoning
+    }
 
     # Call the judge_workplan tool
     result = await session.call_tool("judge_workplan", arguments=arguments)
@@ -214,7 +224,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
 
                 try:
                     result_str = await judge_workplan(
-                        session, args.issue_number, args.base_ref, args.head_ref
+                        session, args.issue_number, args.base_ref, args.head_ref, args.codebase_reasoning
                     )
                     print("\nJudgement Task:")
                     print(result_str)
@@ -255,8 +265,8 @@ def main():
         dest="codebase_reasoning",
         required=False,
         default="full",
-        choices=["full", "none"],
-        help="Control AI enhancement: 'full' (default) uses AI, 'none' skips AI enhancement",
+        choices=["full", "lsp", "none"],
+        help="Control AI enhancement: 'full' (default) uses full code, 'lsp' uses function signatures only, 'none' skips AI enhancement",
     )
 
 
@@ -295,6 +305,14 @@ def main():
         required=False,
         default="HEAD",
         help="Head Git ref (commit SHA, branch name, tag) for comparison (default: 'HEAD')",
+    )
+    judge_parser.add_argument(
+        "--codebase-reasoning",
+        dest="codebase_reasoning",
+        required=False,
+        default="full",
+        choices=["full", "lsp", "none"],
+        help="Control codebase context: 'full' (default) uses full code, 'lsp' uses function signatures, 'none' skips codebase",
     )
 
     args = parser.parse_args()
