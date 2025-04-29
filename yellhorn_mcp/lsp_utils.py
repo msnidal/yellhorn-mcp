@@ -62,28 +62,85 @@ def _sig_from_ast(node: ast.AST) -> str | None:
         # Handle function arguments
         args = []
 
-        # Add regular args
+        # Add regular args with type annotations if available
         for arg in node.args.args:
-            args.append(arg.arg)
+            arg_name = arg.arg
+            # Get annotation if present
+            annotation = getattr(arg, "annotation", None)
+            if annotation:
+                try:
+                    # Python 3.9+ supports ast.unparse
+                    if hasattr(ast, "unparse"):
+                        annotation_str = ast.unparse(annotation)
+                    else:
+                        # Fallback for older Python versions
+                        annotation_str = getattr(annotation, "id", "Any")
+                    arg_name = f"{arg.arg}: {annotation_str}"
+                except Exception:
+                    # If we can't unparse, just use the name
+                    pass
+            args.append(arg_name)
 
         # Add *args if present
         if node.args.vararg:
-            args.append(f"*{node.args.vararg.arg}")
+            vararg_name = node.args.vararg.arg
+            # Add type annotation for *args if present
+            annotation = getattr(node.args.vararg, "annotation", None)
+            if annotation:
+                try:
+                    if hasattr(ast, "unparse"):
+                        annotation_str = ast.unparse(annotation)
+                        vararg_name = f"{vararg_name}: {annotation_str}"
+                except Exception:
+                    pass
+            args.append(f"*{vararg_name}")
 
-        # Add keyword-only args
+        # Add keyword-only args with type annotations if available
         if node.args.kwonlyargs:
             if not node.args.vararg:
                 args.append("*")
             for kwarg in node.args.kwonlyargs:
-                args.append(kwarg.arg)
+                kwarg_name = kwarg.arg
+                # Get annotation if present
+                annotation = getattr(kwarg, "annotation", None)
+                if annotation:
+                    try:
+                        if hasattr(ast, "unparse"):
+                            annotation_str = ast.unparse(annotation)
+                            kwarg_name = f"{kwarg.arg}: {annotation_str}"
+                    except Exception:
+                        pass
+                args.append(kwarg_name)
 
         # Add **kwargs if present
         if node.args.kwarg:
-            args.append(f"**{node.args.kwarg.arg}")
+            kwargs_name = node.args.kwarg.arg
+            # Add type annotation for **kwargs if present
+            annotation = getattr(node.args.kwarg, "annotation", None)
+            if annotation:
+                try:
+                    if hasattr(ast, "unparse"):
+                        annotation_str = ast.unparse(annotation)
+                        kwargs_name = f"{kwargs_name}: {annotation_str}"
+                except Exception:
+                    pass
+            args.append(f"**{kwargs_name}")
 
         # Format as regular or async function
         prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
-        return f"{prefix} {node.name}({', '.join(args)})"
+        sig = f"{prefix} {node.name}({', '.join(args)})"
+
+        # Add return type if available
+        returns = getattr(node, "returns", None)
+        if returns:
+            try:
+                if hasattr(ast, "unparse"):
+                    return_type = ast.unparse(returns)
+                    sig = f"{sig} -> {return_type}"
+            except Exception:
+                pass
+
+        return sig
 
     elif isinstance(node, ast.ClassDef):
         # Get base classes if any
@@ -263,9 +320,11 @@ def extract_go_api(file_path: Path) -> list[str]:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Find exported symbols (capitalized names)
-        # Matches: func Name, type Name, type Name interface, type Name struct
-        GO_SIG_RE = re.compile(r"^(func|type)\s+([A-Z]\w*)", re.MULTILINE)
+        # Enhanced regex for functions to capture parameters and return types
+        FUNC_SIG_RE = re.compile(r"^func\s+([A-Z]\w*)\s*\(([^)]*)\)\s*([^{\n]*)", re.MULTILINE)
+
+        # Find exported type definitions (interfaces, structs)
+        TYPE_RE = re.compile(r"^type\s+([A-Z]\w*)\s+([^\s{]+)", re.MULTILINE)
 
         # Find interface definitions
         INTERFACE_RE = re.compile(r"type\s+([A-Z]\w*)\s+interface", re.MULTILINE)
@@ -275,19 +334,30 @@ def extract_go_api(file_path: Path) -> list[str]:
             r"type\s+([A-Z]\w*)\s+struct\s*\{([^}]*)\}", re.MULTILINE | re.DOTALL
         )
 
-        # Regular symbols
-        matches = GO_SIG_RE.findall(content)
         sigs = []
 
-        for kind, name in matches:
-            if kind == "func":
-                sigs.append(f"{kind} {name}")
-            # type will be handled by STRUCT_RE if it's a struct
+        # Extract functions with parameters and return types
+        func_matches = FUNC_SIG_RE.findall(content)
+        for name, params, returns in func_matches:
+            # Clean up parameters and returns
+            params = params.strip()
+            returns = returns.strip()
+
+            if returns:
+                sigs.append(f"func {name}({params}) {returns}")
+            else:
+                sigs.append(f"func {name}({params})")
+
+        # Extract types that aren't structs or interfaces
+        type_matches = TYPE_RE.findall(content)
+        for name, type_def in type_matches:
+            if type_def != "struct" and type_def != "interface":
+                sigs.append(f"type {name} {type_def}")
 
         # Extract interfaces
         interface_matches = INTERFACE_RE.findall(content)
         for name in interface_matches:
-            sigs.append(f"type {name}")
+            sigs.append(f"type {name} interface")
 
         # Extract structs and their fields
         struct_matches = STRUCT_RE.findall(content)
@@ -315,6 +385,20 @@ def extract_go_api(file_path: Path) -> list[str]:
         return []
 
 
+def _fence(lang: str, text: str) -> str:
+    """
+    Add code fences around text with specified language.
+
+    Args:
+        lang: The language for syntax highlighting.
+        text: The text content to fence.
+
+    Returns:
+        Text wrapped in code fences with language specified.
+    """
+    return f"```{lang}\n{text}\n```"
+
+
 async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
     """
     Get an LSP-style snapshot of the codebase, extracting API information.
@@ -329,7 +413,7 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
 
     Returns:
         Tuple of (file list, file contents dictionary), where contents contain
-        API signatures, class attributes, and docstrings
+        API signatures, class attributes, and docstrings as plain text (no code fences)
     """
     from yellhorn_mcp.server import get_codebase_snapshot
 
@@ -353,7 +437,7 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
 
         sigs = extract_python_api(full_path)
         if sigs:
-            contents[file_path] = "```py\n" + "\n".join(sigs) + "\n```"
+            contents[file_path] = "\n".join(sigs)
 
     # Process Go files
     for file_path in go_files:
@@ -363,7 +447,7 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
 
         sigs = extract_go_api(full_path)
         if sigs:
-            contents[file_path] = "```go\n" + "\n".join(sigs) + "\n```"
+            contents[file_path] = "\n".join(sigs)
 
     return file_paths, contents
 
@@ -419,12 +503,8 @@ async def update_snapshot_with_full_diff_files(
                 with open(full_path, "r", encoding="utf-8") as f:
                     content = f.read()
 
-                # Determine language for syntax highlighting
-                extension = Path(file_path).suffix.lstrip(".")
-                lang = extension if extension else "text"
-
-                # Add or replace with full content
-                file_contents[file_path] = f"```{lang}\n{content}\n```"
+                # Add or replace with raw content (no fences) - fences will be added by format_codebase_for_prompt
+                file_contents[file_path] = content
             except UnicodeDecodeError:
                 # Skip binary files
                 continue

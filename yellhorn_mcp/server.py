@@ -469,15 +469,12 @@ async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[
         file_contents: Dictionary mapping file paths to contents.
 
     Returns:
-        Formatted string for prompt inclusion.
+        Formatted string with codebase tree and file contents.
     """
     from yellhorn_mcp.tree_utils import build_tree
 
     # Generate tree visualization
     tree_view = build_tree(file_paths)
-
-    # Generate file list as plain text (keeping for backward compatibility)
-    codebase_structure = "\n".join(file_paths)
 
     # Format file contents
     contents_section = []
@@ -493,10 +490,6 @@ async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[
     return f"""<codebase_tree>
 {tree_view}
 </codebase_tree>
-
-<codebase_structure>
-{codebase_structure}
-</codebase_structure>
 
 <full_codebase_contents>
 {full_codebase_contents}
@@ -991,7 +984,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             level="info",
             message=f"Successfully updated GitHub issue #{issue_number} with generated workplan and metrics",
         )
-        
+
         # If debug mode is enabled, add a comment with the full prompt
         if debug:
             debug_comment = f"""
@@ -1427,12 +1420,12 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 judgement_with_metadata_and_metrics,
                 ["yellhorn-mcp"],
             )
-            
+
             # If debug mode is enabled, add a comment with the full prompt
             if debug:
                 # Extract the sub-issue number
                 subissue_number = subissue_url.split("/")[-1]
-                
+
                 debug_comment = f"""
 ## Debug Information - Prompt Used for Judgement
 

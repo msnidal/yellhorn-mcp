@@ -17,7 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Python class attribute extraction to LSP mode for regular classes, dataclasses, and Pydantic models
 - Added Go struct field extraction to LSP mode for better API representation
 - Added debug mode to create_workplan and judge_workplan tools to view the full prompt in a GitHub comment
+- Added type annotations (parameter and return types) to function signatures in Python and Go LSP mode
 - Updated CLI, documentation, and example client to support the new mode
+
+### Changed
+- Removed redundant `<codebase_structure>` section from prompt format to improve conciseness
+- Fixed code fence handling in LSP mode to prevent nested code fences (no more ```py inside another ```py)
 
 ## [0.3.3] - 2025-04-28
 

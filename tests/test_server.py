@@ -389,15 +389,15 @@ async def test_format_codebase_for_prompt():
         assert "<codebase_tree>" in result
         assert ".\n\n├── file1.py\n└── file2.js" in result
 
-        # Check if file paths and contents are included
-        assert "<codebase_structure>" in result
-        assert "file1.py" in result
-        assert "file2.js" in result
+        # Check if file paths and contents are included in full_codebase_contents
         assert "<full_codebase_contents>" in result
         assert "def hello(): pass" in result
         assert "function hello() {}" in result
         assert "```py" in result
         assert "```js" in result
+
+        # Verify codebase_structure section is NOT included
+        assert "<codebase_structure>" not in result
 
 
 @pytest.mark.asyncio

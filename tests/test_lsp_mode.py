@@ -17,23 +17,35 @@ from yellhorn_mcp.lsp_utils import (
 
 def test_sig_from_ast_function():
     """Test extracting signatures from AST function nodes."""
-    # Simple function
-    source = "def hello(name): pass"
-    tree = ast.parse(source)
-    node = tree.body[0]
-    assert _sig_from_ast(node) == "def hello(name)"
+    # Mock ast.unparse for environments that might not have it
+    with patch("ast.unparse", side_effect=lambda x: str(getattr(x, "id", "Any"))):
+        # Simple function
+        source = "def hello(name): pass"
+        tree = ast.parse(source)
+        node = tree.body[0]
+        assert _sig_from_ast(node) == "def hello(name)"
 
-    # Function with multiple args and default values
-    source = "def complex_func(a, b=2, *args, c, **kwargs): pass"
-    tree = ast.parse(source)
-    node = tree.body[0]
-    assert _sig_from_ast(node) == "def complex_func(a, b, *args, c, **kwargs)"
+        # Function with multiple args and default values
+        source = "def complex_func(a, b=2, *args, c, **kwargs): pass"
+        tree = ast.parse(source)
+        node = tree.body[0]
+        assert _sig_from_ast(node) == "def complex_func(a, b, *args, c, **kwargs)"
 
-    # Async function
-    source = "async def fetch(url): pass"
-    tree = ast.parse(source)
-    node = tree.body[0]
-    assert _sig_from_ast(node) == "async def fetch(url)"
+        # Async function
+        source = "async def fetch(url): pass"
+        tree = ast.parse(source)
+        node = tree.body[0]
+        assert _sig_from_ast(node) == "async def fetch(url)"
+
+        # Function with type annotations
+        source = "def typed_func(x: int, y: str) -> bool: pass"
+        tree = ast.parse(source)
+        node = tree.body[0]
+        result = _sig_from_ast(node)
+        assert "def typed_func(" in result
+        assert "x: int" in result
+        assert "y: str" in result
+        assert "-> bool" in result
 
 
 def test_sig_from_ast_class():
@@ -102,22 +114,24 @@ class PublicClass:
             signatures = extract_python_api(Path("/mock/file.py"))
 
             # Check extracted signatures - use specific indices and exact matches
-            assert len(signatures) == 6  # public_func, PublicClass, 3 attrs, and PublicClass.public_method
+            assert (
+                len(signatures) == 6
+            )  # public_func, PublicClass, 3 attrs, and PublicClass.public_method
             assert (
                 signatures[0]
                 == "def public_func(arg1, arg2)  # This is a public function docstring."
             )
             assert signatures[1] == "class PublicClass  # Class docstring."
-            
+
             # Check class attributes
             assert "    name: str" in signatures
             assert "    age: int" in signatures
             assert "    is_active" in signatures
-            
+
             # Check method
             assert any(
-                "    def PublicClass.public_method(self)  # Public method docstring."
-                == sig for sig in signatures
+                "    def PublicClass.public_method(self)  # Public method docstring." == sig
+                for sig in signatures
             )
 
             # Check private items are excluded
@@ -173,20 +187,20 @@ async def test_get_lsp_snapshot():
             # Mock Python signature extraction
             mock_extract_py.side_effect = [
                 [
-                    "def func1()", 
+                    "def func1()",
                     "class User",
                     "    name: str",
                     "    age: int",
-                    "    def User.get_name(self)"
+                    "    def User.get_name(self)",
                 ],  # signatures for file1.py
                 ["def func2()"],  # signatures for file2.py
             ]
-            
+
             with patch("yellhorn_mcp.lsp_utils.extract_go_api") as mock_extract_go:
                 # Mock Go signature extraction
                 mock_extract_go.return_value = [
                     "func Handler",
-                    "struct Person { Name string; Age int }"
+                    "struct Person { Name string; Age int }",
                 ]
 
                 with patch("pathlib.Path.is_file", return_value=True):
@@ -204,25 +218,25 @@ async def test_get_lsp_snapshot():
                     assert "file3.go" in file_contents
                     assert "other.txt" not in file_contents
 
-                    # Check formatted content with class attributes
+                    # Check content is returned as plain text (no code fences)
                     assert file_contents["file1.py"] == (
-                        "```py\n"
                         "def func1()\n"
                         "class User\n"
                         "    name: str\n"
                         "    age: int\n"
-                        "    def User.get_name(self)\n"
-                        "```"
+                        "    def User.get_name(self)"
                     )
-                    assert file_contents["file2.py"] == "```py\ndef func2()\n```"
-                    
-                    # Check Go content with struct fields
+                    assert file_contents["file2.py"] == "def func2()"
+
+                    # Check Go content with struct fields (no code fences)
                     assert file_contents["file3.go"] == (
-                        "```go\n"
-                        "func Handler\n"
-                        "struct Person { Name string; Age int }\n"
-                        "```"
+                        "func Handler\n" "struct Person { Name string; Age int }"
                     )
+
+                    # Ensure no code fences are present
+                    assert "```" not in file_contents["file1.py"]
+                    assert "```" not in file_contents["file2.py"]
+                    assert "```" not in file_contents["file3.go"]
 
 
 @pytest.mark.asyncio
@@ -230,19 +244,12 @@ async def test_update_snapshot_with_full_diff_files():
     """Test updating an LSP snapshot with full contents of files in a diff."""
     # Clean test that patches the actual function to avoid complex mocking issues
 
-    # Initial LSP snapshot with signatures only
+    # Initial LSP snapshot with signatures only (plain text, no fences)
     file_paths = ["file1.py", "file2.py", "file3.py"]
     file_contents = {
-        "file1.py": "```py\ndef hello()\n```",
-        "file2.py": "```py\ndef goodbye()\n```",
-        "file3.py": "```py\ndef unchanged()\n```",
-    }
-
-    # Directly inject our expected result into a mock of the function
-    expected_contents = {
-        "file1.py": "```py\nfull file1 content\n```",
-        "file2.py": "```py\nfull file2 content\n```",
-        "file3.py": "```py\ndef unchanged()\n```",  # Unchanged
+        "file1.py": "def hello()",
+        "file2.py": "def goodbye()",
+        "file3.py": "def unchanged()",
     }
 
     # Test simplified version - just check that it doesn't crash
@@ -252,13 +259,27 @@ async def test_update_snapshot_with_full_diff_files():
 
         # Return file_paths and file_contents directly to avoid file I/O
         with patch("pathlib.Path.is_file", return_value=True):
-            # When we update files, just return an empty string for simplicity
+            # When we update files, return actual file content
             with patch("builtins.open", MagicMock()) as mock_open:
                 mock_file = MagicMock()
-                mock_file.__enter__.return_value.read.return_value = "file content"
+                # Use a more reliable approach with a dictionary for file content
+                mock_file_content = {
+                    "file1.py": "full file1 content",
+                    "file2.py": "full file2 content",
+                }
+
+                def mock_read_side_effect(*args, **kwargs):
+                    # Get the file path from the open call
+                    file_path = mock_open.call_args[0][0]
+                    # Extract just the filename
+                    filename = Path(file_path).name
+                    # Return the content for this file
+                    return mock_file_content.get(filename, "default content")
+
+                mock_file.__enter__.return_value.read.side_effect = mock_read_side_effect
                 mock_open.return_value = mock_file
 
-                # Just test that the function runs without error
+                # Run the function
                 result_paths, result_contents = await update_snapshot_with_full_diff_files(
                     Path("/mock/repo"), "main", "feature", file_paths, file_contents.copy()
                 )
@@ -269,6 +290,16 @@ async def test_update_snapshot_with_full_diff_files():
 
                 # Verify file_contents still contains all the original files
                 assert set(result_contents.keys()) == set(file_contents.keys())
+
+                # Files in the diff should have been updated with full content (raw, no fences)
+                assert result_contents["file1.py"] == "full file1 content"
+                assert result_contents["file2.py"] == "full file2 content"
+                # File not in the diff should remain unchanged
+                assert result_contents["file3.py"] == "def unchanged()"
+
+                # Verify no code fences are present in the updated content
+                assert "```" not in result_contents["file1.py"]
+                assert "```" not in result_contents["file2.py"]
 
 
 @pytest.mark.asyncio

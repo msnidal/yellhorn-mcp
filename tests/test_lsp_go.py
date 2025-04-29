@@ -58,14 +58,21 @@ def test_extract_go_api_regex(sample_go_content):
         with patch("shutil.which", return_value=None):
             result = extract_go_api(Path("fake/path/file.go"))
 
-    # Should only include exported symbols (capitalized)
-    assert "func PublicFunction" in result
-    
+    # Should extract function with parameters and return type
+    found_public_function = False
+    for item in result:
+        if item.startswith("func PublicFunction"):
+            found_public_function = True
+            assert "name string" in item
+            assert "string" in item  # Return type should be captured
+
+    assert found_public_function, "PublicFunction with parameters and return type not found"
+
     # Should include struct with fields
     assert any("struct User" in item for item in result)
     assert any("Name" in item and "string" in item for item in result)
     assert any("Age" in item and "int" in item for item in result)
-    
+
     # For interface, we only extract the type name, not the methods
     assert any("type Logger" in item for item in result)
 
@@ -102,12 +109,12 @@ def test_extract_go_api_gopls():
 
     # Should include exported symbols (capitalized) with kind
     assert "function PublicFunction" in result
-    
+
     # Should include struct with fields
     assert any("struct User {" in item for item in result)
     assert any("Name string" in item for item in result)
     assert any("Age int" in item for item in result)
-    
+
     assert "interface Logger" in result
 
     # Should not include private symbols
@@ -134,7 +141,7 @@ func ExportedFunction() {}
                 result = extract_go_api(Path("fake/path/file.go"))
 
     # Should fall back to regex extraction
-    assert "func ExportedFunction" in result
+    assert "func ExportedFunction()" in result
     assert len(result) == 1
 
 
