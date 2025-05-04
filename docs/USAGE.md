@@ -7,6 +7,7 @@ Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to
 1. **Create workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
 2. **Get workplan**: Retrieves the workplan content from a GitHub issue.
 3. **Judge workplan**: Triggers an asynchronous code judgement for a Pull Request against its original workplan issue.
+4. **Curate ignore file**: Analyzes your codebase structure to build an optimized .yellhornignore file with blacklist/whitelist rules.
 
 ## Installation
 
@@ -31,17 +32,22 @@ The server requires the following environment variables:
   - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
   - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
 
-### Excludes with .yellhornignore
+### File Filtering with .yellhornignore
 
-You can create a `.yellhornignore` file in your repository root to exclude specific files from being included in the AI context. This works similar to `.gitignore` but is specific to the Yellhorn MCP server:
+You can create a `.yellhornignore` file in your repository root to control which files are included in the AI context. This works similar to `.gitignore` but is specific to the Yellhorn MCP server:
 
 ```
 # Example .yellhornignore file
+# Blacklist patterns
 *.log
 node_modules/
 dist/
 *.min.js
 credentials/
+
+# Whitelist patterns (exceptions to blacklist)
+!important.log
+!node_modules/important-package.json
 ```
 
 The `.yellhornignore` file uses the same pattern syntax as `.gitignore`:
@@ -51,12 +57,20 @@ The `.yellhornignore` file uses the same pattern syntax as `.gitignore`:
 - Patterns use shell-style wildcards (e.g., `*.js`, `node_modules/`)
 - Patterns ending with `/` will match directories
 - Patterns containing `/` are relative to the repository root
+- Patterns starting with `!` are whitelist patterns (exceptions to ignores)
+
+**Blacklist and Whitelist Processing:**
+- Standard patterns (without `!`) will ignore matching files
+- Patterns starting with `!` will whitelist matching files, even if they match an ignore pattern
+- Whitelist patterns are checked first, so they take precedence over blacklist patterns
+- This allows you to have broad blacklist patterns with specific exceptions
 
 This feature is useful for:
 
 - Excluding large folders that wouldn't provide useful context (e.g., `node_modules/`)
 - Excluding sensitive or credential-related files
 - Reducing noise in the AI's context to improve focus on relevant code
+- Allowing specific important files through blacklist patterns (e.g., `!config/important.json`)
 
 The codebase snapshot already respects `.gitignore` by default, and `.yellhornignore` provides additional filtering.
 
@@ -218,6 +232,36 @@ Retrieves the workplan content (GitHub issue body) associated with a specified G
 
 - The content of the workplan issue as a string
 
+### curate_ignore_file
+
+Analyzes the codebase structure to build a .yellhornignore file with blacklist/whitelist rules for improved AI context management. The tool creates an optimized filter configuration to provide relevant context to AI models while reducing noise.
+
+**Input**:
+
+- `chunk_size`: (optional) Number of files to analyze in each LLM chunk. Defaults to 100.
+- `max_tokens`: (optional) Maximum tokens allowed for LLM context. Defaults to 50,000.
+- `output_path`: (optional) Path where the .yellhornignore file will be created. Defaults to ".yellhornignore".
+- `reasoning_mode`: (optional) Context level for analysis. Defaults to "full".
+
+**Output**:
+
+- Success message with path to created .yellhornignore file and pattern counts.
+
+**Notes**:
+
+- This tool generates a new .yellhornignore file or overwrites an existing one each time it's called.
+- It uses chunked LLM calls to process large codebases, analyzing directory structure and file patterns.
+- The generated file includes both blacklist patterns (to exclude files from AI context) and whitelist patterns (to explicitly include important files that would otherwise be excluded).
+- You can customize the output location using the `output_path` parameter if you don't want to use the default ".yellhornignore" at the repository root.
+
+**Example Usage**:
+
+```
+Please analyze my codebase and create an optimized .yellhornignore file.
+```
+
+This will scan your entire repository structure, identify common patterns of files that should be excluded from AI context (like build artifacts, logs, binary files), and create a .yellhornignore file with appropriate blacklist and whitelist rules.
+
 ### judge_workplan
 
 Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background).
@@ -309,11 +353,15 @@ curl -X POST http://127.0.0.1:8000/tools/create_workplan \
   -H "Content-Type: application/json" \
   -d '{"title": "User Authentication System", "detailed_description": "Implement a secure authentication system using JWT tokens and bcrypt for password hashing", "codebase_reasoning": "none"}'
 
-
 # Call a tool (get_workplan)
 curl -X POST http://127.0.0.1:8000/tools/get_workplan \
   -H "Content-Type: application/json" \
   -d '{"issue_number": "123"}'
+
+# Call a tool (curate_ignore_file)
+curl -X POST http://127.0.0.1:8000/tools/curate_ignore_file \
+  -H "Content-Type: application/json" \
+  -d '{"chunk_size": 150, "output_path": ".yellhornignore"}'
 
 # Call a tool (judge_workplan with full codebase context - default)
 curl -X POST http://127.0.0.1:8000/tools/judge_workplan \
@@ -343,9 +391,11 @@ python -m examples.client_example plan --title "User Authentication System" --de
 # Generate a basic workplan without AI enhancement
 python -m examples.client_example plan --title "User Authentication System" --description "Implement a secure authentication system using JWT tokens and bcrypt for password hashing" --codebase-reasoning none
 
-
 # Get workplan
 python -m examples.client_example getplan --issue-number "123"
+
+# Generate a .yellhornignore file
+python -m examples.client_example curate-ignore --chunk-size 150 --output-path ".yellhornignore"
 
 # Judge work with full codebase context (default)
 python -m examples.client_example judge --issue-number "456" --base-ref "main" --head-ref "feature-branch"

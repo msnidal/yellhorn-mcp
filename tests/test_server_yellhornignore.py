@@ -3,11 +3,11 @@
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
-from yellhorn_mcp.server import get_codebase_snapshot
+from yellhorn_mcp.server import get_codebase_snapshot, parse_ignore_patterns
 
 
 @pytest.mark.asyncio
@@ -200,3 +200,229 @@ async def test_get_codebase_snapshot_binary_file_handling():
                         assert len(file_contents) == 1
                         assert "file1.py" in file_contents
                         assert "file2.jpg" not in file_contents
+
+
+@pytest.mark.asyncio
+async def test_yellhornignore_whitelist_functionality():
+    """Test whitelisting files with ! prefix in .yellhornignore file."""
+    # Create a temporary directory with a .yellhornignore file
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+
+        # Create a .yellhornignore file with patterns and whitelist
+        yellhornignore_file = tmp_path / ".yellhornignore"
+        yellhornignore_file.write_text(
+            "# Comment line\n"
+            "*.log\n"
+            "node_modules/\n"
+            "dist/\n"
+            "# Whitelist specific files\n"
+            "!important.log\n"
+            "!node_modules/important-package.json\n"
+        )
+
+        # Mock run_git_command to return a list of files
+        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+            mock_git.return_value = "\n".join(
+                [
+                    "file1.py",
+                    "file2.js",
+                    "regular.log",
+                    "important.log",
+                    "node_modules/package.json",
+                    "node_modules/important-package.json",
+                    "dist/bundle.js",
+                    "src/components/Button.js",
+                ]
+            )
+
+            # Create files for testing
+            (tmp_path / "file1.py").write_text("# Test file 1")
+            (tmp_path / "file2.js").write_text("// Test file 2")
+            os.makedirs(tmp_path / "node_modules")
+            os.makedirs(tmp_path / "dist")
+            os.makedirs(tmp_path / "src/components")
+            (tmp_path / "regular.log").write_text("regular log data")
+            (tmp_path / "important.log").write_text("important log data")
+            (tmp_path / "node_modules/package.json").write_text("{}")
+            (tmp_path / "node_modules/important-package.json").write_text('{"name": "important"}')
+            (tmp_path / "dist/bundle.js").write_text("/* bundle */")
+            (tmp_path / "src/components/Button.js").write_text("// Button component")
+
+            # Call get_codebase_snapshot
+            file_paths, file_contents = await get_codebase_snapshot(tmp_path)
+
+            # Verify that ignored files are not in results
+            assert "file1.py" in file_paths
+            assert "file2.js" in file_paths
+            assert "src/components/Button.js" in file_paths
+            
+            # Verify that regular ignored files are not included
+            assert "regular.log" not in file_paths  # Ignored by *.log
+            assert "node_modules/package.json" not in file_paths  # Ignored by node_modules/
+            assert "dist/bundle.js" not in file_paths  # Ignored by dist/
+            
+            # Verify whitelisted files are included despite matching ignore patterns
+            assert "important.log" in file_paths  # Whitelisted despite *.log
+            assert "node_modules/important-package.json" in file_paths  # Whitelisted despite node_modules/
+
+            # Verify contents
+            assert "file1.py" in file_contents
+            assert "file2.js" in file_contents
+            assert "regular.log" not in file_contents
+            assert "important.log" in file_contents
+            assert "node_modules/package.json" not in file_contents
+            assert "node_modules/important-package.json" in file_contents
+            assert "dist/bundle.js" not in file_contents
+
+
+def test_parse_ignore_patterns():
+    """Test the parse_ignore_patterns function that extracts blacklist and whitelist patterns."""
+    # Basic test with standard format
+    result = """```ignorefile
+# BLACKLIST PATTERNS
+*.log
+node_modules/
+dist/
+__pycache__/
+
+# WHITELIST PATTERNS
+!important.log
+!node_modules/config.json
+```"""
+    ignore_patterns, whitelist_patterns = parse_ignore_patterns(result)
+    
+    assert "*.log" in ignore_patterns
+    assert "node_modules/" in ignore_patterns
+    assert "dist/" in ignore_patterns
+    assert "__pycache__/" in ignore_patterns
+    assert len(ignore_patterns) == 4
+    
+    assert "!important.log" in whitelist_patterns
+    assert "!node_modules/config.json" in whitelist_patterns
+    assert len(whitelist_patterns) == 2
+    
+    # Test with non-standard format (without code blocks)
+    result = """
+# BLACKLIST PATTERNS
+*.log
+node_modules/
+
+# WHITELIST PATTERNS
+!important.log
+"""
+    ignore_patterns, whitelist_patterns = parse_ignore_patterns(result)
+    
+    assert "*.log" in ignore_patterns
+    assert "node_modules/" in ignore_patterns
+    assert len(ignore_patterns) == 2
+    
+    assert "!important.log" in whitelist_patterns
+    assert len(whitelist_patterns) == 1
+    
+    # Test with empty result
+    result = ""
+    ignore_patterns, whitelist_patterns = parse_ignore_patterns(result)
+    
+    assert len(ignore_patterns) == 0
+    assert len(whitelist_patterns) == 0
+
+
+@pytest.mark.asyncio
+async def test_curate_ignore_file():
+    """Test the curate_ignore_file tool functionality."""
+    from yellhorn_mcp.server import curate_ignore_file, YellhornMCPError
+    
+    # Create a mock context with async log method
+    mock_ctx = MagicMock()
+    mock_ctx.log = AsyncMock()
+    mock_ctx.request_context.lifespan_context = {
+        "repo_path": Path("/fake/repo/path"),
+        "model": "gemini-2.5-pro-preview-03-25",
+        "gemini_client": MagicMock(),
+    }
+    
+    # Setup mock for get_codebase_snapshot
+    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+        # First test: No files found
+        mock_snapshot.return_value = ([], {})
+        
+        # Test error handling when no files are found
+        with pytest.raises(YellhornMCPError, match="No files found in repository to analyze"):
+            await curate_ignore_file(mock_ctx)
+        
+        # Second test: Normal operation with files
+        mock_sample_files = [
+            "src/main.py",
+            "src/utils.py",
+            "node_modules/package1/index.js",
+            "dist/bundle.js",
+            "docs/README.md",
+            "tests/test_main.py",
+        ]
+        mock_snapshot.return_value = (mock_sample_files, {})
+        
+        # Mock the Gemini API response
+        mock_response = MagicMock()
+        mock_response.text = """```ignorefile
+# BLACKLIST PATTERNS
+node_modules/
+dist/
+*.pyc
+__pycache__/
+
+# WHITELIST PATTERNS
+!docs/README.md
+```"""
+        # Set up the async response for gemini client
+        gemini_client_mock = mock_ctx.request_context.lifespan_context["gemini_client"]
+        gemini_client_mock.aio = MagicMock()
+        gemini_client_mock.aio.models = MagicMock()
+        gemini_client_mock.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        
+        # Mock the open function to avoid writing to the filesystem
+        with patch("builtins.open", MagicMock()):
+            result = await curate_ignore_file(mock_ctx)
+            
+            # Verify the result message is correct
+            assert "Successfully created .yellhornignore file" in result
+            assert "4 blacklist and 1 whitelist patterns" in result
+            
+            # Verify the API was called
+            assert gemini_client_mock.aio.models.generate_content.called
+            
+    # Test error handling for API errors
+    mock_ctx = MagicMock()
+    mock_ctx.log = AsyncMock()
+    mock_ctx.request_context.lifespan_context = {
+        "repo_path": Path("/fake/repo/path"),
+        "model": "gemini-2.5-pro-preview-03-25",
+        "gemini_client": MagicMock(),
+    }
+    
+    # Configure gemini client to raise an exception
+    gemini_client_mock = mock_ctx.request_context.lifespan_context["gemini_client"]
+    gemini_client_mock.aio = MagicMock()
+    gemini_client_mock.aio.models = MagicMock()
+    gemini_client_mock.aio.models.generate_content = AsyncMock(side_effect=Exception("API Error"))
+    
+    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+        mock_snapshot.return_value = (["file1.py"], {})
+        
+        # Test that we still continue processing after chunk errors
+        with patch("builtins.open", MagicMock()):
+            # Should not raise exception due to try/except that catches chunk errors
+            result = await curate_ignore_file(mock_ctx)
+            assert "Successfully created .yellhornignore file" in result
+            assert "0 blacklist and 0 whitelist patterns" in result  # No patterns due to API error
+
+
+# Helper class for creating async mocks
+class AsyncMock(MagicMock):
+    """MagicMock subclass that supports async with syntax and awaitable returns."""
+    async def __call__(self, *args, **kwargs):
+        return super().__call__(*args, **kwargs)
+    
+    def __await__(self):
+        yield from []
+        return self().__await__()
