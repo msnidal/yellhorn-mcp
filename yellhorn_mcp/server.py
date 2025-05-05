@@ -1569,414 +1569,6 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         await ctx.log(level="error", message=error_message)
         raise YellhornMCPError(error_message)
 
-
-@mcp.tool(
-    name="curate_ignore_file",
-    description="Analyzes the codebase structure to build a .yellhornignore file with blacklist/whitelist rules customized for your specific task.",
-)
-async def curate_ignore_file(
-    ctx: Context,
-    user_task: str,
-    codebase_reasoning: str = "file_structure",
-    output_path: str = ".yellhornignore",
-    depth_limit: int = 0,  # 0 means no limit, will be set to 2 for file_structure mode if not specified
-) -> str:
-    """
-    Analyzes codebase structure and creates a .yellhornignore file with optimized blacklist/whitelist rules.
-    
-    This tool examines your codebase, identifies patterns, and generates an optimized .yellhornignore file
-    customized for your specific task to provide the most relevant context to AI models while filtering out noise.
-    
-    Args:
-        ctx: Server context.
-        user_task: Description of the task you're working on, used to customize the ignore rules.
-        codebase_reasoning: Analysis mode for codebase structure. Options:
-            - "full": Performs deep analysis with all codebase context
-            - "file_structure": Lightweight analysis based only on file/directory structure (default)
-            - "lsp": Analysis using programming language constructs (functions, classes)
-        output_path: Path where the .yellhornignore file will be created. Defaults to ".yellhornignore".
-        depth_limit: Maximum directory depth to analyze (0 means no limit). For file_structure mode,
-                     defaults to 2 (top-level directories only) if not specified.
-            
-    Returns:
-        Success message with path to created .yellhornignore file.
-        
-    Raises:
-        YellhornMCPError: If there's an error during .yellhornignore generation.
-    """
-    try:
-        # Get repository path from context
-        repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-        gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
-        openai_client = ctx.request_context.lifespan_context.get("openai_client")
-        model: str = ctx.request_context.lifespan_context["model"]
-        
-        # Set default depth limit for file_structure mode if not specified
-        if codebase_reasoning == "file_structure" and depth_limit == 0:
-            depth_limit = 2  # Default to only top-level directories for file_structure mode
-            await ctx.log(
-                level="info",
-                message=f"Setting depth_limit to 2 for file_structure mode (top-level directories only)"
-            )
-        
-        await ctx.log(
-            level="info",
-            message=f"Starting .yellhornignore file curation with {model} using {codebase_reasoning} mode (depth_limit={depth_limit})"
-        )
-        
-        # Set chunk size based on reasoning mode
-        if codebase_reasoning == "file_structure":
-            chunk_size = 3000  # Process more files per chunk for file structure mode
-        elif codebase_reasoning == "lsp":
-            chunk_size = 300  # Process more files per chunk for lsp mode
-        else:
-            chunk_size = 100  # Default chunk size for other modes
-        
-        # Validate codebase_reasoning option
-        valid_modes = ["full", "file_structure", "lsp"]
-        if codebase_reasoning not in valid_modes:
-            await ctx.log(
-                level="warning",
-                message=f"Invalid codebase_reasoning '{codebase_reasoning}'. Using 'file_structure' as default.",
-            )
-            codebase_reasoning = "file_structure"
-            
-        # Get codebase information based on reasoning mode
-        if codebase_reasoning == "lsp":
-            # Use LSP mode for language-aware analysis
-            from yellhorn_mcp.lsp_utils import get_lsp_snapshot
-            file_paths, file_contents = await get_lsp_snapshot(repo_path)
-        else:
-            # For both full and file_structure modes, just get file paths
-            file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths")
-            file_contents = {}  # No contents needed for file_structure mode
-        
-        if not file_paths:
-            raise YellhornMCPError("No files found in repository to analyze")
-            
-        # Apply depth limit if specified
-        if depth_limit > 0:
-            filtered_file_paths = []
-            for file_path in file_paths:
-                # Count the number of path separators to determine depth
-                # +1 because a file at the root has depth 1, not 0
-                path_depth = file_path.count('/') + 1
-                if path_depth <= depth_limit:
-                    filtered_file_paths.append(file_path)
-            
-            # Update file_paths with filtered list
-            original_count = len(file_paths)
-            file_paths = filtered_file_paths
-            filtered_count = len(file_paths)
-            
-            await ctx.log(
-                level="info",
-                message=f"Applied depth limit {depth_limit}: filtered from {original_count} to {filtered_count} files"
-            )
-            
-        # Log the number of files found
-        await ctx.log(
-            level="info",
-            message=f"Found {len(file_paths)} files to analyze for .yellhornignore generation",
-        )
-        
-        # Calculate number of chunks needed
-        total_chunks = (len(file_paths) + chunk_size - 1) // chunk_size  # Ceiling division
-        
-        # Create chunks of file paths
-        file_path_chunks = []
-        for i in range(0, len(file_paths), chunk_size):
-            file_path_chunks.append(file_paths[i:i + chunk_size])
-        
-        # Log start of parallel processing
-        await ctx.log(
-            level="info",
-            message=f"Starting parallel processing of {total_chunks} chunks with max concurrency of 5"
-        )
-            
-        # Track ignore patterns and whitelist patterns
-        all_ignore_patterns = set()
-        all_whitelist_patterns = set()
-        
-        # Define a helper function to process a single chunk
-        async def process_chunk(chunk_idx, file_chunk):
-            await ctx.log(
-                level="info",
-                message=f"Processing chunk {chunk_idx + 1}/{total_chunks} with {len(file_chunk)} files",
-            )
-            
-            # Format the file list for the prompt
-            file_list = "\n".join(file_chunk)
-            
-            # Prepare additional context based on reasoning mode
-            if codebase_reasoning == "full" and file_contents:
-                # Include a sample of file contents for full mode
-                content_sample = []
-                for file_path in file_chunk[:5]:  # Include first 5 files in chunk as samples
-                    if file_path in file_contents:
-                        # Limit content to 50 lines max
-                        content = file_contents.get(file_path, "")
-                        content_lines = content.split("\n")[:50]
-                        if content_lines:
-                            content_sample.append(f"File: {file_path}\n```\n{chr(10).join(content_lines)}\n```\n")
-                
-                content_context = "\n".join(content_sample)
-                additional_context = f"\n\n<content_samples>\n{content_context}\n</content_samples>" if content_sample else ""
-            elif codebase_reasoning == "lsp" and file_contents:
-                # Include signature information for LSP mode
-                signature_sample = []
-                for file_path in file_chunk[:10]:  # Include first 10 files in chunk
-                    if file_path in file_contents:
-                        # Extract signatures
-                        signature_sample.append(f"File: {file_path}\n{file_contents.get(file_path, '')}")
-                
-                signature_context = "\n".join(signature_sample)
-                additional_context = f"\n\n<code_signatures>\n{signature_context}\n</code_signatures>" if signature_sample else ""
-            else:
-                # For file_structure mode, no additional context needed
-                additional_context = ""
-            
-            # Construct the prompt for this chunk
-            prompt = f"""You are an expert software developer tasked with analyzing a codebase structure to identify patterns for a .yellhornignore file that will be optimized for the following user task:
-
-<user_task>
-{user_task}
-</user_task>
-
-The .yellhornignore file is similar to .gitignore but specifically for filtering what files an AI assistant sees when analyzing a codebase. Your goal is to ensure the AI has access to all relevant code for the user's task while filtering out noise.
-
-Below is a list of file paths from the codebase (chunk {chunk_idx + 1} of {total_chunks}):
-
-<file_paths>
-{file_list}
-</file_paths>{additional_context}
-
-Your task is to identify patterns for filtering files in this codebase, specifically focused on helping with the user task above. Consider:
-
-1. Files that typically don't provide useful context to an AI (e.g., build artifacts, logs, cache files)
-2. Directories that contain machine-generated code or vendor code
-3. Binary files or large data files
-4. Files that would contribute to token bloat without adding useful context
-5. What files are MOST RELEVANT to the user's task - these might need to be whitelisted
-
-For each pattern, decide if it should be:
-- BLACKLISTED (excluded from AI context with pattern like "*.log" or "build/")
-- WHITELISTED (explicitly included with pattern like "!important.config" or "!docs/architecture.md")
-
-IMPORTANT: Your analysis should consider standard software development conventions, but be specific to the actual file structure shown above and the user's task.
-
-Return your analysis in this exact format:
-
-```ignorefile
-# BLACKLIST PATTERNS
-pattern1
-pattern2
-...
-
-# WHITELIST PATTERNS
-!pattern1
-!pattern2
-...
-```
-
-Only include patterns that are clearly justified by the file structure and user task. Keep patterns minimal but effective. Use directory patterns with "/" where appropriate.
-"""
-            
-            # Call the appropriate AI model based on type
-            is_openai_model = model.startswith("gpt-") or model.startswith("o")
-            
-            # Log that we're initiating the LLM call
-            await ctx.log(
-                level="info",
-                message=f"Initiating LLM call for chunk {chunk_idx + 1}/{total_chunks} using {model} (files: {len(file_chunk)})"
-            )
-            
-            chunk_ignore_patterns = set()
-            chunk_whitelist_patterns = set()
-            
-            try:
-                if is_openai_model:
-                    if not openai_client:
-                        raise YellhornMCPError("OpenAI client not initialized. Is OPENAI_API_KEY set?")
-                        
-                    # Convert the prompt to OpenAI messages format
-                    messages = [{"role": "user", "content": prompt}]
-                    
-                    await ctx.log(
-                        level="info",
-                        message=f"Sending request to OpenAI API for chunk {chunk_idx + 1}"
-                    )
-                    
-                    # Call OpenAI API
-                    response = await openai_client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                    )
-                    
-                    await ctx.log(
-                        level="info",
-                        message=f"Received response from OpenAI API for chunk {chunk_idx + 1} (tokens: prompt={response.usage.prompt_tokens}, completion={response.usage.completion_tokens}, total={response.usage.total_tokens})"
-                    )
-                    
-                    # Extract content
-                    chunk_result = response.choices[0].message.content
-                else:
-                    if gemini_client is None:
-                        raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
-                        
-                    await ctx.log(
-                        level="info",
-                        message=f"Sending request to Gemini API for chunk {chunk_idx + 1}"
-                    )
-                    
-                    # Call Gemini API
-                    response = await gemini_client.aio.models.generate_content(model=model, contents=prompt)
-                    
-                    # Log completion with usage data if available
-                    usage_metadata = getattr(response, "usage_metadata", None)
-                    usage_log = {}
-                    
-                    if usage_metadata:
-                        usage_log = {
-                            "prompt_tokens": usage_metadata.prompt_token_count,
-                            "completion_tokens": usage_metadata.candidates_token_count,
-                            "total_tokens": usage_metadata.total_token_count
-                        }
-                    
-                    tokens_info = ""
-                    if usage_metadata:
-                        tokens_info = f" (tokens: prompt={usage_metadata.prompt_token_count}, completion={usage_metadata.candidates_token_count}, total={usage_metadata.total_token_count})"
-                    
-                    await ctx.log(
-                        level="info",
-                        message=f"Received response from Gemini API for chunk {chunk_idx + 1}{tokens_info}"
-                    )
-                    
-                    chunk_result = response.text
-                    
-                # Extract patterns from the result
-                ignore_patterns, whitelist_patterns = parse_ignore_patterns(chunk_result)
-                
-                # Store patterns for this chunk
-                chunk_ignore_patterns = ignore_patterns
-                chunk_whitelist_patterns = whitelist_patterns
-                
-                # Log the patterns found with detailed metadata
-                # Format pattern list for logging
-                ignore_patterns_str = ", ".join(sorted(list(ignore_patterns))[:5])
-                if len(ignore_patterns) > 5:
-                    ignore_patterns_str += f", ... ({len(ignore_patterns) - 5} more)"
-                
-                whitelist_patterns_str = ", ".join(sorted(list(whitelist_patterns))[:5])
-                if len(whitelist_patterns) > 5:
-                    whitelist_patterns_str += f", ... ({len(whitelist_patterns) - 5} more)"
-                
-                await ctx.log(
-                    level="info",
-                    message=f"Chunk {chunk_idx + 1} processed, found {len(ignore_patterns)} blacklist patterns [{ignore_patterns_str}] and {len(whitelist_patterns)} whitelist patterns [{whitelist_patterns_str}]"
-                )
-                
-            except Exception as chunk_error:
-                await ctx.log(
-                    level="error", 
-                    message=f"Error processing chunk {chunk_idx + 1}: {str(chunk_error)} ({type(chunk_error).__name__})"
-                )
-                # Continue with next chunk despite errors
-            
-            # Return results from this chunk
-            return chunk_ignore_patterns, chunk_whitelist_patterns
-        
-        # Use semaphore to limit concurrency to 5 parallel calls
-        semaphore = asyncio.Semaphore(5)
-        
-        async def bounded_process_chunk(chunk_idx, file_chunk):
-            async with semaphore:
-                return await process_chunk(chunk_idx, file_chunk)
-        
-        # Create tasks for all chunks
-        tasks = []
-        for chunk_idx, file_chunk in enumerate(file_path_chunks):
-            task = asyncio.create_task(bounded_process_chunk(chunk_idx, file_chunk))
-            tasks.append(task)
-        
-        # Wait for all tasks to complete and collect results
-        await ctx.log(level="info", message=f"Waiting for {len(tasks)} parallel LLM tasks to complete")
-        completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Process results
-        for result in completed_tasks:
-            if isinstance(result, Exception):
-                # Log the exception but continue
-                await ctx.log(level="error", message=f"Parallel task failed: {str(result)}")
-                continue
-                
-            # Unpack the result tuple and update our pattern collections
-            chunk_ignore_patterns, chunk_whitelist_patterns = result
-            all_ignore_patterns.update(chunk_ignore_patterns)
-            all_whitelist_patterns.update(chunk_whitelist_patterns)
-        
-        await ctx.log(
-            level="info", 
-            message=f"All chunks processed, collected {len(all_ignore_patterns)} blacklist and {len(all_whitelist_patterns)} whitelist patterns in total"
-        )
-                
-        # Generate the final .yellhornignore file content with comments
-        final_content = "# Yellhorn Ignore File - AI-optimized patterns\n"
-        final_content += "# Generated by yellhorn-mcp curate_ignore_file tool\n\n"
-        
-        if all_ignore_patterns:
-            final_content += "# Files and directories to exclude from AI context\n"
-            final_content += "\n".join(sorted(all_ignore_patterns)) + "\n\n"
-            
-        if all_whitelist_patterns:
-            final_content += "# Important files to explicitly include despite matching blacklist patterns\n"
-            final_content += "\n".join(sorted(all_whitelist_patterns)) + "\n"
-        
-        # Write the file to the specified path
-        output_file_path = repo_path / output_path
-        try:
-            with open(output_file_path, "w", encoding="utf-8") as f:
-                f.write(final_content)
-                
-            await ctx.log(
-                level="info",
-                message=f"Successfully wrote .yellhornignore file to {output_file_path}",
-            )
-            
-            # Create trace content to log
-            trace_content = {
-                "output_path": str(output_file_path),
-                "blacklist_patterns": sorted(list(all_ignore_patterns)),
-                "whitelist_patterns": sorted(list(all_whitelist_patterns)),
-                "content": final_content
-            }
-            
-            # Add trace to cache with simplified content
-            blacklist_str = ", ".join(sorted(list(all_ignore_patterns))[:5])
-            if len(all_ignore_patterns) > 5:
-                blacklist_str += f", ... ({len(all_ignore_patterns) - 5} more)"
-                
-            whitelist_str = ", ".join(sorted(list(all_whitelist_patterns))[:5]) 
-            if len(all_whitelist_patterns) > 5:
-                whitelist_str += f", ... ({len(all_whitelist_patterns) - 5} more)"
-                
-            await ctx.log(
-                level="info", 
-                message=f"Generated .yellhornignore file at {output_file_path} with patterns - Blacklist: [{blacklist_str}], Whitelist: [{whitelist_str}]"
-            )
-            
-            # Return success message
-            return f"Successfully created .yellhornignore file at {output_file_path} with {len(all_ignore_patterns)} blacklist and {len(all_whitelist_patterns)} whitelist patterns."
-            
-        except Exception as write_error:
-            raise YellhornMCPError(f"Failed to write .yellhornignore file: {str(write_error)}")
-            
-    except Exception as e:
-        error_message = f"Failed to generate .yellhornignore file: {str(e)}"
-        await ctx.log(level="error", message=error_message)
-        raise YellhornMCPError(error_message)
-
-
 @mcp.tool(
     name="curate_context",
     description="Analyzes the codebase and creates a .yellhorncontext file listing directories to be included in AI context.",
@@ -2472,41 +2064,6 @@ Don't include explanations for your choices, just return the list in the specifi
         raise YellhornMCPError(error_message)
 
 
-def parse_ignore_patterns(result_text: str) -> tuple[set[str], set[str]]:
-    """
-    Parse the ignore patterns from LLM response text.
-    
-    Args:
-        result_text: Text response from LLM containing patterns.
-        
-    Returns:
-        Tuple of (ignore_patterns, whitelist_patterns) as sets.
-    """
-    ignore_patterns = set()
-    whitelist_patterns = set()
-    
-    # Extract the content between ```ignorefile and ``` if present
-    if "```ignorefile" in result_text and "```" in result_text[result_text.find("```ignorefile"):]:
-        start_idx = result_text.find("```ignorefile") + len("```ignorefile")
-        end_idx = result_text.find("```", start_idx)
-        if end_idx > start_idx:
-            result_text = result_text[start_idx:end_idx]
-    
-    # Process each line
-    for line in result_text.split("\n"):
-        line = line.strip()
-        
-        # Skip empty lines and comments
-        if not line or line.startswith("#"):
-            continue
-            
-        # Whitelist patterns start with !
-        if line.startswith("!"):
-            whitelist_patterns.add(line)
-        else:
-            ignore_patterns.add(line)
-            
-    return ignore_patterns, whitelist_patterns
 
 
 @mcp.tool(
@@ -2625,3 +2182,39 @@ async def judge_workplan(
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to trigger workplan judgement: {str(e)}")
+
+def parse_ignore_patterns(result_text: str) -> tuple[set[str], set[str]]:
+    """
+    Parse the ignore patterns from LLM response text.
+
+    Args:
+        result_text: Text response from LLM containing patterns.
+        
+    Returns:
+        Tuple of (ignore_patterns, whitelist_patterns) as sets.
+    """
+    ignore_patterns = set()
+    whitelist_patterns = set()
+
+    # Extract the content between ```ignorefile and ``` if present
+    if "```ignorefile" in result_text and "```" in result_text[result_text.find("```ignorefile"):]:
+        start_idx = result_text.find("```ignorefile") + len("```ignorefile")
+        end_idx = result_text.find("```", start_idx)
+        if end_idx > start_idx:
+            result_text = result_text[start_idx:end_idx]
+
+    # Process each line
+    for line in result_text.split("\n"):
+        line = line.strip()
+        
+        # Skip empty lines and comments
+        if not line or line.startswith("#"):
+            continue
+            
+        # Whitelist patterns start with !
+        if line.startswith("!"):
+            whitelist_patterns.add(line)
+        else:
+            ignore_patterns.add(line)
+            
+    return ignore_patterns, whitelist_patterns

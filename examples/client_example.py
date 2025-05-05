@@ -119,6 +119,39 @@ async def judge_workplan(
     return str(result)
 
 
+async def curate_context(
+    session: ClientSession,
+    user_task: str,
+    codebase_reasoning: str = "file_structure",
+    output_path: str = ".yellhorncontext",
+) -> str:
+    """
+    Generate a .yellhorncontext file with optimized directory filtering rules.
+
+    Args:
+        session: MCP client session.
+        user_task: Description of the task to customize directory selection.
+        codebase_reasoning: Analysis mode for codebase structure. Options:
+            - "full": Deep analysis with all codebase context
+            - "file_structure": (default) Lightweight analysis based on file/directory structure
+            - "lsp": Analysis using programming language constructs
+        output_path: Path where the .yellhorncontext file will be created.
+
+    Returns:
+        Success message with path to created .yellhorncontext file.
+    """
+    # Call the curate_context tool
+    result = await session.call_tool(
+        "curate_context",
+        arguments={
+            "user_task": user_task,
+            "codebase_reasoning": codebase_reasoning,
+            "output_path": output_path,
+        },
+    )
+    return str(result)
+
+
 async def list_tools(session: ClientSession) -> None:
     """
     List all available tools in the Yellhorn MCP server.
@@ -234,6 +267,22 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
                 except Exception as e:
                     print(f"Error: {str(e)}")
                     sys.exit(1)
+                    
+            elif command == "curate-context":
+                # Generate a .yellhorncontext file
+                print(f"Generating .yellhorncontext file for task: {args.user_task}")
+                print(f"Using codebase reasoning mode: {args.codebase_reasoning}")
+                print(f"Output path: {args.output_path}")
+                
+                try:
+                    result_str = await curate_context(
+                        session, args.user_task, args.codebase_reasoning, args.output_path
+                    )
+                    print("\nResult:")
+                    print(result_str)
+                except Exception as e:
+                    print(f"Error: {str(e)}")
+                    sys.exit(1)
 
 
 def main():
@@ -314,6 +363,32 @@ def main():
         choices=["full", "lsp", "none"],
         help="Control codebase context: 'full' (default) uses full code, 'lsp' uses function signatures, 'none' skips codebase",
     )
+    
+    # Add curate-context command
+    curate_context_parser = subparsers.add_parser(
+        "curate-context", help="Generate a .yellhorncontext file with optimized directory filtering rules"
+    )
+    curate_context_parser.add_argument(
+        "--user-task",
+        dest="user_task",
+        required=True,
+        help="Description of the task to customize directory selection"
+    )
+    curate_context_parser.add_argument(
+        "--codebase-reasoning",
+        dest="codebase_reasoning",
+        required=False,
+        default="file_structure",
+        choices=["full", "file_structure", "lsp"],
+        help="Analysis mode: 'file_structure' (default), 'full', or 'lsp'"
+    )
+    curate_context_parser.add_argument(
+        "--output-path",
+        dest="output_path",
+        required=False,
+        default=".yellhorncontext",
+        help="Output path for the .yellhorncontext file (default: .yellhorncontext)"
+    )
 
     args = parser.parse_args()
 
@@ -326,7 +401,7 @@ def main():
     is_openai_model = model.startswith("gpt-")
 
     # Ensure appropriate API keys are set for commands that require them
-    if args.command in ["plan", "worktree", "getplan", "judge"]:
+    if args.command in ["plan", "getplan", "judge", "curate-context"]:
         if is_openai_model and not os.environ.get("OPENAI_API_KEY"):
             print(f"Error: OPENAI_API_KEY environment variable is required for model '{model}'")
             print("Please set the OPENAI_API_KEY environment variable with your OpenAI API key")
