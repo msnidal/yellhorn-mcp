@@ -330,7 +330,7 @@ node_modules/
 
 @pytest.mark.asyncio
 async def test_curate_ignore_file():
-    """Test the curate_ignore_file tool functionality."""
+    """Test the curate_ignore_file tool functionality with parallel processing."""
     from yellhorn_mcp.server import curate_ignore_file, YellhornMCPError
     
     # Create a mock context with async log method
@@ -355,6 +355,7 @@ async def test_curate_ignore_file():
             await curate_ignore_file(mock_ctx, user_task)
         
         # Second test: Normal operation with files using file_structure mode
+        # Create a larger list of files to trigger parallel processing
         mock_sample_files = [
             "src/main.py",
             "src/utils.py",
@@ -362,38 +363,82 @@ async def test_curate_ignore_file():
             "dist/bundle.js",
             "docs/README.md",
             "tests/test_main.py",
+            # Adding more files to ensure we have multiple chunks
+            *[f"src/module{i}.py" for i in range(20)],
+            *[f"tests/test_module{i}.py" for i in range(20)],
         ]
         mock_snapshot.return_value = (mock_sample_files, {})
         
-        # Mock the Gemini API response
-        mock_response = MagicMock()
-        mock_response.text = """```ignorefile
+        # Mock asyncio.Semaphore to ensure we're limiting concurrency
+        mock_semaphore = MagicMock()
+        mock_semaphore_context = AsyncMock().__aenter__.return_value = None
+        mock_semaphore.__aenter__ = AsyncMock(return_value=mock_semaphore_context)
+        mock_semaphore.__aexit__ = AsyncMock(return_value=None)
+        
+        # Mock the Gemini API response - different responses for each chunk
+        mock_responses = [
+            MagicMock(text="""```ignorefile
 # BLACKLIST PATTERNS
 node_modules/
 dist/
 *.pyc
-__pycache__/
 
 # WHITELIST PATTERNS
 !docs/README.md
+```"""),
+            MagicMock(text="""```ignorefile
+# BLACKLIST PATTERNS
+__pycache__/
+.DS_Store
+
+# WHITELIST PATTERNS
 !src/auth/
-```"""
+```"""),
+            # Add more responses as needed for multiple chunks
+        ]
+        
         # Set up the async response for gemini client
         gemini_client_mock = mock_ctx.request_context.lifespan_context["gemini_client"]
         gemini_client_mock.aio = MagicMock()
         gemini_client_mock.aio.models = MagicMock()
-        gemini_client_mock.aio.models.generate_content = AsyncMock(return_value=mock_response)
         
-        # Mock the open function to avoid writing to the filesystem
-        with patch("builtins.open", MagicMock()):
-            result = await curate_ignore_file(mock_ctx, user_task, "file_structure")
-            
-            # Verify the result message is correct
-            assert "Successfully created .yellhornignore file" in result
-            assert "4 blacklist and 2 whitelist patterns" in result
-            
-            # Verify the API was called
-            assert gemini_client_mock.aio.models.generate_content.called
+        # Configure generate_content to return different responses for each call
+        generate_content_mock = AsyncMock()
+        # Return a different response each time it's called, or last response if we run out
+        generate_content_mock.side_effect = lambda **kwargs: mock_responses.pop(0) if mock_responses else mock_responses[-1]
+        gemini_client_mock.aio.models.generate_content = generate_content_mock
+        
+        # Create a patch for asyncio.Semaphore
+        with patch("asyncio.Semaphore", return_value=mock_semaphore):
+            # Also patch asyncio.create_task to track tasks
+            with patch("asyncio.create_task") as mock_create_task:
+                # Make mock_create_task pass through the coroutine
+                mock_create_task.side_effect = lambda coro: coro
+                
+                # And patch asyncio.gather to validate tasks are created
+                with patch("asyncio.gather") as mock_gather:
+                    # Make gather return results as if all tasks completed
+                    mock_gather.return_value = [
+                        ({"node_modules/", "dist/", "*.pyc"}, {"!docs/README.md"}),
+                        ({"__pycache__/", ".DS_Store"}, {"!src/auth/"}),
+                    ]
+                    
+                    # Mock the open function to avoid writing to the filesystem
+                    with patch("builtins.open", MagicMock()):
+                        result = await curate_ignore_file(mock_ctx, user_task, "file_structure")
+                        
+                        # Verify asyncio.gather was called to wait for parallel tasks
+                        assert mock_gather.called
+                        
+                        # Verify the result message is correct
+                        assert "Successfully created .yellhornignore file" in result
+                        assert "5 blacklist and 2 whitelist patterns" in result  # Combined from both responses
+                        
+                        # Verify parallel processing logs were made
+                        log_calls = [call[1]['message'] for call in mock_ctx.log.call_args_list if isinstance(call[1].get('message'), str)]
+                        assert any("parallel processing" in msg for msg in log_calls)
+                        assert any("parallel LLM tasks" in msg for msg in log_calls)
+                        assert any("All chunks processed" in msg for msg in log_calls)
     
     # Test LSP mode
     with patch("yellhorn_mcp.lsp_utils.get_lsp_snapshot") as mock_lsp_snapshot:
@@ -431,16 +476,17 @@ node_modules/
         gemini_client_mock.aio.models = MagicMock()
         gemini_client_mock.aio.models.generate_content = AsyncMock(return_value=mock_response)
         
-        # Mock the open function to avoid writing to the filesystem
-        with patch("builtins.open", MagicMock()):
-            result = await curate_ignore_file(mock_ctx, user_task, "lsp")
-            
-            # Verify the result message is correct
-            assert "Successfully created .yellhornignore file" in result
-            assert "2 blacklist and 2 whitelist patterns" in result
-            
-            # Verify the API was called
-            assert gemini_client_mock.aio.models.generate_content.called
+        # Mock asyncio functions for parallel processing
+        with patch("asyncio.Semaphore"):
+            with patch("asyncio.create_task", side_effect=lambda coro: coro):
+                with patch("asyncio.gather", return_value=[({"*.log", "node_modules/"}, {"!src/auth/jwt.py", "!src/models/user.py"})]):
+                    # Mock the open function to avoid writing to the filesystem
+                    with patch("builtins.open", MagicMock()):
+                        result = await curate_ignore_file(mock_ctx, user_task, "lsp")
+                        
+                        # Verify the result message is correct
+                        assert "Successfully created .yellhornignore file" in result
+                        assert "2 blacklist and 2 whitelist patterns" in result
             
     # Test error handling for API errors
     mock_ctx = MagicMock()
@@ -460,12 +506,17 @@ node_modules/
     with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
         mock_snapshot.return_value = (["file1.py"], {})
         
-        # Test that we still continue processing after chunk errors
-        with patch("builtins.open", MagicMock()):
-            # Should not raise exception due to try/except that catches chunk errors
-            result = await curate_ignore_file(mock_ctx, user_task, "full")
-            assert "Successfully created .yellhornignore file" in result
-            assert "0 blacklist and 0 whitelist patterns" in result  # No patterns due to API error
+        # Test parallel processing with errors
+        with patch("asyncio.Semaphore"):
+            with patch("asyncio.create_task", side_effect=lambda coro: coro):
+                # Make gather return an exception to simulate a task failure
+                with patch("asyncio.gather", return_value=[Exception("API Error")]):
+                    # Mock the open function to avoid writing to the filesystem
+                    with patch("builtins.open", MagicMock()):
+                        # Should not raise exception due to error handling in parallel processing
+                        result = await curate_ignore_file(mock_ctx, user_task, "full")
+                        assert "Successfully created .yellhornignore file" in result
+                        assert "0 blacklist and 0 whitelist patterns" in result  # No patterns due to API error
     
     # Test invalid codebase_reasoning mode (should default to full)
     mock_ctx = MagicMock()
@@ -484,11 +535,86 @@ node_modules/
         gemini_client_mock.aio.models = MagicMock()
         gemini_client_mock.aio.models.generate_content = AsyncMock(return_value=mock_response)
         
-        # Mock the open function to avoid writing to the filesystem
-        with patch("builtins.open", MagicMock()):
-            # Should work and default to full mode
-            result = await curate_ignore_file(mock_ctx, user_task, "invalid_mode")
-            assert "Successfully created .yellhornignore file" in result
+        # Mock asyncio functions for parallel processing
+        with patch("asyncio.Semaphore"):
+            with patch("asyncio.create_task", side_effect=lambda coro: coro):
+                with patch("asyncio.gather", return_value=[({"*.log", "node_modules/"}, {"!src/auth/jwt.py", "!src/models/user.py"})]):
+                    # Mock the open function to avoid writing to the filesystem
+                    with patch("builtins.open", MagicMock()):
+                        # Should work and default to full mode
+                        result = await curate_ignore_file(mock_ctx, user_task, "invalid_mode")
+                        assert "Successfully created .yellhornignore file" in result
+
+    # Test depth_limit parameter
+    mock_ctx = MagicMock()
+    mock_ctx.log = AsyncMock()
+    mock_ctx.request_context.lifespan_context = {
+        "repo_path": Path("/fake/repo/path"),
+        "model": "gemini-2.5-pro-preview-03-25",
+        "gemini_client": MagicMock(),
+    }
+    
+    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+        # Create a sample file list with different depths
+        mock_sample_files = [
+            "root_file.py",                  # depth 1
+            "first_level/file.py",           # depth 2
+            "first_level/second_level/file.py",  # depth 3
+            "first_level/second_level/third_level/file.py",  # depth 4
+            "another_dir/file.py",           # depth 2
+            "another_dir/subdir/file.py",    # depth 3
+        ]
+        mock_snapshot.return_value = (mock_sample_files, {})
+        
+        # Set up mock for gemini client
+        gemini_client_mock = mock_ctx.request_context.lifespan_context["gemini_client"]
+        gemini_client_mock.aio = MagicMock()
+        gemini_client_mock.aio.models = MagicMock()
+        gemini_client_mock.aio.models.generate_content = AsyncMock(return_value=MagicMock(text="```ignorefile\n# BLACKLIST PATTERNS\n*.log\n\n# WHITELIST PATTERNS\n!important.py\n```"))
+        
+        # Test with explicit depth_limit = 1 (only root files)
+        with patch("asyncio.Semaphore"):
+            with patch("asyncio.create_task", side_effect=lambda coro: coro):
+                with patch("asyncio.gather", return_value=[({"*.log"}, {"!important.py"})]):
+                    with patch("builtins.open", MagicMock()):
+                        result = await curate_ignore_file(mock_ctx, user_task, "file_structure", depth_limit=1)
+                        assert "Successfully created .yellhornignore file" in result
+                        
+                        # Verify depth filtering was logged
+                        log_messages = [call[1]['message'] for call in mock_ctx.log.call_args_list 
+                                      if isinstance(call[1].get('message'), str)]
+                        depth_logs = [msg for msg in log_messages if "depth limit" in msg.lower()]
+                        assert any("filtered from" in msg for msg in depth_logs)
+                        
+        # Test with depth_limit = 2 (root files and first level directories)
+        mock_ctx.log.reset_mock()  # Reset log calls
+        with patch("asyncio.Semaphore"):
+            with patch("asyncio.create_task", side_effect=lambda coro: coro):
+                with patch("asyncio.gather", return_value=[({"*.log"}, {"!important.py"})]):
+                    with patch("builtins.open", MagicMock()):
+                        result = await curate_ignore_file(mock_ctx, user_task, "file_structure", depth_limit=2)
+                        assert "Successfully created .yellhornignore file" in result
+                        
+                        # Verify depth filtering was logged with correct counts
+                        metadata_logs = [call[1].get('metadata', {}) for call in mock_ctx.log.call_args_list 
+                                      if call[1].get('metadata') is not None]
+                        depth_metadata = [meta for meta in metadata_logs if 'depth_limit' in meta]
+                        assert any(meta.get('depth_limit') == 2 for meta in depth_metadata)
+                        
+        # Test automatic depth limit for file_structure mode
+        mock_ctx.log.reset_mock()  # Reset log calls
+        with patch("asyncio.Semaphore"):
+            with patch("asyncio.create_task", side_effect=lambda coro: coro):
+                with patch("asyncio.gather", return_value=[({"*.log"}, {"!important.py"})]):
+                    with patch("builtins.open", MagicMock()):
+                        # Don't specify depth_limit - should default to 1 for file_structure mode
+                        result = await curate_ignore_file(mock_ctx, user_task, "file_structure")
+                        assert "Successfully created .yellhornignore file" in result
+                        
+                        # Verify automatic depth limit was set and logged
+                        log_messages = [call[1]['message'] for call in mock_ctx.log.call_args_list 
+                                      if isinstance(call[1].get('message'), str)]
+                        assert any("Setting depth_limit to 1" in msg for msg in log_messages)
 
 
 # Helper class for creating async mocks

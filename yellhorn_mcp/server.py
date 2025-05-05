@@ -887,14 +887,42 @@ async def process_workplan_async(
         # Get codebase snapshot based on reasoning mode
         codebase_reasoning = ctx.request_context.lifespan_context.get("codebase_reasoning", "full")
 
+        # Get codebase info based on reasoning mode
         if codebase_reasoning == "lsp":
             from yellhorn_mcp.lsp_utils import get_lsp_snapshot
-
             file_paths, file_contents = await get_lsp_snapshot(repo_path)
-        else:
-            file_paths, file_contents = await get_codebase_snapshot(repo_path)
+            # For lsp mode, format with tree and LSP file contents
+            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
+            
+        elif codebase_reasoning == "file_structure":
+            # For file_structure mode, we only need the file paths, not the contents
+            file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths")
+            
+            # Log that we're using file_structure mode
+            await ctx.log(
+                level="info",
+                message=f"Using file structure mode for workplan generation: {len(file_paths)} files discovered",
+            )
+            
+            # Create directory structure visualization using tree_utils
+            from yellhorn_mcp.tree_utils import build_tree
+            tree_view = build_tree(file_paths)
+            
+            # Create special codebase info for file_structure mode that only includes the tree
+            codebase_info = f"""<codebase_tree>
+{tree_view}
+</codebase_tree>
 
-        codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
+<file_structure_note>
+This workplan is being generated with file structure mode, which only includes directory structure 
+and file paths without file contents. This provides a lightweight overview of the codebase organization.
+</file_structure_note>"""
+            
+        else:
+            # Default full mode - get all file paths and contents
+            file_paths, file_contents = await get_codebase_snapshot(repo_path)
+            # Format with tree and full file contents
+            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct prompt
         prompt = f"""You are an expert software developer tasked with creating a detailed workplan that will be published as a GitHub issue.
@@ -1104,7 +1132,7 @@ def is_git_repository(path: Path) -> bool:
 
 @mcp.tool(
     name="create_workplan",
-    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full', 'lsp', or 'none'). Set debug=True to see the full prompt.",
+    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full', 'lsp', 'file_structure', or 'none'). Set debug=True to see the full prompt.",
 )
 async def create_workplan(
     title: str,
@@ -1124,6 +1152,7 @@ async def create_workplan(
         codebase_reasoning: Control whether AI enhancement is performed:
             - "full": (default) Use AI to enhance the workplan with full codebase context
             - "lsp": Use AI with lighter codebase context (only function/method signatures)
+            - "file_structure": Use AI with only file structure information (no file contents)
             - "none": Skip AI enhancement, use the provided description as-is
         debug: If True, adds a comment to the issue with the full prompt used for generation.
                Useful for debugging and improving prompt engineering.
@@ -1154,6 +1183,8 @@ async def create_workplan(
             initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
         elif codebase_reasoning == "lsp":
             initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with lightweight codebase context (function signatures), please wait...*"
+        elif codebase_reasoning == "file_structure":
+            initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with file structure context (directory structure only), please wait...*"
         else:
             # If codebase_reasoning is not recognized, default to "full" with a log message
             await ctx.log(
@@ -1486,6 +1517,7 @@ async def curate_ignore_file(
     user_task: str,
     codebase_reasoning: str = "file_structure",
     output_path: str = ".yellhornignore",
+    depth_limit: int = 0,  # 0 means no limit, will be set to 1 for file_structure mode if not specified
 ) -> str:
     """
     Analyzes codebase structure and creates a .yellhornignore file with optimized blacklist/whitelist rules.
@@ -1497,10 +1529,12 @@ async def curate_ignore_file(
         ctx: Server context.
         user_task: Description of the task you're working on, used to customize the ignore rules.
         codebase_reasoning: Analysis mode for codebase structure. Options:
-            - "full": Performs deep analysis with all codebase context (default)
-            - "file_structure": Lightweight analysis based only on file/directory structure
+            - "full": Performs deep analysis with all codebase context
+            - "file_structure": Lightweight analysis based only on file/directory structure (default)
             - "lsp": Analysis using programming language constructs (functions, classes)
         output_path: Path where the .yellhornignore file will be created. Defaults to ".yellhornignore".
+        depth_limit: Maximum directory depth to analyze (0 means no limit). For file_structure mode,
+                     defaults to 1 (top-level directories only) if not specified.
             
     Returns:
         Success message with path to created .yellhornignore file.
@@ -1515,14 +1549,29 @@ async def curate_ignore_file(
         openai_client = ctx.request_context.lifespan_context.get("openai_client")
         model: str = ctx.request_context.lifespan_context["model"]
         
+        # Set default depth limit for file_structure mode if not specified
+        if codebase_reasoning == "file_structure" and depth_limit == 0:
+            depth_limit = 1  # Default to only top-level directories for file_structure mode
+            await ctx.log(
+                level="info",
+                message=f"Setting depth_limit to 1 for file_structure mode (top-level directories only)"
+            )
+        
         await ctx.log(
             level="info",
             message=f"Starting .yellhornignore file curation with {model} using {codebase_reasoning} mode",
+            metadata={
+                "depth_limit": depth_limit,
+                "codebase_reasoning": codebase_reasoning,
+                "model": model
+            }
         )
         
         # Set chunk size based on reasoning mode
         if codebase_reasoning == "file_structure":
-            chunk_size = 300  # Process more files per chunk for file structure mode
+            chunk_size = 3000  # Process more files per chunk for file structure mode
+        elif codebase_reasoning == "lsp":
+            chunk_size = 300  # Process more files per chunk for lsp mode
         else:
             chunk_size = 100  # Default chunk size for other modes
         
@@ -1548,6 +1597,31 @@ async def curate_ignore_file(
         if not file_paths:
             raise YellhornMCPError("No files found in repository to analyze")
             
+        # Apply depth limit if specified
+        if depth_limit > 0:
+            filtered_file_paths = []
+            for file_path in file_paths:
+                # Count the number of path separators to determine depth
+                # +1 because a file at the root has depth 1, not 0
+                path_depth = file_path.count('/') + 1
+                if path_depth <= depth_limit:
+                    filtered_file_paths.append(file_path)
+            
+            # Update file_paths with filtered list
+            original_count = len(file_paths)
+            file_paths = filtered_file_paths
+            filtered_count = len(file_paths)
+            
+            await ctx.log(
+                level="info",
+                message=f"Applied depth limit {depth_limit}: filtered from {original_count} to {filtered_count} files",
+                metadata={
+                    "depth_limit": depth_limit,
+                    "original_file_count": original_count,
+                    "filtered_file_count": filtered_count
+                }
+            )
+            
         # Log the number of files found
         await ctx.log(
             level="info",
@@ -1561,13 +1635,19 @@ async def curate_ignore_file(
         file_path_chunks = []
         for i in range(0, len(file_paths), chunk_size):
             file_path_chunks.append(file_paths[i:i + chunk_size])
+        
+        # Log start of parallel processing
+        await ctx.log(
+            level="info",
+            message=f"Starting parallel processing of {total_chunks} chunks with max concurrency of 5"
+        )
             
         # Track ignore patterns and whitelist patterns
         all_ignore_patterns = set()
         all_whitelist_patterns = set()
         
-        # Process each chunk with LLM
-        for chunk_idx, file_chunk in enumerate(file_path_chunks):
+        # Define a helper function to process a single chunk
+        async def process_chunk(chunk_idx, file_chunk):
             await ctx.log(
                 level="info",
                 message=f"Processing chunk {chunk_idx + 1}/{total_chunks} with {len(file_chunk)} files",
@@ -1653,6 +1733,22 @@ Only include patterns that are clearly justified by the file structure and user 
             # Call the appropriate AI model based on type
             is_openai_model = model.startswith("gpt-") or model.startswith("o")
             
+            # Log that we're initiating the LLM call
+            await ctx.log(
+                level="info",
+                message=f"Initiating LLM call for chunk {chunk_idx + 1}/{total_chunks} using {model}",
+                metadata={
+                    "chunk_index": chunk_idx + 1,
+                    "total_chunks": total_chunks,
+                    "file_count": len(file_chunk),
+                    "model": model,
+                    "reasoning_mode": codebase_reasoning
+                }
+            )
+            
+            chunk_ignore_patterns = set()
+            chunk_whitelist_patterns = set()
+            
             try:
                 if is_openai_model:
                     if not openai_client:
@@ -1661,10 +1757,27 @@ Only include patterns that are clearly justified by the file structure and user 
                     # Convert the prompt to OpenAI messages format
                     messages = [{"role": "user", "content": prompt}]
                     
+                    await ctx.log(
+                        level="info",
+                        message=f"Sending request to OpenAI API for chunk {chunk_idx + 1}"
+                    )
+                    
                     # Call OpenAI API
                     response = await openai_client.chat.completions.create(
                         model=model,
                         messages=messages,
+                    )
+                    
+                    await ctx.log(
+                        level="info",
+                        message=f"Received response from OpenAI API for chunk {chunk_idx + 1}",
+                        metadata={
+                            "usage": {
+                                "prompt_tokens": response.usage.prompt_tokens,
+                                "completion_tokens": response.usage.completion_tokens,
+                                "total_tokens": response.usage.total_tokens
+                            }
+                        }
                     )
                     
                     # Extract content
@@ -1673,28 +1786,103 @@ Only include patterns that are clearly justified by the file structure and user 
                     if gemini_client is None:
                         raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
                         
+                    await ctx.log(
+                        level="info",
+                        message=f"Sending request to Gemini API for chunk {chunk_idx + 1}"
+                    )
+                    
                     # Call Gemini API
                     response = await gemini_client.aio.models.generate_content(model=model, contents=prompt)
+                    
+                    # Log completion with usage data if available
+                    usage_metadata = getattr(response, "usage_metadata", None)
+                    usage_log = {}
+                    
+                    if usage_metadata:
+                        usage_log = {
+                            "prompt_tokens": usage_metadata.prompt_token_count,
+                            "completion_tokens": usage_metadata.candidates_token_count,
+                            "total_tokens": usage_metadata.total_token_count
+                        }
+                    
+                    await ctx.log(
+                        level="info",
+                        message=f"Received response from Gemini API for chunk {chunk_idx + 1}",
+                        metadata={"usage": usage_log}
+                    )
+                    
                     chunk_result = response.text
                     
                 # Extract patterns from the result
                 ignore_patterns, whitelist_patterns = parse_ignore_patterns(chunk_result)
                 
-                # Add patterns to our collections
-                all_ignore_patterns.update(ignore_patterns)
-                all_whitelist_patterns.update(whitelist_patterns)
+                # Store patterns for this chunk
+                chunk_ignore_patterns = ignore_patterns
+                chunk_whitelist_patterns = whitelist_patterns
                 
+                # Log the patterns found with detailed metadata
                 await ctx.log(
                     level="info",
                     message=f"Chunk {chunk_idx + 1} processed, found {len(ignore_patterns)} blacklist and {len(whitelist_patterns)} whitelist patterns",
+                    metadata={
+                        "chunk_index": chunk_idx + 1,
+                        "ignore_patterns": sorted(list(ignore_patterns)),
+                        "whitelist_patterns": sorted(list(whitelist_patterns)),
+                        "pattern_count": {
+                            "ignore": len(ignore_patterns),
+                            "whitelist": len(whitelist_patterns)
+                        }
+                    }
                 )
                 
             except Exception as chunk_error:
                 await ctx.log(
                     level="error", 
-                    message=f"Error processing chunk {chunk_idx + 1}: {str(chunk_error)}"
+                    message=f"Error processing chunk {chunk_idx + 1}: {str(chunk_error)}",
+                    metadata={
+                        "chunk_index": chunk_idx + 1,
+                        "error": str(chunk_error),
+                        "error_type": type(chunk_error).__name__
+                    }
                 )
                 # Continue with next chunk despite errors
+            
+            # Return results from this chunk
+            return chunk_ignore_patterns, chunk_whitelist_patterns
+        
+        # Use semaphore to limit concurrency to 5 parallel calls
+        semaphore = asyncio.Semaphore(5)
+        
+        async def bounded_process_chunk(chunk_idx, file_chunk):
+            async with semaphore:
+                return await process_chunk(chunk_idx, file_chunk)
+        
+        # Create tasks for all chunks
+        tasks = []
+        for chunk_idx, file_chunk in enumerate(file_path_chunks):
+            task = asyncio.create_task(bounded_process_chunk(chunk_idx, file_chunk))
+            tasks.append(task)
+        
+        # Wait for all tasks to complete and collect results
+        await ctx.log(level="info", message=f"Waiting for {len(tasks)} parallel LLM tasks to complete")
+        completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        for result in completed_tasks:
+            if isinstance(result, Exception):
+                # Log the exception but continue
+                await ctx.log(level="error", message=f"Parallel task failed: {str(result)}")
+                continue
+                
+            # Unpack the result tuple and update our pattern collections
+            chunk_ignore_patterns, chunk_whitelist_patterns = result
+            all_ignore_patterns.update(chunk_ignore_patterns)
+            all_whitelist_patterns.update(chunk_whitelist_patterns)
+        
+        await ctx.log(
+            level="info", 
+            message=f"All chunks processed, collected {len(all_ignore_patterns)} blacklist and {len(all_whitelist_patterns)} whitelist patterns in total"
+        )
                 
         # Generate the final .yellhornignore file content with comments
         final_content = "# Yellhorn Ignore File - AI-optimized patterns\n"
@@ -1717,6 +1905,21 @@ Only include patterns that are clearly justified by the file structure and user 
             await ctx.log(
                 level="info",
                 message=f"Successfully wrote .yellhornignore file to {output_file_path}",
+            )
+            
+            # Create trace content to log
+            trace_content = {
+                "output_path": str(output_file_path),
+                "blacklist_patterns": sorted(list(all_ignore_patterns)),
+                "whitelist_patterns": sorted(list(all_whitelist_patterns)),
+                "content": final_content
+            }
+            
+            # Add trace to cache
+            await ctx.log(
+                level="info", 
+                message=f"Generated .yellhornignore file", 
+                metadata=trace_content
             )
             
             # Return success message
