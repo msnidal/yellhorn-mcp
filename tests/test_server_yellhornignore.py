@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from yellhorn_mcp.server import get_codebase_snapshot, parse_ignore_patterns
+from yellhorn_mcp.server import get_codebase_snapshot
 
 
 @pytest.mark.asyncio
@@ -276,56 +276,6 @@ async def test_yellhornignore_whitelist_functionality():
             assert "dist/bundle.js" not in file_contents
 
 
-def test_parse_ignore_patterns():
-    """Test the parse_ignore_patterns function that extracts blacklist and whitelist patterns."""
-    # Basic test with standard format
-    result = """```ignorefile
-# BLACKLIST PATTERNS
-*.log
-node_modules/
-dist/
-__pycache__/
-
-# WHITELIST PATTERNS
-!important.log
-!node_modules/config.json
-```"""
-    ignore_patterns, whitelist_patterns = parse_ignore_patterns(result)
-    
-    assert "*.log" in ignore_patterns
-    assert "node_modules/" in ignore_patterns
-    assert "dist/" in ignore_patterns
-    assert "__pycache__/" in ignore_patterns
-    assert len(ignore_patterns) == 4
-    
-    assert "!important.log" in whitelist_patterns
-    assert "!node_modules/config.json" in whitelist_patterns
-    assert len(whitelist_patterns) == 2
-    
-    # Test with non-standard format (without code blocks)
-    result = """
-# BLACKLIST PATTERNS
-*.log
-node_modules/
-
-# WHITELIST PATTERNS
-!important.log
-"""
-    ignore_patterns, whitelist_patterns = parse_ignore_patterns(result)
-    
-    assert "*.log" in ignore_patterns
-    assert "node_modules/" in ignore_patterns
-    assert len(ignore_patterns) == 2
-    
-    assert "!important.log" in whitelist_patterns
-    assert len(whitelist_patterns) == 1
-    
-    # Test with empty result
-    result = ""
-    ignore_patterns, whitelist_patterns = parse_ignore_patterns(result)
-    
-    assert len(ignore_patterns) == 0
-    assert len(whitelist_patterns) == 0
 
 
 # Helper class for creating async mocks

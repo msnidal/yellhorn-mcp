@@ -1596,8 +1596,7 @@ async def curate_context(
             - "lsp": Analysis using programming language constructs (functions, classes)
         ignore_file_path: Path to the .yellhornignore file to use. Defaults to ".yellhornignore".
         output_path: Path where the .yellhorncontext file will be created. Defaults to ".yellhorncontext".
-        depth_limit: Maximum directory depth to analyze (0 means no limit). Unlike curate_ignore_file,
-                     this doesn't have a default value based on codebase_reasoning.
+        depth_limit: Maximum directory depth to analyze (0 means no limit).
             
     Returns:
         Success message with path to created .yellhorncontext file.
@@ -2183,38 +2182,3 @@ async def judge_workplan(
     except Exception as e:
         raise YellhornMCPError(f"Failed to trigger workplan judgement: {str(e)}")
 
-def parse_ignore_patterns(result_text: str) -> tuple[set[str], set[str]]:
-    """
-    Parse the ignore patterns from LLM response text.
-
-    Args:
-        result_text: Text response from LLM containing patterns.
-        
-    Returns:
-        Tuple of (ignore_patterns, whitelist_patterns) as sets.
-    """
-    ignore_patterns = set()
-    whitelist_patterns = set()
-
-    # Extract the content between ```ignorefile and ``` if present
-    if "```ignorefile" in result_text and "```" in result_text[result_text.find("```ignorefile"):]:
-        start_idx = result_text.find("```ignorefile") + len("```ignorefile")
-        end_idx = result_text.find("```", start_idx)
-        if end_idx > start_idx:
-            result_text = result_text[start_idx:end_idx]
-
-    # Process each line
-    for line in result_text.split("\n"):
-        line = line.strip()
-        
-        # Skip empty lines and comments
-        if not line or line.startswith("#"):
-            continue
-            
-        # Whitelist patterns start with !
-        if line.startswith("!"):
-            whitelist_patterns.add(line)
-        else:
-            ignore_patterns.add(line)
-            
-    return ignore_patterns, whitelist_patterns
