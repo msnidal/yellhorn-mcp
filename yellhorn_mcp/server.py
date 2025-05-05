@@ -867,6 +867,7 @@ async def process_workplan_async(
     ctx: Context,
     detailed_description: str,
     debug: bool = False,
+    _meta: dict[str, Any] | None = None,
 ) -> None:
     """
     Process workplan generation asynchronously and update the GitHub issue.
@@ -1278,6 +1279,7 @@ async def process_judgement_async(
     base_commit_hash: str | None = None,
     head_commit_hash: str | None = None,
     debug: bool = False,
+    _meta: dict[str, Any] | None = None,
 ) -> str:
     """
     Process the judgement of a workplan and diff asynchronously, creating a GitHub sub-issue.
@@ -1477,28 +1479,28 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
 @mcp.tool(
     name="curate_ignore_file",
-    description="Analyzes the codebase structure to build a .yellhornignore file with blacklist/whitelist rules for improved AI context management.",
+    description="Analyzes the codebase structure to build a .yellhornignore file with blacklist/whitelist rules customized for your specific task.",
 )
 async def curate_ignore_file(
     ctx: Context,
-    chunk_size: int = 100, 
-    max_tokens: int = 50000,
+    user_task: str,
+    codebase_reasoning: str = "full",
     output_path: str = ".yellhornignore",
-    reasoning_mode: str = "full",
 ) -> str:
     """
     Analyzes codebase structure and creates a .yellhornignore file with optimized blacklist/whitelist rules.
     
     This tool examines your codebase, identifies patterns, and generates an optimized .yellhornignore file
-    to provide the most relevant context to AI models while filtering out noise. It uses chunked LLM calls
-    to handle large codebases.
+    customized for your specific task to provide the most relevant context to AI models while filtering out noise.
     
     Args:
         ctx: Server context.
-        chunk_size: Number of files to analyze in each LLM chunk. Defaults to 100.
-        max_tokens: Maximum tokens allowed for LLM context. Defaults to 50,000.
+        user_task: Description of the task you're working on, used to customize the ignore rules.
+        codebase_reasoning: Analysis mode for codebase structure. Options:
+            - "full": Performs deep analysis with all codebase context (default)
+            - "file_structure": Lightweight analysis based only on file/directory structure
+            - "lsp": Analysis using programming language constructs (functions, classes)
         output_path: Path where the .yellhornignore file will be created. Defaults to ".yellhornignore".
-        reasoning_mode: Context level for analysis ("full" or "lsp"). Defaults to "full".
             
     Returns:
         Success message with path to created .yellhornignore file.
@@ -1515,11 +1517,33 @@ async def curate_ignore_file(
         
         await ctx.log(
             level="info",
-            message=f"Starting .yellhornignore file curation with {model}",
+            message=f"Starting .yellhornignore file curation with {model} using {codebase_reasoning} mode",
         )
         
-        # Get file paths only (no contents) to analyze directory structure
-        file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths")
+        # Set chunk size based on reasoning mode
+        if codebase_reasoning == "file_structure":
+            chunk_size = 300  # Process more files per chunk for file structure mode
+        else:
+            chunk_size = 100  # Default chunk size for other modes
+        
+        # Validate codebase_reasoning option
+        valid_modes = ["full", "file_structure", "lsp"]
+        if codebase_reasoning not in valid_modes:
+            await ctx.log(
+                level="warning",
+                message=f"Invalid codebase_reasoning '{codebase_reasoning}'. Using 'full' as default.",
+            )
+            codebase_reasoning = "full"
+            
+        # Get codebase information based on reasoning mode
+        if codebase_reasoning == "lsp":
+            # Use LSP mode for language-aware analysis
+            from yellhorn_mcp.lsp_utils import get_lsp_snapshot
+            file_paths, file_contents = await get_lsp_snapshot(repo_path)
+        else:
+            # For both full and file_structure modes, just get file paths
+            file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths")
+            file_contents = {}  # No contents needed for file_structure mode
         
         if not file_paths:
             raise YellhornMCPError("No files found in repository to analyze")
@@ -1552,29 +1576,62 @@ async def curate_ignore_file(
             # Format the file list for the prompt
             file_list = "\n".join(file_chunk)
             
-            # Construct the prompt for this chunk
-            prompt = f"""You are an expert software developer tasked with analyzing a portion of a codebase structure to identify patterns for a .yellhornignore file. 
+            # Prepare additional context based on reasoning mode
+            if codebase_reasoning == "full" and file_contents:
+                # Include a sample of file contents for full mode
+                content_sample = []
+                for file_path in file_chunk[:5]:  # Include first 5 files in chunk as samples
+                    if file_path in file_contents:
+                        # Limit content to 50 lines max
+                        content = file_contents.get(file_path, "")
+                        content_lines = content.split("\n")[:50]
+                        if content_lines:
+                            content_sample.append(f"File: {file_path}\n```\n{chr(10).join(content_lines)}\n```\n")
+                
+                content_context = "\n".join(content_sample)
+                additional_context = f"\n\n<content_samples>\n{content_context}\n</content_samples>" if content_sample else ""
+            elif codebase_reasoning == "lsp" and file_contents:
+                # Include signature information for LSP mode
+                signature_sample = []
+                for file_path in file_chunk[:10]:  # Include first 10 files in chunk
+                    if file_path in file_contents:
+                        # Extract signatures
+                        signature_sample.append(f"File: {file_path}\n{file_contents.get(file_path, '')}")
+                
+                signature_context = "\n".join(signature_sample)
+                additional_context = f"\n\n<code_signatures>\n{signature_context}\n</code_signatures>" if signature_sample else ""
+            else:
+                # For file_structure mode, no additional context needed
+                additional_context = ""
             
-The .yellhornignore file is similar to .gitignore but specifically for filtering what files an AI assistant sees when analyzing a codebase.
+            # Construct the prompt for this chunk
+            prompt = f"""You are an expert software developer tasked with analyzing a codebase structure to identify patterns for a .yellhornignore file that will be optimized for the following user task:
+
+<user_task>
+{user_task}
+</user_task>
+
+The .yellhornignore file is similar to .gitignore but specifically for filtering what files an AI assistant sees when analyzing a codebase. Your goal is to ensure the AI has access to all relevant code for the user's task while filtering out noise.
 
 Below is a list of file paths from the codebase (chunk {chunk_idx + 1} of {total_chunks}):
 
 <file_paths>
 {file_list}
-</file_paths>
+</file_paths>{additional_context}
 
-Your task is to identify patterns for filtering files in this codebase. Consider:
+Your task is to identify patterns for filtering files in this codebase, specifically focused on helping with the user task above. Consider:
 
 1. Files that typically don't provide useful context to an AI (e.g., build artifacts, logs, cache files)
 2. Directories that contain machine-generated code or vendor code
 3. Binary files or large data files
 4. Files that would contribute to token bloat without adding useful context
+5. What files are MOST RELEVANT to the user's task - these might need to be whitelisted
 
 For each pattern, decide if it should be:
 - BLACKLISTED (excluded from AI context with pattern like "*.log" or "build/")
 - WHITELISTED (explicitly included with pattern like "!important.config" or "!docs/architecture.md")
 
-IMPORTANT: Your analysis should consider standard software development conventions, but be specific to the actual file structure shown above.
+IMPORTANT: Your analysis should consider standard software development conventions, but be specific to the actual file structure shown above and the user's task.
 
 Return your analysis in this exact format:
 
@@ -1590,7 +1647,7 @@ pattern2
 ...
 ```
 
-Only include patterns that are clearly justified by the file structure. Keep patterns minimal but effective. Use directory patterns with "/" where appropriate.
+Only include patterns that are clearly justified by the file structure and user task. Keep patterns minimal but effective. Use directory patterns with "/" where appropriate.
 """
             
             # Call the appropriate AI model based on type

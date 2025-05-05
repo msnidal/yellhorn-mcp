@@ -342,6 +342,9 @@ async def test_curate_ignore_file():
         "gemini_client": MagicMock(),
     }
     
+    # Sample user task
+    user_task = "Implementing a user authentication system with JWT tokens"
+    
     # Setup mock for get_codebase_snapshot
     with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
         # First test: No files found
@@ -349,9 +352,9 @@ async def test_curate_ignore_file():
         
         # Test error handling when no files are found
         with pytest.raises(YellhornMCPError, match="No files found in repository to analyze"):
-            await curate_ignore_file(mock_ctx)
+            await curate_ignore_file(mock_ctx, user_task)
         
-        # Second test: Normal operation with files
+        # Second test: Normal operation with files using file_structure mode
         mock_sample_files = [
             "src/main.py",
             "src/utils.py",
@@ -373,6 +376,7 @@ __pycache__/
 
 # WHITELIST PATTERNS
 !docs/README.md
+!src/auth/
 ```"""
         # Set up the async response for gemini client
         gemini_client_mock = mock_ctx.request_context.lifespan_context["gemini_client"]
@@ -382,11 +386,58 @@ __pycache__/
         
         # Mock the open function to avoid writing to the filesystem
         with patch("builtins.open", MagicMock()):
-            result = await curate_ignore_file(mock_ctx)
+            result = await curate_ignore_file(mock_ctx, user_task, "file_structure")
             
             # Verify the result message is correct
             assert "Successfully created .yellhornignore file" in result
-            assert "4 blacklist and 1 whitelist patterns" in result
+            assert "4 blacklist and 2 whitelist patterns" in result
+            
+            # Verify the API was called
+            assert gemini_client_mock.aio.models.generate_content.called
+    
+    # Test LSP mode
+    with patch("yellhorn_mcp.lsp_utils.get_lsp_snapshot") as mock_lsp_snapshot:
+        # Setup mock for LSP mode
+        mock_lsp_files = ["src/auth/jwt.py", "src/models/user.py"]
+        mock_lsp_contents = {
+            "src/auth/jwt.py": "def generate_token(user_id: str) -> str\ndef verify_token(token: str) -> dict",
+            "src/models/user.py": "class User\n    username: str\n    password_hash: str\n    def authenticate(self, password: str) -> bool"
+        }
+        mock_lsp_snapshot.return_value = (mock_lsp_files, mock_lsp_contents)
+        
+        # Set up a fresh mock context
+        mock_ctx = MagicMock()
+        mock_ctx.log = AsyncMock()
+        mock_ctx.request_context.lifespan_context = {
+            "repo_path": Path("/fake/repo/path"),
+            "model": "gemini-2.5-pro-preview-03-25",
+            "gemini_client": MagicMock(),
+        }
+        
+        # Mock the Gemini API response
+        mock_response = MagicMock()
+        mock_response.text = """```ignorefile
+# BLACKLIST PATTERNS
+*.log
+node_modules/
+
+# WHITELIST PATTERNS
+!src/auth/jwt.py
+!src/models/user.py
+```"""
+        # Set up the async response for gemini client
+        gemini_client_mock = mock_ctx.request_context.lifespan_context["gemini_client"]
+        gemini_client_mock.aio = MagicMock()
+        gemini_client_mock.aio.models = MagicMock()
+        gemini_client_mock.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        
+        # Mock the open function to avoid writing to the filesystem
+        with patch("builtins.open", MagicMock()):
+            result = await curate_ignore_file(mock_ctx, user_task, "lsp")
+            
+            # Verify the result message is correct
+            assert "Successfully created .yellhornignore file" in result
+            assert "2 blacklist and 2 whitelist patterns" in result
             
             # Verify the API was called
             assert gemini_client_mock.aio.models.generate_content.called
@@ -412,9 +463,32 @@ __pycache__/
         # Test that we still continue processing after chunk errors
         with patch("builtins.open", MagicMock()):
             # Should not raise exception due to try/except that catches chunk errors
-            result = await curate_ignore_file(mock_ctx)
+            result = await curate_ignore_file(mock_ctx, user_task, "full")
             assert "Successfully created .yellhornignore file" in result
             assert "0 blacklist and 0 whitelist patterns" in result  # No patterns due to API error
+    
+    # Test invalid codebase_reasoning mode (should default to full)
+    mock_ctx = MagicMock()
+    mock_ctx.log = AsyncMock()
+    mock_ctx.request_context.lifespan_context = {
+        "repo_path": Path("/fake/repo/path"),
+        "model": "gemini-2.5-pro-preview-03-25",
+        "gemini_client": MagicMock(),
+    }
+    
+    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+        mock_snapshot.return_value = (["file1.py"], {})
+        
+        gemini_client_mock = mock_ctx.request_context.lifespan_context["gemini_client"]
+        gemini_client_mock.aio = MagicMock()
+        gemini_client_mock.aio.models = MagicMock()
+        gemini_client_mock.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        
+        # Mock the open function to avoid writing to the filesystem
+        with patch("builtins.open", MagicMock()):
+            # Should work and default to full mode
+            result = await curate_ignore_file(mock_ctx, user_task, "invalid_mode")
+            assert "Successfully created .yellhornignore file" in result
 
 
 # Helper class for creating async mocks

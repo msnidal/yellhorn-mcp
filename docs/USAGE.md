@@ -234,14 +234,16 @@ Retrieves the workplan content (GitHub issue body) associated with a specified G
 
 ### curate_ignore_file
 
-Analyzes the codebase structure to build a .yellhornignore file with blacklist/whitelist rules for improved AI context management. The tool creates an optimized filter configuration to provide relevant context to AI models while reducing noise.
+Analyzes the codebase structure to build a .yellhornignore file with blacklist/whitelist rules customized for your specific task. The tool creates an optimized filter configuration focused on making sure the AI has access to the most relevant files.
 
 **Input**:
 
-- `chunk_size`: (optional) Number of files to analyze in each LLM chunk. Defaults to 100.
-- `max_tokens`: (optional) Maximum tokens allowed for LLM context. Defaults to 50,000.
+- `user_task`: Description of the task you're working on, used to customize the ignore rules.
+- `codebase_reasoning`: (optional) Analysis mode for codebase structure. Options:
+  - `"full"`: Performs deep analysis with all codebase context (default)
+  - `"file_structure"`: Lightweight analysis based only on file/directory structure
+  - `"lsp"`: Analysis using programming language constructs (functions, classes)
 - `output_path`: (optional) Path where the .yellhornignore file will be created. Defaults to ".yellhornignore".
-- `reasoning_mode`: (optional) Context level for analysis. Defaults to "full".
 
 **Output**:
 
@@ -252,15 +254,23 @@ Analyzes the codebase structure to build a .yellhornignore file with blacklist/w
 - This tool generates a new .yellhornignore file or overwrites an existing one each time it's called.
 - It uses chunked LLM calls to process large codebases, analyzing directory structure and file patterns.
 - The generated file includes both blacklist patterns (to exclude files from AI context) and whitelist patterns (to explicitly include important files that would otherwise be excluded).
+- The tool now customizes the ignore patterns based on the specific task you're working on, ensuring that files relevant to your task are available to the AI.
+- Three different reasoning modes allow for flexibility in how the codebase is analyzed:
+  - `full`: Most comprehensive analysis, includes file contents samples
+  - `file_structure`: Fastest analysis based only on file paths, best for large codebases
+  - `lsp`: Language-aware analysis, helps identify relevant code constructs
 - You can customize the output location using the `output_path` parameter if you don't want to use the default ".yellhornignore" at the repository root.
 
 **Example Usage**:
 
 ```
-Please analyze my codebase and create an optimized .yellhornignore file.
+Please create a .yellhornignore file optimized for "implementing a user authentication system with JWT tokens".
 ```
 
-This will scan your entire repository structure, identify common patterns of files that should be excluded from AI context (like build artifacts, logs, binary files), and create a .yellhornignore file with appropriate blacklist and whitelist rules.
+This will analyze your codebase with your specific task in mind, creating a .yellhornignore file that:
+1. Excludes common noise (build artifacts, logs, binary files)
+2. Ensures files relevant to authentication and JWT tokens are available to the AI
+3. Balances context size with relevant information for your specific task
 
 ### judge_workplan
 
@@ -361,7 +371,7 @@ curl -X POST http://127.0.0.1:8000/tools/get_workplan \
 # Call a tool (curate_ignore_file)
 curl -X POST http://127.0.0.1:8000/tools/curate_ignore_file \
   -H "Content-Type: application/json" \
-  -d '{"chunk_size": 150, "output_path": ".yellhornignore"}'
+  -d '{"user_task": "Implementing a user authentication system with JWT tokens", "codebase_reasoning": "file_structure", "output_path": ".yellhornignore"}'
 
 # Call a tool (judge_workplan with full codebase context - default)
 curl -X POST http://127.0.0.1:8000/tools/judge_workplan \
@@ -394,8 +404,8 @@ python -m examples.client_example plan --title "User Authentication System" --de
 # Get workplan
 python -m examples.client_example getplan --issue-number "123"
 
-# Generate a .yellhornignore file
-python -m examples.client_example curate-ignore --chunk-size 150 --output-path ".yellhornignore"
+# Generate a .yellhornignore file (using file_structure mode for fast analysis)
+python -m examples.client_example curate-ignore --user-task "Implementing a user authentication system with JWT tokens" --codebase-reasoning file_structure
 
 # Judge work with full codebase context (default)
 python -m examples.client_example judge --issue-number "456" --base-ref "main" --head-ref "feature-branch"
