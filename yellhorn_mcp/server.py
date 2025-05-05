@@ -1534,7 +1534,7 @@ async def curate_ignore_file(
             - "lsp": Analysis using programming language constructs (functions, classes)
         output_path: Path where the .yellhornignore file will be created. Defaults to ".yellhornignore".
         depth_limit: Maximum directory depth to analyze (0 means no limit). For file_structure mode,
-                     defaults to 1 (top-level directories only) if not specified.
+                     defaults to 2 (top-level directories only) if not specified.
             
     Returns:
         Success message with path to created .yellhornignore file.
@@ -1551,20 +1551,15 @@ async def curate_ignore_file(
         
         # Set default depth limit for file_structure mode if not specified
         if codebase_reasoning == "file_structure" and depth_limit == 0:
-            depth_limit = 1  # Default to only top-level directories for file_structure mode
+            depth_limit = 2  # Default to only top-level directories for file_structure mode
             await ctx.log(
                 level="info",
-                message=f"Setting depth_limit to 1 for file_structure mode (top-level directories only)"
+                message=f"Setting depth_limit to 2 for file_structure mode (top-level directories only)"
             )
         
         await ctx.log(
             level="info",
-            message=f"Starting .yellhornignore file curation with {model} using {codebase_reasoning} mode",
-            metadata={
-                "depth_limit": depth_limit,
-                "codebase_reasoning": codebase_reasoning,
-                "model": model
-            }
+            message=f"Starting .yellhornignore file curation with {model} using {codebase_reasoning} mode (depth_limit={depth_limit})"
         )
         
         # Set chunk size based on reasoning mode
@@ -1614,12 +1609,7 @@ async def curate_ignore_file(
             
             await ctx.log(
                 level="info",
-                message=f"Applied depth limit {depth_limit}: filtered from {original_count} to {filtered_count} files",
-                metadata={
-                    "depth_limit": depth_limit,
-                    "original_file_count": original_count,
-                    "filtered_file_count": filtered_count
-                }
+                message=f"Applied depth limit {depth_limit}: filtered from {original_count} to {filtered_count} files"
             )
             
         # Log the number of files found
@@ -1736,14 +1726,7 @@ Only include patterns that are clearly justified by the file structure and user 
             # Log that we're initiating the LLM call
             await ctx.log(
                 level="info",
-                message=f"Initiating LLM call for chunk {chunk_idx + 1}/{total_chunks} using {model}",
-                metadata={
-                    "chunk_index": chunk_idx + 1,
-                    "total_chunks": total_chunks,
-                    "file_count": len(file_chunk),
-                    "model": model,
-                    "reasoning_mode": codebase_reasoning
-                }
+                message=f"Initiating LLM call for chunk {chunk_idx + 1}/{total_chunks} using {model} (files: {len(file_chunk)})"
             )
             
             chunk_ignore_patterns = set()
@@ -1770,14 +1753,7 @@ Only include patterns that are clearly justified by the file structure and user 
                     
                     await ctx.log(
                         level="info",
-                        message=f"Received response from OpenAI API for chunk {chunk_idx + 1}",
-                        metadata={
-                            "usage": {
-                                "prompt_tokens": response.usage.prompt_tokens,
-                                "completion_tokens": response.usage.completion_tokens,
-                                "total_tokens": response.usage.total_tokens
-                            }
-                        }
+                        message=f"Received response from OpenAI API for chunk {chunk_idx + 1} (tokens: prompt={response.usage.prompt_tokens}, completion={response.usage.completion_tokens}, total={response.usage.total_tokens})"
                     )
                     
                     # Extract content
@@ -1805,10 +1781,13 @@ Only include patterns that are clearly justified by the file structure and user 
                             "total_tokens": usage_metadata.total_token_count
                         }
                     
+                    tokens_info = ""
+                    if usage_metadata:
+                        tokens_info = f" (tokens: prompt={usage_metadata.prompt_token_count}, completion={usage_metadata.candidates_token_count}, total={usage_metadata.total_token_count})"
+                    
                     await ctx.log(
                         level="info",
-                        message=f"Received response from Gemini API for chunk {chunk_idx + 1}",
-                        metadata={"usage": usage_log}
+                        message=f"Received response from Gemini API for chunk {chunk_idx + 1}{tokens_info}"
                     )
                     
                     chunk_result = response.text
@@ -1821,29 +1800,24 @@ Only include patterns that are clearly justified by the file structure and user 
                 chunk_whitelist_patterns = whitelist_patterns
                 
                 # Log the patterns found with detailed metadata
+                # Format pattern list for logging
+                ignore_patterns_str = ", ".join(sorted(list(ignore_patterns))[:5])
+                if len(ignore_patterns) > 5:
+                    ignore_patterns_str += f", ... ({len(ignore_patterns) - 5} more)"
+                
+                whitelist_patterns_str = ", ".join(sorted(list(whitelist_patterns))[:5])
+                if len(whitelist_patterns) > 5:
+                    whitelist_patterns_str += f", ... ({len(whitelist_patterns) - 5} more)"
+                
                 await ctx.log(
                     level="info",
-                    message=f"Chunk {chunk_idx + 1} processed, found {len(ignore_patterns)} blacklist and {len(whitelist_patterns)} whitelist patterns",
-                    metadata={
-                        "chunk_index": chunk_idx + 1,
-                        "ignore_patterns": sorted(list(ignore_patterns)),
-                        "whitelist_patterns": sorted(list(whitelist_patterns)),
-                        "pattern_count": {
-                            "ignore": len(ignore_patterns),
-                            "whitelist": len(whitelist_patterns)
-                        }
-                    }
+                    message=f"Chunk {chunk_idx + 1} processed, found {len(ignore_patterns)} blacklist patterns [{ignore_patterns_str}] and {len(whitelist_patterns)} whitelist patterns [{whitelist_patterns_str}]"
                 )
                 
             except Exception as chunk_error:
                 await ctx.log(
                     level="error", 
-                    message=f"Error processing chunk {chunk_idx + 1}: {str(chunk_error)}",
-                    metadata={
-                        "chunk_index": chunk_idx + 1,
-                        "error": str(chunk_error),
-                        "error_type": type(chunk_error).__name__
-                    }
+                    message=f"Error processing chunk {chunk_idx + 1}: {str(chunk_error)} ({type(chunk_error).__name__})"
                 )
                 # Continue with next chunk despite errors
             
@@ -1915,11 +1889,18 @@ Only include patterns that are clearly justified by the file structure and user 
                 "content": final_content
             }
             
-            # Add trace to cache
+            # Add trace to cache with simplified content
+            blacklist_str = ", ".join(sorted(list(all_ignore_patterns))[:5])
+            if len(all_ignore_patterns) > 5:
+                blacklist_str += f", ... ({len(all_ignore_patterns) - 5} more)"
+                
+            whitelist_str = ", ".join(sorted(list(all_whitelist_patterns))[:5]) 
+            if len(all_whitelist_patterns) > 5:
+                whitelist_str += f", ... ({len(all_whitelist_patterns) - 5} more)"
+                
             await ctx.log(
                 level="info", 
-                message=f"Generated .yellhornignore file", 
-                metadata=trace_content
+                message=f"Generated .yellhornignore file at {output_file_path} with patterns - Blacklist: [{blacklist_str}], Whitelist: [{whitelist_str}]"
             )
             
             # Return success message
