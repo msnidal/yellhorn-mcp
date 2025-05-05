@@ -1484,7 +1484,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 async def curate_ignore_file(
     ctx: Context,
     user_task: str,
-    codebase_reasoning: str = "full",
+    codebase_reasoning: str = "file_structure",
     output_path: str = ".yellhornignore",
 ) -> str:
     """
@@ -1531,9 +1531,9 @@ async def curate_ignore_file(
         if codebase_reasoning not in valid_modes:
             await ctx.log(
                 level="warning",
-                message=f"Invalid codebase_reasoning '{codebase_reasoning}'. Using 'full' as default.",
+                message=f"Invalid codebase_reasoning '{codebase_reasoning}'. Using 'file_structure' as default.",
             )
-            codebase_reasoning = "full"
+            codebase_reasoning = "file_structure"
             
         # Get codebase information based on reasoning mode
         if codebase_reasoning == "lsp":
