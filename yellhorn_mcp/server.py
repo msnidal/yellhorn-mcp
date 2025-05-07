@@ -455,32 +455,15 @@ async def get_codebase_snapshot(
             # First check if the file is whitelisted
             for pattern in whitelist_patterns:
                 # Regular pattern matching (e.g., "*.py")
-                if fnmatch.fnmatch(file_path, pattern):
+                if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, pattern.rstrip("/") + "/*"):
                     return False  # Whitelisted, don't ignore
 
-                # Special handling for directory patterns (ending with /)
-                if pattern.endswith("/"):
-                    # Match directories by name at the start of the path (e.g., "allowed_dir/...")
-                    if file_path.startswith(pattern[:-1] + "/"):
-                        return False
-                    # Match directories anywhere in the path (e.g., ".../allowed_dir/...")
-                    if "/" + pattern[:-1] + "/" in file_path:
-                        return False
-            
             # Then check if it matches any ignore patterns
             for pattern in ignore_patterns:
                 # Regular pattern matching (e.g., "*.log")
-                if fnmatch.fnmatch(file_path, pattern):
+                if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, pattern.rstrip("/") + "/*"):
                     return True
 
-                # Special handling for directory patterns (ending with /)
-                if pattern.endswith("/"):
-                    # Match directories by name at the start of the path (e.g., "node_modules/...")
-                    if file_path.startswith(pattern[:-1] + "/"):
-                        return True
-                    # Match directories anywhere in the path (e.g., ".../node_modules/...")
-                    if "/" + pattern[:-1] + "/" in file_path:
-                        return True
             return False
 
         # Create a filtered list using a list comprehension for better performance
@@ -520,7 +503,10 @@ async def get_codebase_snapshot(
     return file_paths, file_contents
 
 
-async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[str, str]) -> str:
+async def format_codebase_for_prompt(
+    file_paths: List[str],
+    file_contents: Dict[str, str]
+) -> str:
     """
     Format the codebase information for inclusion in the prompt.
 
@@ -529,31 +515,48 @@ async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[
         file_contents: Dictionary mapping file paths to contents.
 
     Returns:
-        Formatted string with codebase tree and file contents.
+        Formatted string with codebase tree and inlined file contents.
     """
-    from yellhorn_mcp.tree_utils import build_tree
+    # 1. Gather unique directories (including root as '.')
+    dirs = set(Path(fp).parent.as_posix() for fp in file_paths)
+    # ensure root appears
+    dirs.add('.')
+    # sort so root comes first, then lexicographically
+    dir_list = sorted(dirs, key=lambda d: (d != '.', d))
 
-    # Generate tree visualization
-    tree_view = build_tree(file_paths)
+    lines: List[str] = []
+    for dir_path in dir_list:
+        # pretty label
+        label = 'top_directory' if dir_path == '.' else dir_path
+        lines.append(label)
 
-    # Format file contents
-    contents_section = []
-    for file_path, content in file_contents.items():
-        # Determine language for syntax highlighting
-        extension = Path(file_path).suffix.lstrip(".")
-        lang = extension if extension else "text"
+        # find files directly in this directory
+        if dir_path == '.':
+            dir_files = [f for f in file_paths if '/' not in f]
+        else:
+            prefix = dir_path.rstrip('/') + '/'
+            dir_files = [
+                f for f in file_paths
+                if f.startswith(prefix) and '/' not in f[len(prefix):]
+            ]
 
-        contents_section.append(f"**{file_path}**\n```{lang}\n{content}\n```\n")
+        for fp in sorted(dir_files):
+            name = os.path.basename(fp)
+            lines.append(f"\t{name}")
+            # inline the file’s contents right after its name
+            content = file_contents.get(fp, "").rstrip()
+            if content:
+                # decide syntax highlighting by extension
+                ext = Path(fp).suffix.lstrip('.')
+                lang = ext or 'text'
+                # indent each line of content by one more tab
+                indented = "\n".join("\t\t" + l for l in content.splitlines())
+                lines.append(f"\t\t```{lang}\n{indented}\n\t\t```")
 
-    full_codebase_contents = "\n".join(contents_section)
-
+    codebase_contents = "\n".join(lines)
     return f"""<codebase_tree>
-{tree_view}
-</codebase_tree>
-
-<full_codebase_contents>
-{full_codebase_contents}
-</full_codebase_contents>"""
+{codebase_contents}
+</codebase_tree>"""
 
 
 async def run_github_command(repo_path: Path, command: list[str]) -> str:
@@ -1699,32 +1702,15 @@ async def curate_context(
                     # First check if the file is whitelisted
                     for pattern in whitelist_patterns:
                         # Regular pattern matching (e.g., "*.py")
-                        if fnmatch.fnmatch(file_path, pattern):
+                        if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, pattern.rstrip("/") + "/*"):
                             return False  # Whitelisted, don't ignore
-                        
-                        # Special handling for directory patterns (ending with /)
-                        if pattern.endswith("/"):
-                            # Match directories by name at the start of the path (e.g., "allowed_dir/...")
-                            if file_path.startswith(pattern[:-1] + "/"):
-                                return False
-                            # Match directories anywhere in the path (e.g., ".../allowed_dir/...")
-                            if "/" + pattern[:-1] + "/" in file_path:
-                                return False
                     
                     # Then check if it matches any ignore patterns
                     for pattern in ignore_patterns:
                         # Regular pattern matching (e.g., "*.log")
-                        if fnmatch.fnmatch(file_path, pattern):
+                        if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, pattern.rstrip("/") + "/*"):
                             return True
-                        
-                        # Special handling for directory patterns (ending with /)
-                        if pattern.endswith("/"):
-                            # Match directories by name at the start of the path (e.g., "node_modules/...")
-                            if file_path.startswith(pattern[:-1] + "/"):
-                                return True
-                            # Match directories anywhere in the path (e.g., ".../node_modules/...")
-                            if "/" + pattern[:-1] + "/" in file_path:
-                                return True
+
                     return False
                 
                 # Filter files based on ignore/whitelist patterns
@@ -1796,35 +1782,29 @@ async def curate_context(
             )
             
             # Format the directory list for the prompt
-            dir_list = "\n".join(dir_chunk)
-            
-            # Collect file samples for each directory to provide context
-            dir_samples = {}
+            lines = []
             for dir_path in dir_chunk:
-                # Find files in this directory (but not subdirectories)
+                # Choose a nicer label for the root directory
+                dir_label = 'top_directory' if dir_path == '.' else dir_path
+                lines.append(dir_label)
+
+                # Gather up to 5 direct children files of this directory
                 if dir_path == '.':
-                    # For root directory, find files without a slash
-                    dir_files = [f for f in filtered_file_paths if '/' not in f]
+                    dir_files = [f for f in file_paths if '/' not in f]
                 else:
-                    # For other directories, find files that start with dir_path + '/'
-                    # but don't have additional slashes (to exclude subdirectories)
-                    prefix = dir_path + '/'
+                    prefix = dir_path.rstrip('/') + '/'
                     dir_files = [
-                        f for f in filtered_file_paths 
+                        f for f in file_paths 
                         if f.startswith(prefix) and '/' not in f[len(prefix):]
                     ]
-                
-                # Take up to 5 files as samples
                 samples = dir_files[:5]
-                if samples:
-                    dir_samples[dir_path] = samples
-            
-            # Format samples as part of the prompt
-            samples_text = ""
-            if dir_samples:
-                samples_text = "\n\nDirectory file samples:\n"
-                for dir_path, files in dir_samples.items():
-                    samples_text += f"{dir_path}/: {', '.join(files)}\n"
+
+                # Append each sample file under the directory, indented with a tab
+                for f in samples:
+                    lines.append(f"\t{os.path.basename(f)}")
+
+            # Final single representation
+            directory_tree = "\n".join(lines)
             
             # Construct the prompt for this chunk
             prompt = f"""You are an expert software developer tasked with analyzing a codebase structure to identify important directories for AI context.
@@ -1838,8 +1818,8 @@ Your goal is to identify the most important directories that should be included 
 Below is a list of directories from the codebase (chunk {chunk_idx + 1} of {total_chunks}):
 
 <directories>
-{dir_list}
-</directories>{samples_text}
+{directory_tree}
+</directories>
 
 Analyze these directories and identify the ones that:
 1. Contain core application code relevant to the user's task
