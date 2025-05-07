@@ -2118,7 +2118,7 @@ Don't include explanations for your choices, just return the list in the specifi
 
 @mcp.tool(
     name="judge_workplan",
-    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background). Respects .yellhorncontext and .yellhornignore for file filtering. Set debug=True to see the full prompt.",
+    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background). Control context with 'codebase_reasoning' ('full', 'lsp', 'file_structure', or 'none'). Respects .yellhorncontext and .yellhornignore for file filtering. Set debug=True to see the full prompt.",
 )
 async def judge_workplan(
     ctx: Context,
@@ -2149,6 +2149,7 @@ async def judge_workplan(
         codebase_reasoning: Control which codebase context is provided:
             - "full": (default) Use full codebase context
             - "lsp": Use lighter codebase context (only function/method signatures, plus full diff files)
+            - "file_structure": Use only directory structure without file contents for faster processing
             - "none": Skip codebase context completely for fastest processing
         debug: If True, adds a comment to the sub-issue with the full prompt used for generation.
                Useful for debugging and improving prompt engineering.
@@ -2186,7 +2187,7 @@ async def judge_workplan(
         model = ctx.request_context.lifespan_context["model"]
 
         # Validate codebase_reasoning
-        if codebase_reasoning not in ["full", "lsp", "none"]:
+        if codebase_reasoning not in ["full", "lsp", "file_structure", "none"]:
             await ctx.log(
                 level="info",
                 message=f"Unrecognized codebase_reasoning value '{codebase_reasoning}', defaulting to 'full'.",
@@ -2199,6 +2200,7 @@ async def judge_workplan(
         reasoning_mode_desc = {
             "full": "full codebase",
             "lsp": "function signatures",
+            "file_structure": "file structure only",
             "none": "no codebase",
         }.get(codebase_reasoning, "full codebase")
 
