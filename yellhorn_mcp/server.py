@@ -2054,8 +2054,8 @@ Don't include explanations for your choices, just return the list in the specifi
             final_content += "\n".join(dir_includes) + "\n\n"
         
         # Add a section recommending to blacklist everything else except the important directories
-        final_content += "# Recommended: blacklist everything else (uncomment to enable)\n"
-        final_content += "# **/*\n"
+        final_content += "# Recommended: blacklist everything else (comment to disable)\n"
+        final_content += "**/*\n"
         
         # Remove duplicate lines, keeping the last occurrence (from bottom up)
         # Split content into lines, reverse to process from bottom up
