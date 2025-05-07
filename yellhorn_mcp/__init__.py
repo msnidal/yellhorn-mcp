@@ -4,5 +4,4 @@ __version__ = "0.3.3"
 
 from .server import *
 from .lsp_utils import *
-from .tree_utils import *
 

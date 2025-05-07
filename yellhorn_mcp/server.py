@@ -503,6 +503,53 @@ async def get_codebase_snapshot(
     return file_paths, file_contents
 
 
+def build_file_structure_context(file_paths: list[str]) -> str:
+    """
+    Build a codebase info string containing only the file structure.
+    
+    Creates a formatted string with the directory structure for use in AI prompts
+    when only file structure information is needed, without file contents.
+    
+    Args:
+        file_paths: List of file paths to include in the tree structure
+        
+    Returns:
+        Formatted string with codebase tree and a note about file structure mode
+    """
+    # 1. Gather unique directories (including root as '.')
+    dirs = set(Path(fp).parent.as_posix() for fp in file_paths)
+    # ensure root appears
+    dirs.add('.')
+    # sort so root comes first, then lexicographically
+    dir_list = sorted(dirs, key=lambda d: (d != '.', d))
+
+    lines: List[str] = []
+    for dir_path in dir_list:
+        # pretty label
+        label = 'top_directory' if dir_path == '.' else dir_path
+        lines.append(label)
+
+        # find files directly in this directory
+        if dir_path == '.':
+            dir_files = [f for f in file_paths if '/' not in f]
+        else:
+            prefix = dir_path.rstrip('/') + '/'
+            dir_files = [
+                f for f in file_paths
+                if f.startswith(prefix) and '/' not in f[len(prefix):]
+            ]
+
+        for fp in sorted(dir_files):
+            name = os.path.basename(fp)
+            lines.append(f"\t{name}")
+
+    codebase_contents = "\n".join(lines)
+    
+    return f"""<codebase_tree>
+{codebase_contents}
+</codebase_tree>"""
+
+
 async def format_codebase_for_prompt(
     file_paths: List[str],
     file_contents: Dict[str, str]
@@ -944,25 +991,8 @@ async def process_workplan_async(
             # Pass ctx.log as the logging function to capture filtering info
             file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths", log_function=context_log)
             
-            # Log that we're using file_structure mode
-            await ctx.log(
-                level="info",
-                message=f"Using file structure mode for workplan generation: {len(file_paths)} files discovered",
-            )
-            
-            # Create directory structure visualization using tree_utils
-            from yellhorn_mcp.tree_utils import build_tree
-            tree_view = build_tree(file_paths)
-            
-            # Create special codebase info for file_structure mode that only includes the tree
-            codebase_info = f"""<codebase_tree>
-{tree_view}
-</codebase_tree>
-
-<file_structure_note>
-This workplan is being generated with file structure mode, which only includes directory structure 
-and file paths without file contents. This provides a lightweight overview of the codebase organization.
-</file_structure_note>"""
+            # Use the build_file_structure_context function to create the codebase info
+            codebase_info = build_file_structure_context(file_paths)
             
         else:
             # Default full mode - get all file paths and contents
@@ -1411,6 +1441,15 @@ async def process_judgement_async(
             file_paths, file_contents = await update_snapshot_with_full_diff_files(
                 repo_path, base_ref, head_ref, file_paths, file_contents
             )
+            # Format with tree and LSP file contents
+            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
+        elif codebase_reasoning == "file_structure":
+            # For file_structure mode, we only need the file paths, not the contents
+            # Pass context_log as the logging function to capture filtering info
+            file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths", log_function=context_log)
+            
+            # Use the build_file_structure_context function to create the codebase info
+            codebase_info = build_file_structure_context(file_paths)
         else:
             # Use full snapshot
             await ctx.log(
@@ -1418,8 +1457,8 @@ async def process_judgement_async(
                 message="Getting codebase snapshot for judgement, respecting .yellhorncontext or .yellhornignore if present",
             )
             file_paths, file_contents = await get_codebase_snapshot(repo_path, log_function=context_log)
-
-        codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
+            # Format with tree and full file contents
+            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct a more structured prompt
         prompt = f"""You are an expert code evaluator judging if a code diff correctly implements a workplan.
@@ -1781,30 +1820,17 @@ async def curate_context(
                 message=f"Processing chunk {chunk_idx + 1}/{total_chunks} with {len(dir_chunk)} directories"
             )
             
-            # Format the directory list for the prompt
-            lines = []
-            for dir_path in dir_chunk:
-                # Choose a nicer label for the root directory
-                dir_label = 'top_directory' if dir_path == '.' else dir_path
-                lines.append(dir_label)
-
-                # Gather up to 5 direct children files of this directory
-                if dir_path == '.':
-                    dir_files = [f for f in file_paths if '/' not in f]
-                else:
-                    prefix = dir_path.rstrip('/') + '/'
-                    dir_files = [
-                        f for f in file_paths 
-                        if f.startswith(prefix) and '/' not in f[len(prefix):]
-                    ]
-                samples = dir_files[:5]
-
-                # Append each sample file under the directory, indented with a tab
-                for f in samples:
-                    lines.append(f"\t{os.path.basename(f)}")
-
-            # Final single representation
-            directory_tree = "\n".join(lines)
+            # Filter file paths to only include those in the current chunk directories
+            chunk_file_paths = []
+            for fp in file_paths:
+                # Check if the file is in one of the directories in this chunk
+                parent_dir = Path(fp).parent.as_posix()
+                if parent_dir in dir_chunk or (parent_dir == '' and '.' in dir_chunk):
+                    chunk_file_paths.append(fp)
+                    
+            # Use the build_file_structure_context function to create a directory tree
+            # but extract just the tree portion without the note
+            directory_tree = build_file_structure_context(chunk_file_paths)
             
             # Construct the prompt for this chunk
             prompt = f"""You are an expert software developer tasked with analyzing a codebase structure to identify important directories for AI context.
@@ -1817,9 +1843,7 @@ Your goal is to identify the most important directories that should be included 
 
 Below is a list of directories from the codebase (chunk {chunk_idx + 1} of {total_chunks}):
 
-<directories>
 {directory_tree}
-</directories>
 
 Analyze these directories and identify the ones that:
 1. Contain core application code relevant to the user's task

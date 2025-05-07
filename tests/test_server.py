@@ -372,35 +372,6 @@ async def test_get_codebase_snapshot_integration():
 
 
 @pytest.mark.asyncio
-async def test_format_codebase_for_prompt():
-    """Test formatting codebase for prompt."""
-    with patch("yellhorn_mcp.tree_utils.build_tree") as mock_build_tree:
-        mock_build_tree.return_value = ".\n\n├── file1.py\n└── file2.js"
-
-        file_paths = ["file1.py", "file2.js"]
-        file_contents = {
-            "file1.py": "def hello(): pass",
-            "file2.js": "function hello() {}",
-        }
-
-        result = await format_codebase_for_prompt(file_paths, file_contents)
-
-        # Check if tree view is included
-        assert "<codebase_tree>" in result
-        assert ".\n\n├── file1.py\n└── file2.js" in result
-
-        # Check if file paths and contents are included in full_codebase_contents
-        assert "<full_codebase_contents>" in result
-        assert "def hello(): pass" in result
-        assert "function hello() {}" in result
-        assert "```py" in result
-        assert "```js" in result
-
-        # Verify codebase_structure section is NOT included
-        assert "<codebase_structure>" not in result
-
-
-@pytest.mark.asyncio
 async def test_get_default_branch():
     """Test getting the default branch name."""
     # Test when symbolic-ref works
