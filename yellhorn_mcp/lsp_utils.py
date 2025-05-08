@@ -503,6 +503,151 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
     return file_paths, contents
 
 
+async def get_lsp_diff(
+    repo_path: Path, 
+    base_ref: str, 
+    head_ref: str, 
+    changed_files: list[str]
+) -> str:
+    """
+    Create a lightweight LSP-focused diff between two git refs.
+    
+    This function generates a diff that focuses on API changes (function signatures,
+    class signatures, attributes, etc.) between the base and head refs for the specified
+    changed files. It extracts API information from both versions of each file and
+    compares them to create a concise diff that highlights structural changes.
+    
+    Args:
+        repo_path: Path to the repository
+        base_ref: Base Git ref (commit SHA, branch name, tag) for comparison
+        head_ref: Head Git ref (commit SHA, branch name, tag) for comparison
+        changed_files: List of file paths that were changed between refs
+        
+    Returns:
+        A formatted string containing the LSP-style diff focusing on API changes
+    """
+    from yellhorn_mcp.server import run_git_command
+    
+    # Initialize result
+    diff_parts = []
+    diff_parts.append(f"# API Changes Between {base_ref} and {head_ref}")
+    diff_parts.append(f"Files changed: {len(changed_files)}")
+    
+    # Process each changed file to extract API differences
+    for file_path in changed_files:
+        # Skip files we don't support (focus on Python and Go)
+        if not (file_path.endswith(".py") or file_path.endswith(".go")):
+            continue
+            
+        # Get the file content from both refs
+        try:
+            # Get base version content if file existed in base_ref
+            try:
+                base_content = await run_git_command(
+                    repo_path, ["show", f"{base_ref}:{file_path}"]
+                )
+            except Exception:
+                # File didn't exist in base_ref
+                base_content = ""
+                
+            # Get head version content
+            try:
+                head_content = await run_git_command(
+                    repo_path, ["show", f"{head_ref}:{file_path}"]
+                )
+            except Exception:
+                # File was deleted in head_ref
+                head_content = ""
+                
+            # If the file was added or deleted, note that in the diff
+            if not base_content and head_content:
+                diff_parts.append(f"\n## {file_path} (Added)")
+            elif base_content and not head_content:
+                diff_parts.append(f"\n## {file_path} (Deleted)")
+            else:
+                diff_parts.append(f"\n## {file_path} (Modified)")
+                
+            # Extract API information from both versions
+            base_api = []
+            head_api = []
+            
+            # Extract base API
+            if base_content:
+                # Create a temporary file for the base content
+                import tempfile
+                
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".tmp", delete=False) as temp:
+                    temp.write(base_content)
+                    temp_path = Path(temp.name)
+                    
+                try:
+                    if file_path.endswith(".py"):
+                        base_api = extract_python_api(temp_path)
+                    elif file_path.endswith(".go"):
+                        base_api = extract_go_api(temp_path)
+                finally:
+                    # Clean up the temporary file
+                    if temp_path.exists():
+                        temp_path.unlink()
+                        
+            # Extract head API
+            if head_content:
+                # Create a temporary file for the head content
+                import tempfile
+                
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".tmp", delete=False) as temp:
+                    temp.write(head_content)
+                    temp_path = Path(temp.name)
+                    
+                try:
+                    if file_path.endswith(".py"):
+                        head_api = extract_python_api(temp_path)
+                    elif file_path.endswith(".go"):
+                        head_api = extract_go_api(temp_path)
+                finally:
+                    # Clean up the temporary file
+                    if temp_path.exists():
+                        temp_path.unlink()
+            
+            # Compare and show differences
+            base_api_set = set(base_api)
+            head_api_set = set(head_api)
+            
+            # Find additions and deletions
+            added = head_api_set - base_api_set
+            removed = base_api_set - head_api_set
+            
+            # Add to diff if there are changes
+            if added or removed:
+                # Add removals first with - prefix
+                if removed:
+                    diff_parts.append("\nRemoved:")
+                    for item in sorted(removed):
+                        diff_parts.append(f"- {item}")
+                        
+                # Add additions with + prefix
+                if added:
+                    diff_parts.append("\nAdded:")
+                    for item in sorted(added):
+                        diff_parts.append(f"+ {item}")
+            else:
+                # No API changes detected
+                diff_parts.append("\nNo structural API changes detected (implementation details may have changed)")
+                
+        except Exception as e:
+            diff_parts.append(f"\nError processing {file_path}: {str(e)}")
+            
+    # If no supported files were changed, add a note
+    if len(diff_parts) <= 2:  # Only header and file count
+        diff_parts.append("\nNo API changes detected in supported files (Python, Go)")
+        
+    # Add footer with a note about what's included
+    diff_parts.append("\n---")
+    diff_parts.append("Note: This diff focuses on API changes (functions, classes, methods, signatures) and may not show implementation details.")
+        
+    return "\n".join(diff_parts)
+
+
 async def update_snapshot_with_full_diff_files(
     repo_path: Path,
     base_ref: str,
