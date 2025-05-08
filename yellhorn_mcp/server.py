@@ -790,25 +790,56 @@ async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
         raise YellhornMCPError(f"Failed to fetch GitHub issue/PR content: {str(e)}")
 
 
-async def get_git_diff(repo_path: Path, base_ref: str, head_ref: str) -> str:
+async def get_git_diff(repo_path: Path, base_ref: str, head_ref: str, codebase_reasoning: str = "full") -> str:
     """
-    Get the diff content between two git references.
+    Get the diff content between two git references, optimized according to codebase_reasoning mode.
 
     Args:
         repo_path: Path to the repository.
         base_ref: Base Git ref (commit SHA, branch name, tag) for comparison.
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison.
+        codebase_reasoning: Mode for controlling how diff is generated:
+            - "full": (default) Complete diff with all content changes
+            - "file_structure": Only show changed file names
+            - "lsp": Generate optimized diff focusing on API changes
+            - "none": Same as "file_structure", but minimal
 
     Returns:
-        The diff content between the two references.
+        The diff content between the references, formatted according to codebase_reasoning.
 
     Raises:
         YellhornMCPError: If there's an error generating the diff.
     """
     try:
-        # Generate the diff between the specified references
-        result = await run_git_command(repo_path, ["diff", f"{base_ref}..{head_ref}"])
-        return result
+        if codebase_reasoning == "file_structure" or codebase_reasoning == "none":
+            # Only get the names of changed files for file_structure and none modes
+            changed_files = await run_git_command(repo_path, ["diff", "--name-only", f"{base_ref}..{head_ref}"])
+            result = f"Changed files between {base_ref} and {head_ref}:\n\n" + changed_files
+            return result
+        
+        elif codebase_reasoning == "lsp":
+            # For lsp mode, get file names first
+            changed_files = await run_git_command(repo_path, ["diff", "--name-only", f"{base_ref}..{head_ref}"])
+            
+            # Get API-focused diff for each changed file, if supported
+            try:
+                from yellhorn_mcp.lsp_utils import get_lsp_diff
+                lsp_diff = await get_lsp_diff(repo_path, base_ref, head_ref, changed_files.splitlines())
+                if lsp_diff:
+                    return lsp_diff
+            except (ImportError, AttributeError):
+                # LSP utils import failed or function not available, fall back to standard diff
+                pass
+            
+            # If LSP diff failed or isn't available, get a more minimal diff that still shows changes
+            result = await run_git_command(repo_path, ["diff", "--unified=1", f"{base_ref}..{head_ref}"])
+            return result
+        
+        else:  # "full" mode or any unrecognized value
+            # Full diff with complete context
+            result = await run_git_command(repo_path, ["diff", f"{base_ref}..{head_ref}"])
+            return result
+            
     except Exception as e:
         raise YellhornMCPError(f"Failed to generate git diff: {str(e)}")
 
@@ -1398,6 +1429,7 @@ async def process_judgement_async(
     head_commit_hash: str | None = None,
     debug: bool = False,
     _meta: dict[str, Any] | None = None,
+    codebase_reasoning: str = "full",
 ) -> str:
     """
     Process the judgement of a workplan and diff asynchronously, creating a GitHub sub-issue.
@@ -1417,54 +1449,35 @@ async def process_judgement_async(
         head_commit_hash: Optional head commit hash for better reference in the output.
         debug: If True, adds a comment to the issue with the full prompt used for generation.
                Useful for debugging and improving prompt engineering.
+        codebase_reasoning: The mode for codebase reasoning, one of:
+               - "full": Full codebase content (default)
+               - "lsp": LSP-style signatures only (faster)
+               - "file_structure": Only directory structure (fastest)
+               - "none": No codebase context
 
     Returns:
         The judgement content and URL of the created sub-issue.
     """
     try:
-        # Get codebase snapshot based on reasoning mode
-        codebase_reasoning = ctx.request_context.lifespan_context.get("codebase_reasoning", "full")
-
-        # Define a logging function to use Context for logging
-        async def context_log(message):
-            await ctx.log(level="info", message=message)
-
+        # Process LSP snapshot if requested
         if codebase_reasoning == "lsp":
-            from yellhorn_mcp.lsp_utils import (
-                get_lsp_snapshot,
-                update_snapshot_with_full_diff_files,
+            await ctx.log(
+                level="info",
+                message="Using LSP mode for codebase reasoning in judgement"
             )
-
-            # Get LSP snapshot (signatures only)
+            # Import LSP utils and get LSP snapshot
+            from yellhorn_mcp.lsp_utils import get_lsp_snapshot, update_snapshot_with_full_diff_files
+            
+            # Get LSP snapshot of the codebase
             file_paths, file_contents = await get_lsp_snapshot(repo_path)
-            # Then update with full contents of diff-touched files
+            
+            # Update the snapshot with full contents of files in the diff
             file_paths, file_contents = await update_snapshot_with_full_diff_files(
                 repo_path, base_ref, head_ref, file_paths, file_contents
             )
-            # Format with tree and LSP file contents
-            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
-        elif codebase_reasoning == "file_structure":
-            # For file_structure mode, we only need the file paths, not the contents
-            # Pass context_log as the logging function to capture filtering info
-            file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths", log_function=context_log)
-            
-            # Use the build_file_structure_context function to create the codebase info
-            codebase_info = build_file_structure_context(file_paths)
-        else:
-            # Use full snapshot
-            await ctx.log(
-                level="info",
-                message="Getting codebase snapshot for judgement, respecting .yellhorncontext or .yellhornignore if present",
-            )
-            file_paths, file_contents = await get_codebase_snapshot(repo_path, log_function=context_log)
-            # Format with tree and full file contents
-            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct a more structured prompt
         prompt = f"""You are an expert code evaluator judging if a code diff correctly implements a workplan.
-
-{codebase_info}
-
 <Original Workplan>
 {workplan}
 </Original Workplan>
@@ -1472,11 +1485,6 @@ async def process_judgement_async(
 <Code Diff>
 {diff}
 </Code Diff>
-
-<Comparison Data>
-Base ref: {base_ref}{f" ({base_commit_hash})" if base_commit_hash else ""}
-Head ref: {head_ref}{f" ({head_commit_hash})" if head_commit_hash else ""}
-</Comparison Data>
 
 Please judge if this code diff correctly implements the workplan and provide detailed feedback.
 The diff represents changes between '{base_ref}' and '{head_ref}'.
@@ -2175,10 +2183,15 @@ async def judge_workplan(
 
         # Fetch the workplan and generate diff for review
         workplan = await get_github_issue_body(repo_path, issue_number)
-        diff = await get_git_diff(repo_path, base_ref, head_ref)
+        diff = await get_git_diff(repo_path, base_ref, head_ref, codebase_reasoning)
 
-        # Check if diff is empty
-        if not diff.strip():
+        # Check if diff is empty or only contains the header for file_structure mode
+        is_empty = not diff.strip() or (
+            codebase_reasoning in ["file_structure", "none"] and
+            diff.strip() == f"Changed files between {base_ref} and {head_ref}:"
+        )
+        
+        if is_empty:
             return f"No differences found between {base_ref} ({base_commit_hash}) and {head_ref} ({head_commit_hash}). Nothing to judge."
 
         # Trigger the judgement asynchronously
@@ -2223,6 +2236,7 @@ async def judge_workplan(
                 base_commit_hash=base_commit_hash,
                 head_commit_hash=head_commit_hash,
                 debug=debug,
+                codebase_reasoning=codebase_reasoning,
             )
         )
 
