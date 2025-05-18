@@ -23,7 +23,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, List, Dict
+from typing import Any, Dict, List
 
 from google import genai
 
@@ -364,12 +364,12 @@ async def run_git_command(repo_path: Path, command: list[str]) -> str:
 
 
 async def get_codebase_snapshot(
-    repo_path: Path, _mode: str = "full", log_function = print
+    repo_path: Path, _mode: str = "full", log_function=print
 ) -> tuple[list[str], dict[str, str]]:
     """
     Get a snapshot of the codebase, including file list and contents.
 
-    Respects .gitignore, .yellhornignore and .yellhorncontext files. 
+    Respects .gitignore, .yellhornignore and .yellhorncontext files.
     - .gitignore: Standard Git ignore file, respected by Git commands
     - .yellhornignore: Uses same pattern syntax as .gitignore for blacklist/whitelist
     - .yellhorncontext: Enhanced context with both blacklist/whitelist patterns plus AI-optimized patterns
@@ -395,15 +395,15 @@ async def get_codebase_snapshot(
     # Check for .yellhorncontext file first as it takes precedence
     yellhorncontext_path = repo_path / ".yellhorncontext"
     context_exists = yellhorncontext_path.exists() and yellhorncontext_path.is_file()
-    
+
     # Check for .yellhornignore file next
     yellhornignore_path = repo_path / ".yellhornignore"
     ignore_exists = yellhornignore_path.exists() and yellhornignore_path.is_file()
-    
+
     # Initialize pattern lists
     ignore_patterns = []
     whitelist_patterns = []
-    
+
     # First try to read from .yellhorncontext if it exists
     if context_exists:
         try:
@@ -423,7 +423,7 @@ async def get_codebase_snapshot(
             log_function(f"Warning: Error reading .yellhorncontext file: {str(e)}")
             # If .yellhorncontext reading fails, fall back to .yellhornignore
             context_exists = False
-    
+
     # If .yellhorncontext doesn't exist or failed to read, try .yellhornignore
     if not context_exists and ignore_exists:
         try:
@@ -441,27 +441,37 @@ async def get_codebase_snapshot(
         except Exception as e:
             # Log but continue if there's an error reading .yellhornignore
             log_function(f"Warning: Error reading .yellhornignore file: {str(e)}")
-    
+
     # Filter files based on patterns from either .yellhorncontext or .yellhornignore
     if ignore_patterns or whitelist_patterns:
         import fnmatch
-        
+
         # Log what we're using for filtering
-        filter_source = ".yellhorncontext" if context_exists else ".yellhornignore" if ignore_exists else "no filters"
-        log_function(f"Filtering codebase with {len(ignore_patterns)} blacklist and {len(whitelist_patterns)} whitelist patterns from {filter_source}")
+        filter_source = (
+            ".yellhorncontext"
+            if context_exists
+            else ".yellhornignore" if ignore_exists else "no filters"
+        )
+        log_function(
+            f"Filtering codebase with {len(ignore_patterns)} blacklist and {len(whitelist_patterns)} whitelist patterns from {filter_source}"
+        )
 
         # Function definition for the is_ignored function that can be patched in tests
         def is_ignored(file_path: str) -> bool:
             # First check if the file is whitelisted
             for pattern in whitelist_patterns:
                 # Regular pattern matching (e.g., "*.py")
-                if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, pattern.rstrip("/") + "/*"):
+                if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(
+                    file_path, pattern.rstrip("/") + "/*"
+                ):
                     return False  # Whitelisted, don't ignore
 
             # Then check if it matches any ignore patterns
             for pattern in ignore_patterns:
                 # Regular pattern matching (e.g., "*.log")
-                if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, pattern.rstrip("/") + "/*"):
+                if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(
+                    file_path, pattern.rstrip("/") + "/*"
+                ):
                     return True
 
             return False
@@ -506,37 +516,36 @@ async def get_codebase_snapshot(
 def build_file_structure_context(file_paths: list[str]) -> str:
     """
     Build a codebase info string containing only the file structure.
-    
+
     Creates a formatted string with the directory structure for use in AI prompts
     when only file structure information is needed, without file contents.
-    
+
     Args:
         file_paths: List of file paths to include in the tree structure
-        
+
     Returns:
         Formatted string with codebase tree and a note about file structure mode
     """
     # 1. Gather unique directories (including root as '.')
     dirs = set(Path(fp).parent.as_posix() for fp in file_paths)
     # ensure root appears
-    dirs.add('.')
+    dirs.add(".")
     # sort so root comes first, then lexicographically
-    dir_list = sorted(dirs, key=lambda d: (d != '.', d))
+    dir_list = sorted(dirs, key=lambda d: (d != ".", d))
 
     lines: List[str] = []
     for dir_path in dir_list:
         # pretty label
-        label = 'top_directory' if dir_path == '.' else dir_path
+        label = "top_directory" if dir_path == "." else dir_path
         lines.append(label)
 
         # find files directly in this directory
-        if dir_path == '.':
-            dir_files = [f for f in file_paths if '/' not in f]
+        if dir_path == ".":
+            dir_files = [f for f in file_paths if "/" not in f]
         else:
-            prefix = dir_path.rstrip('/') + '/'
+            prefix = dir_path.rstrip("/") + "/"
             dir_files = [
-                f for f in file_paths
-                if f.startswith(prefix) and '/' not in f[len(prefix):]
+                f for f in file_paths if f.startswith(prefix) and "/" not in f[len(prefix) :]
             ]
 
         for fp in sorted(dir_files):
@@ -544,16 +553,13 @@ def build_file_structure_context(file_paths: list[str]) -> str:
             lines.append(f"\t{name}")
 
     codebase_contents = "\n".join(lines)
-    
+
     return f"""<codebase_tree>
 {codebase_contents}
 </codebase_tree>"""
 
 
-async def format_codebase_for_prompt(
-    file_paths: List[str],
-    file_contents: Dict[str, str]
-) -> str:
+async def format_codebase_for_prompt(file_paths: List[str], file_contents: Dict[str, str]) -> str:
     """
     Format the codebase information for inclusion in the prompt.
 
@@ -567,24 +573,23 @@ async def format_codebase_for_prompt(
     # 1. Gather unique directories (including root as '.')
     dirs = set(Path(fp).parent.as_posix() for fp in file_paths)
     # ensure root appears
-    dirs.add('.')
+    dirs.add(".")
     # sort so root comes first, then lexicographically
-    dir_list = sorted(dirs, key=lambda d: (d != '.', d))
+    dir_list = sorted(dirs, key=lambda d: (d != ".", d))
 
     lines: List[str] = []
     for dir_path in dir_list:
         # pretty label
-        label = 'top_directory' if dir_path == '.' else dir_path
+        label = "top_directory" if dir_path == "." else dir_path
         lines.append(label)
 
         # find files directly in this directory
-        if dir_path == '.':
-            dir_files = [f for f in file_paths if '/' not in f]
+        if dir_path == ".":
+            dir_files = [f for f in file_paths if "/" not in f]
         else:
-            prefix = dir_path.rstrip('/') + '/'
+            prefix = dir_path.rstrip("/") + "/"
             dir_files = [
-                f for f in file_paths
-                if f.startswith(prefix) and '/' not in f[len(prefix):]
+                f for f in file_paths if f.startswith(prefix) and "/" not in f[len(prefix) :]
             ]
 
         for fp in sorted(dir_files):
@@ -594,8 +599,8 @@ async def format_codebase_for_prompt(
             content = file_contents.get(fp, "").rstrip()
             if content:
                 # decide syntax highlighting by extension
-                ext = Path(fp).suffix.lstrip('.')
-                lang = ext or 'text'
+                ext = Path(fp).suffix.lstrip(".")
+                lang = ext or "text"
                 # indent each line of content by one more tab
                 indented = "\n".join("\t\t" + l for l in content.splitlines())
                 lines.append(f"\t\t```{lang}\n{indented}\n\t\t```")
@@ -790,7 +795,9 @@ async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
         raise YellhornMCPError(f"Failed to fetch GitHub issue/PR content: {str(e)}")
 
 
-async def get_git_diff(repo_path: Path, base_ref: str, head_ref: str, codebase_reasoning: str = "full") -> str:
+async def get_git_diff(
+    repo_path: Path, base_ref: str, head_ref: str, codebase_reasoning: str = "full"
+) -> str:
     """
     Get the diff content between two git references, optimized according to codebase_reasoning mode.
 
@@ -813,33 +820,42 @@ async def get_git_diff(repo_path: Path, base_ref: str, head_ref: str, codebase_r
     try:
         if codebase_reasoning == "file_structure" or codebase_reasoning == "none":
             # Only get the names of changed files for file_structure and none modes
-            changed_files = await run_git_command(repo_path, ["diff", "--name-only", f"{base_ref}..{head_ref}"])
+            changed_files = await run_git_command(
+                repo_path, ["diff", "--name-only", f"{base_ref}..{head_ref}"]
+            )
             result = f"Changed files between {base_ref} and {head_ref}:\n\n" + changed_files
             return result
-        
+
         elif codebase_reasoning == "lsp":
             # For lsp mode, get file names first
-            changed_files = await run_git_command(repo_path, ["diff", "--name-only", f"{base_ref}..{head_ref}"])
-            
+            changed_files = await run_git_command(
+                repo_path, ["diff", "--name-only", f"{base_ref}..{head_ref}"]
+            )
+
             # Get API-focused diff for each changed file, if supported
             try:
                 from yellhorn_mcp.lsp_utils import get_lsp_diff
-                lsp_diff = await get_lsp_diff(repo_path, base_ref, head_ref, changed_files.splitlines())
+
+                lsp_diff = await get_lsp_diff(
+                    repo_path, base_ref, head_ref, changed_files.splitlines()
+                )
                 if lsp_diff:
                     return lsp_diff
             except (ImportError, AttributeError):
                 # LSP utils import failed or function not available, fall back to standard diff
                 pass
-            
+
             # If LSP diff failed or isn't available, get a more minimal diff that still shows changes
-            result = await run_git_command(repo_path, ["diff", "--unified=1", f"{base_ref}..{head_ref}"])
+            result = await run_git_command(
+                repo_path, ["diff", "--unified=1", f"{base_ref}..{head_ref}"]
+            )
             return result
-        
+
         else:  # "full" mode or any unrecognized value
             # Full diff with complete context
             result = await run_git_command(repo_path, ["diff", f"{base_ref}..{head_ref}"])
             return result
-            
+
     except Exception as e:
         raise YellhornMCPError(f"Failed to generate git diff: {str(e)}")
 
@@ -1009,22 +1025,25 @@ async def process_workplan_async(
         # Define a logging function to use Context for logging
         async def context_log(message):
             await ctx.log(level="info", message=message)
-            
+
         # Get codebase info based on reasoning mode
         if codebase_reasoning == "lsp":
             from yellhorn_mcp.lsp_utils import get_lsp_snapshot
+
             file_paths, file_contents = await get_lsp_snapshot(repo_path)
             # For lsp mode, format with tree and LSP file contents
             codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
-            
+
         elif codebase_reasoning == "file_structure":
             # For file_structure mode, we only need the file paths, not the contents
             # Pass ctx.log as the logging function to capture filtering info
-            file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths", log_function=context_log)
-            
+            file_paths, _ = await get_codebase_snapshot(
+                repo_path, _mode="paths", log_function=context_log
+            )
+
             # Use the build_file_structure_context function to create the codebase info
             codebase_info = build_file_structure_context(file_paths)
-            
+
         else:
             # Default full mode - get all file paths and contents
             # Pass ctx.log as the logging function to capture filtering info
@@ -1032,7 +1051,9 @@ async def process_workplan_async(
                 level="info",
                 message="Using full mode with content retrieval for workplan generation",
             )
-            file_paths, file_contents = await get_codebase_snapshot(repo_path, log_function=context_log)
+            file_paths, file_contents = await get_codebase_snapshot(
+                repo_path, log_function=context_log
+            )
             # Format with tree and full file contents
             codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
@@ -1256,11 +1277,11 @@ async def create_workplan(
     """
     Create a workplan based on the provided title and detailed description.
     Creates a GitHub issue and processes the workplan generation asynchronously.
-    
+
     Respects file filtering from:
     - .yellhorncontext (if present, takes priority)
     - .yellhornignore (used if .yellhorncontext is not present)
-    
+
     These files use gitignore-style syntax with blacklist and whitelist (!) patterns.
 
     Args:
@@ -1462,15 +1483,17 @@ async def process_judgement_async(
         # Process LSP snapshot if requested
         if codebase_reasoning == "lsp":
             await ctx.log(
-                level="info",
-                message="Using LSP mode for codebase reasoning in judgement"
+                level="info", message="Using LSP mode for codebase reasoning in judgement"
             )
             # Import LSP utils and get LSP snapshot
-            from yellhorn_mcp.lsp_utils import get_lsp_snapshot, update_snapshot_with_full_diff_files
-            
+            from yellhorn_mcp.lsp_utils import (
+                get_lsp_snapshot,
+                update_snapshot_with_full_diff_files,
+            )
+
             # Get LSP snapshot of the codebase
             file_paths, file_contents = await get_lsp_snapshot(repo_path)
-            
+
             # Update the snapshot with full contents of files in the diff
             file_paths, file_contents = await update_snapshot_with_full_diff_files(
                 repo_path, base_ref, head_ref, file_paths, file_contents
@@ -1619,6 +1642,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         await ctx.log(level="error", message=error_message)
         raise YellhornMCPError(error_message)
 
+
 @mcp.tool(
     name="curate_context",
     description="Analyzes the codebase and creates a .yellhorncontext file listing directories to be included in AI context.",
@@ -1633,10 +1657,10 @@ async def curate_context(
 ) -> str:
     """
     Analyzes codebase and creates a .yellhorncontext file listing directories for AI context.
-    
+
     This tool reads the .yellhornignore file (if it exists), processes files not blacklisted/whitelisted,
     and generates a .yellhorncontext file with directories that should be included when reading the codebase.
-    
+
     Args:
         ctx: Server context.
         user_task: Description of the task you're working on, used to customize directory selection.
@@ -1647,10 +1671,10 @@ async def curate_context(
         ignore_file_path: Path to the .yellhornignore file to use. Defaults to ".yellhornignore".
         output_path: Path where the .yellhorncontext file will be created. Defaults to ".yellhorncontext".
         depth_limit: Maximum directory depth to analyze (0 means no limit).
-            
+
     Returns:
         Success message with path to created .yellhorncontext file.
-        
+
     Raises:
         YellhornMCPError: If there's an error during .yellhorncontext generation.
     """
@@ -1660,68 +1684,68 @@ async def curate_context(
         gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
         openai_client = ctx.request_context.lifespan_context.get("openai_client")
         model: str = ctx.request_context.lifespan_context["model"]
-        
+
         await ctx.log(
             level="info",
-            message=f"Starting .yellhorncontext file generation with {model} using {codebase_reasoning} mode"
+            message=f"Starting .yellhorncontext file generation with {model} using {codebase_reasoning} mode",
         )
-        
+
         # Note that we respect .gitignore patterns
         await ctx.log(
             level="info",
-            message="Using Git's tracking information - respecting .gitignore patterns"
+            message="Using Git's tracking information - respecting .gitignore patterns",
         )
-        
+
         # First, check if .yellhornignore exists
         yellhornignore_path = repo_path / ignore_file_path
         has_ignore_file = yellhornignore_path.exists() and yellhornignore_path.is_file()
-        
+
         if has_ignore_file:
             await ctx.log(
                 level="info",
-                message=f"Found .yellhornignore file at {yellhornignore_path}, will use it for filtering"
+                message=f"Found .yellhornignore file at {yellhornignore_path}, will use it for filtering",
             )
         else:
             await ctx.log(
                 level="info",
-                message=f"No .yellhornignore file found at {yellhornignore_path}, proceeding without blacklist/whitelist filters"
+                message=f"No .yellhornignore file found at {yellhornignore_path}, proceeding without blacklist/whitelist filters",
             )
-        
+
         # Get file paths from codebase snapshot
         # The get_codebase_snapshot already respects .gitignore patterns by default
         # This will give us only tracked and untracked files that aren't ignored by git
         file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths")
-        
+
         if not file_paths:
             raise YellhornMCPError("No files found in repository to analyze")
-            
+
         # Apply depth limit if specified
         if depth_limit > 0:
             filtered_file_paths = []
             for file_path in file_paths:
                 # Count the number of path separators to determine depth
                 # +1 because a file at the root has depth 1, not 0
-                path_depth = file_path.count('/') + 1
+                path_depth = file_path.count("/") + 1
                 if path_depth <= depth_limit:
                     filtered_file_paths.append(file_path)
-            
+
             # Update file_paths with filtered list
             original_count = len(file_paths)
             file_paths = filtered_file_paths
             filtered_count = len(file_paths)
-            
+
             await ctx.log(
                 level="info",
-                message=f"Applied depth limit {depth_limit}: filtered from {original_count} to {filtered_count} files"
+                message=f"Applied depth limit {depth_limit}: filtered from {original_count} to {filtered_count} files",
             )
-        
+
         # If we have a .yellhornignore file, apply its filters
         filtered_file_paths = file_paths
         if has_ignore_file:
             # Read ignore patterns from .yellhornignore
             ignore_patterns = []
             whitelist_patterns = []
-            
+
             try:
                 with open(yellhornignore_path, "r", encoding="utf-8") as f:
                     for line in f:
@@ -1737,59 +1761,63 @@ async def curate_context(
                 # Log but continue if there's an error reading .yellhornignore
                 await ctx.log(
                     level="warning",
-                    message=f"Error reading .yellhornignore file: {str(e)}, proceeding without filters"
+                    message=f"Error reading .yellhornignore file: {str(e)}, proceeding without filters",
                 )
-            
+
             # If we have patterns, apply them
             if ignore_patterns or whitelist_patterns:
                 import fnmatch
-                
+
                 # Use the same is_ignored function that get_codebase_snapshot uses
                 def is_ignored(file_path: str) -> bool:
                     # First check if the file is whitelisted
                     for pattern in whitelist_patterns:
                         # Regular pattern matching (e.g., "*.py")
-                        if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, pattern.rstrip("/") + "/*"):
+                        if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(
+                            file_path, pattern.rstrip("/") + "/*"
+                        ):
                             return False  # Whitelisted, don't ignore
-                    
+
                     # Then check if it matches any ignore patterns
                     for pattern in ignore_patterns:
                         # Regular pattern matching (e.g., "*.log")
-                        if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, pattern.rstrip("/") + "/*"):
+                        if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(
+                            file_path, pattern.rstrip("/") + "/*"
+                        ):
                             return True
 
                     return False
-                
+
                 # Filter files based on ignore/whitelist patterns
                 filtered_file_paths = [f for f in file_paths if not is_ignored(f)]
-                
+
                 await ctx.log(
                     level="info",
-                    message=f"Applied .yellhornignore filtering: {len(filtered_file_paths)} of {len(file_paths)} files remain"
+                    message=f"Applied .yellhornignore filtering: {len(filtered_file_paths)} of {len(file_paths)} files remain",
                 )
-        
+
         # Extract and analyze directories from filtered files
         all_dirs = set()
         for file_path in filtered_file_paths:
             # Get all parent directories of this file
-            parts = file_path.split('/')
+            parts = file_path.split("/")
             for i in range(1, len(parts)):
-                dir_path = '/'.join(parts[:i])
+                dir_path = "/".join(parts[:i])
                 if dir_path:  # Skip empty strings
                     all_dirs.add(dir_path)
-        
+
         # Add root directory ('.') if there are files at the root level
-        if any('/' not in f for f in filtered_file_paths):
-            all_dirs.add('.')
-            
+        if any("/" not in f for f in filtered_file_paths):
+            all_dirs.add(".")
+
         # Sort directories for consistent output
         sorted_dirs = sorted(list(all_dirs))
-        
+
         await ctx.log(
             level="info",
-            message=f"Extracted {len(sorted_dirs)} directories from {len(filtered_file_paths)} filtered files"
+            message=f"Extracted {len(sorted_dirs)} directories from {len(filtered_file_paths)} filtered files",
         )
-        
+
         # Set chunk size based on reasoning mode
         if codebase_reasoning == "file_structure":
             chunk_size = 3000  # Process more files per chunk for file structure mode
@@ -1797,49 +1825,48 @@ async def curate_context(
             chunk_size = 300  # Process more files per chunk for lsp mode
         else:
             chunk_size = 100  # Default chunk size for other modes
-            
+
         # Calculate number of chunks needed
         total_chunks = (len(sorted_dirs) + chunk_size - 1) // chunk_size  # Ceiling division
-        
+
         # Create chunks of directories
         dir_chunks = []
         for i in range(0, len(sorted_dirs), chunk_size):
-            dir_chunks.append(sorted_dirs[i:i + chunk_size])
-        
+            dir_chunks.append(sorted_dirs[i : i + chunk_size])
+
         # Log start of parallel processing if we have multiple chunks
         if total_chunks > 1:
             await ctx.log(
                 level="info",
-                message=f"Starting parallel processing of {total_chunks} chunks with max concurrency of 5"
+                message=f"Starting parallel processing of {total_chunks} chunks with max concurrency of 5",
             )
         else:
             await ctx.log(
-                level="info",
-                message=f"Processing {len(sorted_dirs)} directories in a single chunk"
+                level="info", message=f"Processing {len(sorted_dirs)} directories in a single chunk"
             )
-            
+
         # Track important directories
         all_important_dirs = set()
-        
+
         # Helper function to process a single chunk
         async def process_chunk(chunk_idx, dir_chunk):
             await ctx.log(
                 level="info",
-                message=f"Processing chunk {chunk_idx + 1}/{total_chunks} with {len(dir_chunk)} directories"
+                message=f"Processing chunk {chunk_idx + 1}/{total_chunks} with {len(dir_chunk)} directories",
             )
-            
+
             # Filter file paths to only include those in the current chunk directories
             chunk_file_paths = []
             for fp in file_paths:
                 # Check if the file is in one of the directories in this chunk
                 parent_dir = Path(fp).parent.as_posix()
-                if parent_dir in dir_chunk or (parent_dir == '' and '.' in dir_chunk):
+                if parent_dir in dir_chunk or (parent_dir == "" and "." in dir_chunk):
                     chunk_file_paths.append(fp)
-                    
+
             # Use the build_file_structure_context function to create a directory tree
             # but extract just the tree portion without the note
             directory_tree = build_file_structure_context(chunk_file_paths)
-            
+
             # Construct the prompt for this chunk
             prompt = f"""You are an expert software developer tasked with analyzing a codebase structure to identify important directories for AI context.
 
@@ -1875,92 +1902,98 @@ dir3
 
 Don't include explanations for your choices, just return the list in the specified format.
 """
-            
+
             # Call the appropriate AI model based on type
             is_openai_model = model.startswith("gpt-") or model.startswith("o")
-            
+
             # Log that we're initiating the LLM call
             await ctx.log(
                 level="info",
-                message=f"Initiating LLM call for chunk {chunk_idx + 1}/{total_chunks} using {model}"
+                message=f"Initiating LLM call for chunk {chunk_idx + 1}/{total_chunks} using {model}",
             )
-            
+
             chunk_important_dirs = set()
-            
+
             try:
                 if is_openai_model:
                     if not openai_client:
-                        raise YellhornMCPError("OpenAI client not initialized. Is OPENAI_API_KEY set?")
-                        
+                        raise YellhornMCPError(
+                            "OpenAI client not initialized. Is OPENAI_API_KEY set?"
+                        )
+
                     # Convert the prompt to OpenAI messages format
                     messages = [{"role": "user", "content": prompt}]
-                    
+
                     # Call OpenAI API
                     response = await openai_client.chat.completions.create(
                         model=model,
                         messages=messages,
                     )
-                    
+
                     # Extract content
                     chunk_result = response.choices[0].message.content
                 else:
                     if gemini_client is None:
-                        raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
-                    
+                        raise YellhornMCPError(
+                            "Gemini client not initialized. Is GEMINI_API_KEY set?"
+                        )
+
                     # Call Gemini API
-                    response = await gemini_client.aio.models.generate_content(model=model, contents=prompt)
+                    response = await gemini_client.aio.models.generate_content(
+                        model=model, contents=prompt
+                    )
                     chunk_result = response.text
-                
+
                 # Extract directory paths from the result
                 in_context_block = False
-                for line in chunk_result.split('\n'):
+                for line in chunk_result.split("\n"):
                     line = line.strip()
-                    
+
                     if line == "```context":
                         in_context_block = True
                         continue
                     elif line == "```" and in_context_block:
                         in_context_block = False
                         continue
-                    
-                    if in_context_block and line and not line.startswith('#'):
+
+                    if in_context_block and line and not line.startswith("#"):
                         chunk_important_dirs.add(line)
-                
+
                 # If we didn't find a context block, try to extract directories directly
                 if not chunk_important_dirs and not in_context_block:
-                    for line in chunk_result.split('\n'):
+                    for line in chunk_result.split("\n"):
                         line = line.strip()
                         # Only add if it looks like a directory path (no spaces, existing in our list)
-                        if line and ' ' not in line and line in dir_chunk:
+                        if line and " " not in line and line in dir_chunk:
                             chunk_important_dirs.add(line)
-                
+
                 # Log the directories found
                 dirs_str = ", ".join(sorted(list(chunk_important_dirs))[:5])
                 if len(chunk_important_dirs) > 5:
                     dirs_str += f", ... ({len(chunk_important_dirs) - 5} more)"
-                
+
                 await ctx.log(
                     level="info",
-                    message=f"Chunk {chunk_idx + 1} processed, found {len(chunk_important_dirs)} important directories: {dirs_str}"
+                    message=f"Chunk {chunk_idx + 1} processed, found {len(chunk_important_dirs)} important directories: {dirs_str}",
                 )
-                
+
             except Exception as chunk_error:
                 await ctx.log(
-                    level="error", 
-                    message=f"Error processing chunk {chunk_idx + 1}: {str(chunk_error)} ({type(chunk_error).__name__})"
+                    level="error",
+                    message=f"Error processing chunk {chunk_idx + 1}: {str(chunk_error)} ({type(chunk_error).__name__})",
                 )
                 # Continue with next chunk despite errors
-            
+
             # Return results from this chunk
             return chunk_important_dirs
-        
+
         # Use semaphore to limit concurrency to 5 parallel calls
         semaphore = asyncio.Semaphore(5)
-        
+
         async def bounded_process_chunk(chunk_idx, dir_chunk):
             async with semaphore:
                 return await process_chunk(chunk_idx, dir_chunk)
-        
+
         # If we only have one chunk, process it directly
         if len(dir_chunks) == 1:
             important_dirs = await process_chunk(0, dir_chunks[0])
@@ -1971,39 +2004,41 @@ Don't include explanations for your choices, just return the list in the specifi
             for chunk_idx, dir_chunk in enumerate(dir_chunks):
                 task = asyncio.create_task(bounded_process_chunk(chunk_idx, dir_chunk))
                 tasks.append(task)
-            
+
             # Wait for all tasks to complete and collect results
-            await ctx.log(level="info", message=f"Waiting for {len(tasks)} parallel LLM tasks to complete")
+            await ctx.log(
+                level="info", message=f"Waiting for {len(tasks)} parallel LLM tasks to complete"
+            )
             completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             # Process results
             for result in completed_tasks:
                 if isinstance(result, Exception):
                     # Log the exception but continue
                     await ctx.log(level="error", message=f"Parallel task failed: {str(result)}")
                     continue
-                    
+
                 # Update our important directories collection
                 all_important_dirs.update(result)
-        
+
         # If we didn't get any important directories, include all directories
         if not all_important_dirs:
             await ctx.log(
                 level="warning",
-                message="No important directories identified, including all directories"
+                message="No important directories identified, including all directories",
             )
             all_important_dirs = set(sorted_dirs)
-        
+
         await ctx.log(
-            level="info", 
-            message=f"Processing complete, identified {len(all_important_dirs)} important directories"
+            level="info",
+            message=f"Processing complete, identified {len(all_important_dirs)} important directories",
         )
-                
+
         # Generate the final .yellhorncontext file content with comments
         final_content = "# Yellhorn Context File - AI context optimization\n"
         final_content += f"# Generated by yellhorn-mcp curate_context tool\n"
         final_content += f"# Based on task: {user_task}\n\n"
-        
+
         # Copy patterns from .gitignore file if it exists
         gitignore_path = repo_path / ".gitignore"
         if gitignore_path.exists() and gitignore_path.is_file():
@@ -2012,10 +2047,12 @@ Don't include explanations for your choices, just return the list in the specifi
                     gitignore_content = f.read()
                     final_content += "# Patterns from .gitignore file\n"
                     final_content += gitignore_content + "\n\n"
-                    await ctx.log(level="info", message="Added .gitignore patterns to .yellhorncontext")
+                    await ctx.log(
+                        level="info", message="Added .gitignore patterns to .yellhorncontext"
+                    )
             except Exception as e:
                 await ctx.log(level="warning", message=f"Failed to read .gitignore file: {str(e)}")
-        
+
         # Copy patterns from .yellhornignore file if it exists
         if has_ignore_file:
             try:
@@ -2023,105 +2060,109 @@ Don't include explanations for your choices, just return the list in the specifi
                     yellhornignore_content = f.read()
                     final_content += "# Patterns from .yellhornignore file\n"
                     final_content += yellhornignore_content + "\n\n"
-                    await ctx.log(level="info", message="Added .yellhornignore patterns to .yellhorncontext")
+                    await ctx.log(
+                        level="info", message="Added .yellhornignore patterns to .yellhorncontext"
+                    )
             except Exception as e:
-                await ctx.log(level="warning", message=f"Failed to read .yellhornignore file: {str(e)}")
-                
+                await ctx.log(
+                    level="warning", message=f"Failed to read .yellhornignore file: {str(e)}"
+                )
+
         # If we have parsed ignore patterns or whitelist patterns, we'll still include them below
         if has_ignore_file and (ignore_patterns or whitelist_patterns):
             final_content += "# Parsed patterns from .yellhornignore file\n"
-            
+
             # Include blacklist patterns from .yellhornignore
             if ignore_patterns:
                 final_content += "# Files and directories to exclude (blacklist)\n"
                 final_content += "\n".join(sorted(ignore_patterns)) + "\n\n"
-                
-            # Include whitelist patterns from .yellhornignore  
+
+            # Include whitelist patterns from .yellhornignore
             if whitelist_patterns:
                 final_content += "# Explicitly included patterns (whitelist)\n"
-                final_content += "\n".join("!" + pattern for pattern in sorted(whitelist_patterns)) + "\n\n"
-        
+                final_content += (
+                    "\n".join("!" + pattern for pattern in sorted(whitelist_patterns)) + "\n\n"
+                )
+
         # Sort directories for consistent output
         sorted_important_dirs = sorted(list(all_important_dirs))
-        
+
         # Add section for task-specific directory context
         final_content += "# Task-specific directories for AI context\n"
-        
+
         # Convert important directories to explicit include patterns (with trailing slash for directories)
         if sorted_important_dirs:
             final_content += "# Important directories to specifically include\n"
             dir_includes = []
             for dir_path in sorted_important_dirs:
                 # Add trailing slash for clarity that it's a directory pattern
-                if dir_path == '.':
+                if dir_path == ".":
                     # Root directory is a special case
                     dir_includes.append("!./")
                 else:
                     dir_includes.append(f"!{dir_path}/")
-            
+
             final_content += "\n".join(dir_includes) + "\n\n"
-        
+
         # Add a section recommending to blacklist everything else except the important directories
         final_content += "# Recommended: blacklist everything else (comment to disable)\n"
         final_content += "**/*\n"
-        
+
         # Remove duplicate lines, keeping the last occurrence (from bottom up)
         # Split content into lines, reverse to process from bottom up
         content_lines = final_content.splitlines()
         content_lines.reverse()
-        
+
         # Track seen lines (excluding comments and empty lines)
         seen_lines = set()
         unique_lines = []
-        
+
         for line in content_lines:
             # Always keep comments and empty lines
-            if line.strip() == "" or line.strip().startswith('#'):
+            if line.strip() == "" or line.strip().startswith("#"):
                 unique_lines.append(line)
                 continue
-                
+
             # For non-comment lines, check if we've seen them before
             if line not in seen_lines:
                 seen_lines.add(line)
                 unique_lines.append(line)
-        
+
         # Reverse back to original order and join
         unique_lines.reverse()
         final_content = "\n".join(unique_lines)
-        
+
         # Write the file to the specified path
         output_file_path = repo_path / output_path
         try:
             with open(output_file_path, "w", encoding="utf-8") as f:
                 f.write(final_content)
-            
+
             await ctx.log(
                 level="info",
                 message=f"Successfully wrote .yellhorncontext file to {output_file_path}",
             )
-            
+
             # Format directories for log message
             dirs_str = ", ".join(sorted_important_dirs[:5])
             if len(sorted_important_dirs) > 5:
                 dirs_str += f", ... ({len(sorted_important_dirs) - 5} more)"
-                
+
             await ctx.log(
-                level="info", 
-                message=f"Generated .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories, blacklist and whitelist patterns"
+                level="info",
+                message=f"Generated .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories, blacklist and whitelist patterns",
             )
-            
+
             # Return success message
             return f"Successfully created .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories and {'existing ignore patterns from .yellhornignore' if has_ignore_file else 'recommended blacklist patterns'}."
-            
+
         except Exception as write_error:
             raise YellhornMCPError(f"Failed to write .yellhorncontext file: {str(write_error)}")
-            
+
     except Exception as e:
         error_message = f"Failed to generate .yellhorncontext file: {str(e)}"
         await ctx.log(level="error", message=error_message)
         raise YellhornMCPError(error_message)
-
-
 
 
 @mcp.tool(
@@ -2142,11 +2183,11 @@ async def judge_workplan(
     This tool fetches the original workplan from the specified GitHub issue, generates a diff
     between the specified git refs, and initiates an asynchronous AI judgement process that creates
     a GitHub sub-issue with the judgement.
-    
+
     Respects file filtering from:
     - .yellhorncontext (if present, takes priority)
     - .yellhornignore (used if .yellhorncontext is not present)
-    
+
     These files use gitignore-style syntax with blacklist and whitelist (!) patterns.
 
     Args:
@@ -2187,10 +2228,10 @@ async def judge_workplan(
 
         # Check if diff is empty or only contains the header for file_structure mode
         is_empty = not diff.strip() or (
-            codebase_reasoning in ["file_structure", "none"] and
-            diff.strip() == f"Changed files between {base_ref} and {head_ref}:"
+            codebase_reasoning in ["file_structure", "none"]
+            and diff.strip() == f"Changed files between {base_ref} and {head_ref}:"
         )
-        
+
         if is_empty:
             return f"No differences found between {base_ref} ({base_commit_hash}) and {head_ref} ({head_commit_hash}). Nothing to judge."
 
@@ -2248,4 +2289,3 @@ async def judge_workplan(
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to trigger workplan judgement: {str(e)}")
-
