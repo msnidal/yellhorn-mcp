@@ -185,7 +185,11 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
 
         # Attach search grounding if enabled
         if use_search_grounding and not is_openai_model:
-            gemini_client = attach_search(gemini_client)
+            try:
+                gemini_client = attach_search(gemini_client)
+            except Exception as e:
+                print(f"Warning: Failed to attach search grounding: {str(e)}")
+                # Continue without search grounding
     # For OpenAI models, require OpenAI API key
     else:
         openai_api_key = os.getenv("OPENAI_API_KEY")
