@@ -293,7 +293,8 @@ class AsyncMock(MagicMock):
 @pytest.mark.asyncio
 async def test_curate_context():
     """Test the curate_context tool functionality with .yellhornignore integration."""
-    from yellhorn_mcp.server import YellhornMCPError, curate_context
+    from yellhorn_mcp.git_utils import YellhornMCPError
+    from yellhorn_mcp.server import curate_context
 
     # Create a mock context with async log method
     mock_ctx = MagicMock()

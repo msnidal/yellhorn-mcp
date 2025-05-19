@@ -9,7 +9,8 @@ from mcp import Resource
 from pydantic import FileUrl
 
 from tests.helpers import DummyContext
-from yellhorn_mcp.server import YellhornMCPError, list_resources, read_resource
+from yellhorn_mcp.git_utils import YellhornMCPError
+from yellhorn_mcp.server import list_resources, read_resource
 
 
 @pytest.mark.asyncio

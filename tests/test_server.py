@@ -199,31 +199,33 @@ async def test_read_resource(mock_request_context):
 from mcp import Resource
 from mcp.server.fastmcp import Context
 
-from yellhorn_mcp.server import (
+from yellhorn_mcp.git_utils import (
     YellhornMCPError,
     add_github_issue_comment,
-    calculate_cost,
     create_github_subissue,
-    create_workplan,
     ensure_label_exists,
-    format_codebase_for_prompt,
-    format_metrics_section,
-    get_codebase_snapshot,
     get_default_branch,
     get_git_diff,
     get_github_issue_body,
     get_github_pr_diff,
-    get_workplan,
     is_git_repository,
-    judge_workplan,
     list_resources,
     post_github_pr_review,
-    process_judgement_async,
-    process_workplan_async,
     read_resource,
     run_git_command,
     run_github_command,
     update_github_issue,
+)
+from yellhorn_mcp.server import (
+    calculate_cost,
+    create_workplan,
+    format_codebase_for_prompt,
+    format_metrics_section,
+    get_codebase_snapshot,
+    get_workplan,
+    judge_workplan,
+    process_judgement_async,
+    process_workplan_async,
 )
 
 
