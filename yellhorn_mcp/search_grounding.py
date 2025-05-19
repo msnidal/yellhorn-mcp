@@ -8,6 +8,7 @@ formatting citation metadata into Markdown for embedding in responses.
 # Import tools directly, but handle different versions of the genai library for GenerativeModel
 import importlib
 import inspect
+
 from google.genai import tools
 
 # Try to import GenerativeModel from google.genai directly, fall back to google.generativeai
@@ -18,13 +19,16 @@ except ImportError:
     try:
         # Legacy import (older google-genai versions)
         import google.generativeai as genai
+
         GenerativeModel = genai.GenerativeModel
     except (ImportError, AttributeError):
         # Create a mock placeholder for GenerativeModel to prevent import errors
         # This allows tests to run even if GenerativeModel is not available
         class GenerativeModel:
             """Mock class for GenerativeModel when not available."""
+
             tools = None
+
             def __init__(self, *args, **kwargs):
                 pass
 
@@ -40,16 +44,16 @@ def attach_search(model: GenerativeModel) -> GenerativeModel:
         The same model with search capabilities attached.
     """
     # If this is our mock placeholder, just return the model as-is
-    if not hasattr(model, 'tools') or not hasattr(tools, 'GoogleSearchResults'):
+    if not hasattr(model, "tools") or not hasattr(tools, "GoogleSearchResults"):
         return model
-        
+
     # Initialize tools list if it's None
     model.tools = model.tools or []
-    
+
     # Add GoogleSearchResults if not already present
     if not any(isinstance(t, tools.GoogleSearchResults) for t in model.tools):
         model.tools.append(tools.GoogleSearchResults())
-    
+
     return model
 
 
