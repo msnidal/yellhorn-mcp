@@ -253,27 +253,28 @@ def test_model_creation_with_search_grounding():
     mock_client = MagicMock()
     mock_model = MagicMock()
     mock_model.tools = []
-    
+
     # Setup for model creation
     mock_client.GenerativeModel.return_value = mock_model
     mock_search = MagicMock()
     mock_search.__class__.__name__ = "GoogleSearchResults"
-    
+
     # Test create_model_with_search
     with patch.object(tools, "GoogleSearchResults", return_value=mock_search):
         model_with_search = create_model_with_search(mock_client, "test-model")
-    
+
     # Verify model was created with search tool
     assert model_with_search is mock_model
     assert len(model_with_search.tools) == 1
-    
+
     # Test create_model_for_request with search enabled
-    with patch("yellhorn_mcp.search_grounding.create_model_with_search", 
-               return_value=mock_model) as mock_create:
+    with patch(
+        "yellhorn_mcp.search_grounding.create_model_with_search", return_value=mock_model
+    ) as mock_create:
         model = create_model_for_request(mock_client, "test-model", True)
         mock_create.assert_called_once_with(mock_client, "test-model")
         assert model is mock_model
-    
+
     # Test create_model_for_request with search disabled
     mock_client.GenerativeModel.reset_mock()
     model = create_model_for_request(mock_client, "test-model", False)
