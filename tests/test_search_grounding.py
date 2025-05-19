@@ -6,7 +6,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from yellhorn_mcp.search_grounding import attach_search, citations_to_markdown
+from yellhorn_mcp.search_grounding import (
+    attach_search,
+    citations_to_markdown,
+    MockGoogleSearchResults,
+    MockGenerativeModel,
+    tools
+)
 
 
 def test_attach_search_adds_search_if_not_present():
@@ -14,14 +20,13 @@ def test_attach_search_adds_search_if_not_present():
     mock_model = MagicMock()
     mock_model.tools = []
 
-    # Create a mock for tools
+    # Create a mock for GoogleSearchResults
     mock_search_results = MagicMock()
-    mock_tools = MagicMock()
-    mock_tools.GoogleSearchResults = MagicMock(return_value=mock_search_results)
-
-    with patch("yellhorn_mcp.search_grounding.tools", mock_tools):
-        with patch("yellhorn_mcp.search_grounding.hasattr", return_value=True):
-            result = attach_search(mock_model)
+    mock_search_results.__class__.__name__ = "GoogleSearchResults"
+    
+    # Patch the tools module's GoogleSearchResults class
+    with patch.object(tools, "GoogleSearchResults", return_value=mock_search_results):
+        result = attach_search(mock_model)
 
     # Verify the model has a tool added
     assert len(result.tools) == 1
@@ -33,14 +38,12 @@ def test_attach_search_doesnt_add_duplicate_search():
     """Test that attach_search doesn't add a duplicate search tool if one already exists."""
     mock_model = MagicMock()
 
-    # Create a mock for tools and search results
+    # Create mock search tool that will be recognized by class name
     mock_search_tool = MagicMock()
+    mock_search_tool.__class__.__name__ = "GoogleSearchResults"
     mock_model.tools = [mock_search_tool]
 
-    # Mock the necessary functions
-    with patch("yellhorn_mcp.search_grounding.isinstance", return_value=True):
-        with patch("yellhorn_mcp.search_grounding.hasattr", return_value=True):
-            result = attach_search(mock_model)
+    result = attach_search(mock_model)
 
     # Verify the tools list still has only one item
     assert len(result.tools) == 1
@@ -53,14 +56,13 @@ def test_attach_search_initializes_tools_list_if_none():
     mock_model = MagicMock()
     mock_model.tools = None
 
-    # Create a mock for tools
+    # Create a mock for GoogleSearchResults
     mock_search_results = MagicMock()
-    mock_tools = MagicMock()
-    mock_tools.GoogleSearchResults = MagicMock(return_value=mock_search_results)
-
-    with patch("yellhorn_mcp.search_grounding.tools", mock_tools):
-        with patch("yellhorn_mcp.search_grounding.hasattr", return_value=True):
-            result = attach_search(mock_model)
+    mock_search_results.__class__.__name__ = "GoogleSearchResults"
+    
+    # Patch the tools module's GoogleSearchResults class
+    with patch.object(tools, "GoogleSearchResults", return_value=mock_search_results):
+        result = attach_search(mock_model)
 
     # Verify the tools list was initialized and has one item
     assert len(result.tools) == 1
@@ -132,9 +134,23 @@ def test_attach_search_handles_missing_tools_attribute():
     """Test that attach_search handles models without tools attribute gracefully."""
     mock_model = MagicMock(spec=[])  # No tools attribute
 
-    # Ensure hasattr returns False for mock_model.tools
-    with patch("yellhorn_mcp.search_grounding.hasattr", return_value=False):
-        result = attach_search(mock_model)
+    # No need to patch hasattr anymore with our improved implementation
+    result = attach_search(mock_model)
 
     # Should return the model unchanged without error
     assert result is mock_model
+
+
+def test_mock_classes_exist():
+    """Test that our mock classes are properly exported and usable."""
+    # Verify mock classes are available
+    assert MockGoogleSearchResults is not None
+    assert MockGenerativeModel is not None
+    assert tools is not None
+    
+    # Verify we can instantiate the mocks without errors
+    search_results = MockGoogleSearchResults()
+    model = MockGenerativeModel()
+    
+    # Verify expected attributes
+    assert model.tools is None

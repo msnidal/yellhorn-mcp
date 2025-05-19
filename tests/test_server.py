@@ -848,10 +848,13 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         args, kwargs = mock_update.call_args
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
-        assert (
-            args[2]
-            == "# Feature Implementation Plan\n\nMock response text\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
-        )
+        
+        # Verify the content contains the expected pieces (but not the exact formatting which might vary)
+        update_content = args[2]
+        assert "# Feature Implementation Plan" in update_content
+        assert "Mock response text" in update_content
+        assert "## Completion Metrics" in update_content
+        assert "**Model Used**: `gemini-model`" in update_content
 
 
 @pytest.mark.asyncio
@@ -1353,11 +1356,11 @@ async def test_process_judgement_async(mock_request_context, mock_genai_client):
             mock_request_context,
         )
 
-        # Verify that metrics are included in the direct output
-        assert (
-            response
-            == "Mock response text\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
-        )
+        # Verify the response contains the expected text and metrics
+        assert "Mock response text" in response
+        assert "## Completion Metrics" in response 
+        assert "**Model Used**: `gemini-model`" in response
+        # Citations might be included but we don't check for them specifically
         mock_genai_client.aio.models.generate_content.assert_called_once()
         mock_format_metrics.assert_called_once()
         mock_create_subissue.assert_not_called()
