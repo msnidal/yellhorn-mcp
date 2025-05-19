@@ -27,12 +27,12 @@ from typing import Any, Dict, List
 
 from google import genai
 
-from yellhorn_mcp.search_grounding import attach_search, citations_to_markdown
-
 # OpenAI is imported conditionally inside app_lifespan when needed
 from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import FileUrl
+
+from yellhorn_mcp.search_grounding import attach_search, citations_to_markdown
 
 # Pricing configuration for models (USD per 1M tokens)
 MODEL_PRICING = {
@@ -167,7 +167,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     repo_path = os.getenv("REPO_PATH", ".")
     model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
     is_openai_model = model.startswith("gpt-") or model.startswith("o")
-    
+
     # Handle search grounding configuration (default to enabled)
     use_search_grounding = os.getenv("YELLHORN_MCP_SEARCH", "on").lower() != "off"
 
@@ -182,7 +182,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             raise ValueError("GEMINI_API_KEY is required for Gemini models")
         # Configure Gemini API
         gemini_client = genai.Client(api_key=gemini_api_key)
-        
+
         # Attach search grounding if enabled
         if use_search_grounding and not is_openai_model:
             gemini_client = attach_search(gemini_client)
@@ -1172,7 +1172,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             citations = getattr(response, "citations", [])
             if citations:
                 citations_section = citations_to_markdown(citations)
-        
+
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
 
@@ -1383,16 +1383,18 @@ async def create_workplan(
             )
             # Store the codebase_reasoning mode in the context for process_workplan_async
             ctx.request_context.lifespan_context["codebase_reasoning"] = codebase_reasoning
-            
+
             # Handle search grounding override if specified
-            original_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
+            original_search_grounding = ctx.request_context.lifespan_context.get(
+                "use_search_grounding", True
+            )
             if disable_search_grounding:
                 ctx.request_context.lifespan_context["use_search_grounding"] = False
                 await ctx.log(
                     level="info",
                     message="Search grounding disabled for this workplan per request parameter.",
                 )
-            
+
             asyncio.create_task(
                 process_workplan_async(
                     repo_path,
@@ -1404,7 +1406,7 @@ async def create_workplan(
                     ctx,
                     detailed_description=detailed_description,
                     debug=debug,
-                    _meta={"original_search_grounding": original_search_grounding}
+                    _meta={"original_search_grounding": original_search_grounding},
                 )
             )
         else:
@@ -1416,7 +1418,7 @@ async def create_workplan(
         # Restore original search grounding setting if we modified it
         if codebase_reasoning != "none" and disable_search_grounding:
             ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
-            
+
         # Return the issue URL as JSON
         result = {
             "issue_url": issue_url,
@@ -1458,9 +1460,11 @@ async def get_workplan(
     try:
         # Get the repository path from context
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-        
+
         # Handle search grounding override if specified
-        original_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
+        original_search_grounding = ctx.request_context.lifespan_context.get(
+            "use_search_grounding", True
+        )
         if disable_search_grounding:
             ctx.request_context.lifespan_context["use_search_grounding"] = False
             await ctx.log(
@@ -1480,7 +1484,9 @@ async def get_workplan(
         finally:
             # Restore original search grounding setting if modified
             if disable_search_grounding:
-                ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
+                ctx.request_context.lifespan_context["use_search_grounding"] = (
+                    original_search_grounding
+                )
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to retrieve workplan: {str(e)}")
@@ -1635,7 +1641,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             citations = getattr(response, "citations", [])
             if citations:
                 citations_section = citations_to_markdown(citations)
-                
+
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
 
@@ -1654,7 +1660,9 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`{base_hash_info}\n- Head ref: `{head_ref}`{head_hash_info}\n- Workplan: #{workplan_issue_number}\n\n"
 
             # Combine metadata, judgement content, citations and metrics
-            judgement_with_metadata_and_metrics = metadata + judgement_content + citations_section + metrics_section
+            judgement_with_metadata_and_metrics = (
+                metadata + judgement_content + citations_section + metrics_section
+            )
 
             # Create a sub-issue
             await ctx.log(
@@ -1745,9 +1753,11 @@ async def curate_context(
         gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
         openai_client = ctx.request_context.lifespan_context.get("openai_client")
         model: str = ctx.request_context.lifespan_context["model"]
-        
+
         # Handle search grounding override if specified
-        original_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
+        original_search_grounding = ctx.request_context.lifespan_context.get(
+            "use_search_grounding", True
+        )
         if disable_search_grounding:
             ctx.request_context.lifespan_context["use_search_grounding"] = False
             await ctx.log(
@@ -2225,8 +2235,10 @@ Don't include explanations for your choices, just return the list in the specifi
 
             # Restore original search grounding setting if modified
             if disable_search_grounding:
-                ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
-                
+                ctx.request_context.lifespan_context["use_search_grounding"] = (
+                    original_search_grounding
+                )
+
             # Return success message
             return f"Successfully created .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories and {'existing ignore patterns from .yellhornignore' if has_ignore_file else 'recommended blacklist patterns'}."
 
@@ -2289,9 +2301,11 @@ async def judge_workplan(
     try:
         # Get the repository path from context
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-        
+
         # Handle search grounding override if specified
-        original_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
+        original_search_grounding = ctx.request_context.lifespan_context.get(
+            "use_search_grounding", True
+        )
         if disable_search_grounding:
             ctx.request_context.lifespan_context["use_search_grounding"] = False
             await ctx.log(
@@ -2364,14 +2378,14 @@ async def judge_workplan(
                 head_commit_hash=head_commit_hash,
                 debug=debug,
                 codebase_reasoning=codebase_reasoning,
-                _meta={"original_search_grounding": original_search_grounding}
+                _meta={"original_search_grounding": original_search_grounding},
             )
         )
 
         # Restore original search grounding setting if modified
         if disable_search_grounding:
             ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
-            
+
         return (
             f"Judgement task initiated comparing {base_ref} (`{base_commit_hash}`)..{head_ref} (`{head_commit_hash}`) "
             f"against workplan issue #{issue_number}. "
