@@ -27,6 +27,8 @@ from typing import Any, Dict, List
 
 from google import genai
 
+from yellhorn_mcp.search_grounding import attach_search, citations_to_markdown
+
 # OpenAI is imported conditionally inside app_lifespan when needed
 from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
@@ -165,6 +167,9 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     repo_path = os.getenv("REPO_PATH", ".")
     model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
     is_openai_model = model.startswith("gpt-") or model.startswith("o")
+    
+    # Handle search grounding configuration (default to enabled)
+    use_search_grounding = os.getenv("YELLHORN_MCP_SEARCH", "on").lower() != "off"
 
     # Initialize clients based on the model type
     gemini_client = None
@@ -177,6 +182,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             raise ValueError("GEMINI_API_KEY is required for Gemini models")
         # Configure Gemini API
         gemini_client = genai.Client(api_key=gemini_api_key)
+        
+        # Attach search grounding if enabled
+        if use_search_grounding and not is_openai_model:
+            gemini_client = attach_search(gemini_client)
     # For OpenAI models, require OpenAI API key
     else:
         openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -205,6 +214,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             "gemini_client": gemini_client,
             "openai_client": openai_client,
             "model": model,
+            "use_search_grounding": use_search_grounding,
         }
     finally:
         pass
@@ -1156,11 +1166,18 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             await add_github_issue_comment(repo_path, issue_number, error_message_comment)
             return
 
+        # Extract citations from Gemini response if available
+        citations_section = ""
+        if not is_openai_model and hasattr(response, "citations"):
+            citations = getattr(response, "citations", [])
+            if citations:
+                citations_section = citations_to_markdown(citations)
+        
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
 
-        # Add the title as header and append metrics to the final body
-        full_body = f"# {title}\n\n{workplan_content}{metrics_section}"
+        # Add the title as header and append citations and metrics to the final body
+        full_body = f"# {title}\n\n{workplan_content}{citations_section}{metrics_section}"
 
         # Update the GitHub issue with the generated workplan and metrics
         await update_github_issue(repo_path, issue_number, full_body)
@@ -1273,6 +1290,7 @@ async def create_workplan(
     ctx: Context,
     codebase_reasoning: str = "full",
     debug: bool = False,
+    disable_search_grounding: bool = False,
 ) -> str:
     """
     Create a workplan based on the provided title and detailed description.
@@ -1295,6 +1313,8 @@ async def create_workplan(
             - "none": Skip AI enhancement, use the provided description as-is
         debug: If True, adds a comment to the issue with the full prompt used for generation.
                Useful for debugging and improving prompt engineering.
+        disable_search_grounding: If True, disables Google Search Grounding for this request.
+               Default is False (search grounding enabled) for Gemini models.
 
     Returns:
         JSON string containing the GitHub issue URL.
@@ -1363,6 +1383,16 @@ async def create_workplan(
             )
             # Store the codebase_reasoning mode in the context for process_workplan_async
             ctx.request_context.lifespan_context["codebase_reasoning"] = codebase_reasoning
+            
+            # Handle search grounding override if specified
+            original_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
+            if disable_search_grounding:
+                ctx.request_context.lifespan_context["use_search_grounding"] = False
+                await ctx.log(
+                    level="info",
+                    message="Search grounding disabled for this workplan per request parameter.",
+                )
+            
             asyncio.create_task(
                 process_workplan_async(
                     repo_path,
@@ -1374,6 +1404,7 @@ async def create_workplan(
                     ctx,
                     detailed_description=detailed_description,
                     debug=debug,
+                    _meta={"original_search_grounding": original_search_grounding}
                 )
             )
         else:
@@ -1382,6 +1413,10 @@ async def create_workplan(
                 message=f"Created basic workplan issue #{issue_number} without AI enhancement.",
             )
 
+        # Restore original search grounding setting if we modified it
+        if codebase_reasoning != "none" and disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
+            
         # Return the issue URL as JSON
         result = {
             "issue_url": issue_url,
@@ -1400,6 +1435,7 @@ async def create_workplan(
 async def get_workplan(
     ctx: Context,
     issue_number: str,
+    disable_search_grounding: bool = False,
 ) -> str:
     """
     Retrieve the workplan content (GitHub issue body) associated with a workplan.
@@ -1410,6 +1446,8 @@ async def get_workplan(
     Args:
         ctx: Server context.
         issue_number: The GitHub issue number for the workplan.
+        disable_search_grounding: If True, disables Google Search Grounding for this request.
+            Default is False (search grounding enabled) for Gemini models.
 
     Returns:
         The content of the workplan issue as a string.
@@ -1420,16 +1458,29 @@ async def get_workplan(
     try:
         # Get the repository path from context
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+        
+        # Handle search grounding override if specified
+        original_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = False
+            await ctx.log(
+                level="info",
+                message="Search grounding disabled for this workplan retrieval per request parameter.",
+            )
 
         await ctx.log(
             level="info",
             message=f"Fetching workplan for issue #{issue_number}.",
         )
 
-        # Fetch the issue content
-        workplan = await get_github_issue_body(repo_path, issue_number)
-
-        return workplan
+        try:
+            # Fetch the issue content
+            workplan = await get_github_issue_body(repo_path, issue_number)
+            return workplan
+        finally:
+            # Restore original search grounding setting if modified
+            if disable_search_grounding:
+                ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to retrieve workplan: {str(e)}")
@@ -1578,6 +1629,13 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             api_name = "OpenAI" if is_openai_model else "Gemini"
             raise YellhornMCPError(f"Received an empty response from {api_name} API.")
 
+        # Extract citations from Gemini response if available
+        citations_section = ""
+        if not is_openai_model and hasattr(response, "citations"):
+            citations = getattr(response, "citations", [])
+            if citations:
+                citations_section = citations_to_markdown(citations)
+                
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
 
@@ -1595,8 +1653,8 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             head_hash_info = f" (`{head_commit_hash}`)" if head_commit_hash else ""
             metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`{base_hash_info}\n- Head ref: `{head_ref}`{head_hash_info}\n- Workplan: #{workplan_issue_number}\n\n"
 
-            # Combine metadata, judgement content and metrics
-            judgement_with_metadata_and_metrics = metadata + judgement_content + metrics_section
+            # Combine metadata, judgement content, citations and metrics
+            judgement_with_metadata_and_metrics = metadata + judgement_content + citations_section + metrics_section
 
             # Create a sub-issue
             await ctx.log(
@@ -1634,8 +1692,8 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             # Return both the judgement content and the sub-issue URL
             return f"Judgement sub-issue created: {subissue_url}\n\n{judgement_content}"
         else:
-            # For direct output, include metrics
-            return f"{judgement_content}{metrics_section}"
+            # For direct output, include citations and metrics
+            return f"{judgement_content}{citations_section}{metrics_section}"
 
     except Exception as e:
         error_message = f"Failed to generate judgement: {str(e)}"
@@ -1654,6 +1712,7 @@ async def curate_context(
     ignore_file_path: str = ".yellhornignore",
     output_path: str = ".yellhorncontext",
     depth_limit: int = 0,  # 0 means no limit
+    disable_search_grounding: bool = False,
 ) -> str:
     """
     Analyzes codebase and creates a .yellhorncontext file listing directories for AI context.
@@ -1671,6 +1730,8 @@ async def curate_context(
         ignore_file_path: Path to the .yellhornignore file to use. Defaults to ".yellhornignore".
         output_path: Path where the .yellhorncontext file will be created. Defaults to ".yellhorncontext".
         depth_limit: Maximum directory depth to analyze (0 means no limit).
+        disable_search_grounding: If True, disables Google Search Grounding for this request.
+            Default is False (search grounding enabled) for Gemini models.
 
     Returns:
         Success message with path to created .yellhorncontext file.
@@ -1684,6 +1745,15 @@ async def curate_context(
         gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
         openai_client = ctx.request_context.lifespan_context.get("openai_client")
         model: str = ctx.request_context.lifespan_context["model"]
+        
+        # Handle search grounding override if specified
+        original_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = False
+            await ctx.log(
+                level="info",
+                message="Search grounding disabled for context curation per request parameter.",
+            )
 
         await ctx.log(
             level="info",
@@ -2153,6 +2223,10 @@ Don't include explanations for your choices, just return the list in the specifi
                 message=f"Generated .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories, blacklist and whitelist patterns",
             )
 
+            # Restore original search grounding setting if modified
+            if disable_search_grounding:
+                ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
+                
             # Return success message
             return f"Successfully created .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories and {'existing ignore patterns from .yellhornignore' if has_ignore_file else 'recommended blacklist patterns'}."
 
@@ -2176,6 +2250,7 @@ async def judge_workplan(
     head_ref: str = "HEAD",
     codebase_reasoning: str = "full",
     debug: bool = False,
+    disable_search_grounding: bool = False,
 ) -> str:
     """
     Trigger an asynchronous code judgement comparing two git refs against a workplan.
@@ -2202,6 +2277,8 @@ async def judge_workplan(
             - "none": Skip codebase context completely for fastest processing
         debug: If True, adds a comment to the sub-issue with the full prompt used for generation.
                Useful for debugging and improving prompt engineering.
+        disable_search_grounding: If True, disables Google Search Grounding for this request.
+               Default is False (search grounding enabled) for Gemini models.
 
     Returns:
         A confirmation message that the judgement task has been initiated.
@@ -2212,6 +2289,15 @@ async def judge_workplan(
     try:
         # Get the repository path from context
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+        
+        # Handle search grounding override if specified
+        original_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = False
+            await ctx.log(
+                level="info",
+                message="Search grounding disabled for workplan judgement per request parameter.",
+            )
 
         await ctx.log(
             level="info",
@@ -2278,9 +2364,14 @@ async def judge_workplan(
                 head_commit_hash=head_commit_hash,
                 debug=debug,
                 codebase_reasoning=codebase_reasoning,
+                _meta={"original_search_grounding": original_search_grounding}
             )
         )
 
+        # Restore original search grounding setting if modified
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
+            
         return (
             f"Judgement task initiated comparing {base_ref} (`{base_commit_hash}`)..{head_ref} (`{head_commit_hash}`) "
             f"against workplan issue #{issue_number}. "

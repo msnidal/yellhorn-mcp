@@ -51,6 +51,15 @@ def main():
     )
 
     parser.add_argument(
+        "--no-search-grounding",
+        dest="no_search_grounding",
+        action="store_true",
+        help="Disable Google Search Grounding for Gemini models. "
+        "By default, search grounding is enabled for all Gemini models. "
+        "This flag maps to YELLHORN_MCP_SEARCH=off environment variable."
+    )
+
+    parser.add_argument(
         "--host",
         dest="host",
         default="127.0.0.1",
@@ -90,6 +99,10 @@ def main():
     os.environ["REPO_PATH"] = args.repo_path
     os.environ["YELLHORN_MCP_MODEL"] = args.model
     os.environ["YELLHORN_MCP_REASONING"] = args.codebase_reasoning
+    
+    # Handle search grounding flag
+    if args.no_search_grounding:
+        os.environ["YELLHORN_MCP_SEARCH"] = "off"
 
     # Validate repository path
     repo_path = Path(args.repo_path).resolve()
@@ -105,6 +118,12 @@ def main():
     print(f"Starting Yellhorn MCP server at http://{args.host}:{args.port}")
     print(f"Repository path: {repo_path}")
     print(f"Using model: {args.model}")
+    
+    # Show search grounding status if using Gemini model
+    is_openai_model = args.model.startswith("gpt-") or args.model.startswith("o")
+    if not is_openai_model:
+        search_status = "disabled" if args.no_search_grounding else "enabled"
+        print(f"Google Search Grounding: {search_status}")
 
     mcp.run(transport="stdio")
 

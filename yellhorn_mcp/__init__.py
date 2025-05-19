@@ -3,4 +3,5 @@
 __version__ = "0.3.3"
 
 from .lsp_utils import *
+from .search_grounding import *
 from .server import *

@@ -31,6 +31,9 @@ The server requires the following environment variables:
 - `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro-preview-03-25"). Available options:
   - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
   - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
+- `YELLHORN_MCP_SEARCH` (optional): Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
+  - "on" - Search grounding enabled for Gemini models
+  - "off" - Search grounding disabled for all models
 
 ### File Filtering with .yellhorncontext and .yellhornignore
 
@@ -164,7 +167,8 @@ To configure Yellhorn MCP in VSCode or Cursor, create a `.vscode/mcp.json` file 
       "args": [],
       "env": {
         "GEMINI_API_KEY": "${input:gemini-api-key}",
-        "REPO_PATH": "${workspaceFolder}"
+        "REPO_PATH": "${workspaceFolder}",
+        "YELLHORN_MCP_SEARCH": "on"
       }
     }
   }
@@ -182,7 +186,9 @@ To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json
       "type": "stdio",
       "command": "yellhorn-mcp",
       "args": ["--model","o3"],
-      "env": {}
+      "env": {
+        "YELLHORN_MCP_SEARCH": "on"
+      }
     }
   }
 }
@@ -249,6 +255,7 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
   - `"lsp"`: Use AI with lightweight codebase context (function/method signatures, class attributes and struct fields for Python and Go)
   - `"none"`: Skip AI enhancement, use the provided description as-is
 - `debug`: (optional) If set to `true`, adds a comment to the issue with the full prompt used for generation
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
 
 **Output**:
 
@@ -268,6 +275,7 @@ Retrieves the workplan content (GitHub issue body) associated with a specified G
 **Input**:
 
 - `issue_number`: The GitHub issue number for the workplan.
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
 
 **Output**:
 
@@ -287,6 +295,7 @@ Analyzes the codebase structure to build a .yellhorncontext file with optimized 
 - `ignore_file_path`: (optional) Path to the .yellhornignore file to use. Defaults to ".yellhornignore".
 - `output_path`: (optional) Path where the .yellhorncontext file will be created. Defaults to ".yellhorncontext".
 - `depth_limit`: (optional) Maximum directory depth to analyze (0 means no limit).
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
 
 **Output**:
 
@@ -336,6 +345,7 @@ Triggers an asynchronous code judgement comparing two git refs (branches or comm
   - `"lsp"`: Use lighter codebase context (function signatures, class attributes, etc. for Python and Go, plus full diff files)
   - `"none"`: Skip codebase context completely for fastest processing
 - `debug`: (optional) If set to `true`, adds a comment to the sub-issue with the full prompt used for generation
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
 
 **Output**:
 
@@ -385,8 +395,11 @@ workplan = await session.get_resource("123")
 When running in standalone mode, Yellhorn MCP exposes a standard HTTP API that can be accessed by any HTTP client:
 
 ```bash
-# Run the server
+# Run the server with default settings (search grounding enabled for Gemini models)
 yellhorn-mcp --host 127.0.0.1 --port 8000
+
+# Run the server with search grounding disabled
+yellhorn-mcp --host 127.0.0.1 --port 8000 --no-search-grounding
 ```
 
 You can then make requests to the server's API endpoints:
@@ -565,6 +578,7 @@ For advanced use cases, you can modify the server's behavior by editing the sour
 - Adjust the prompt templates in `process_workplan_async` and `process_judgement_async` functions
 - Modify the codebase preprocessing in `get_codebase_snapshot` and `format_codebase_for_prompt`
 - Change the Gemini model version with the `YELLHORN_MCP_MODEL` environment variable
+- Toggle Google Search Grounding with the `YELLHORN_MCP_SEARCH` environment variable
 - Customize the directory tree representation in `tree_utils.py`
 - Add support for additional languages in the LSP mode by extending `lsp_utils.py`
 
