@@ -1092,6 +1092,7 @@ Your response will be published directly to a GitHub issue without modification,
 - Code blocks with appropriate language syntax highlighting
 - Checkboxes for action items that can be marked as completed
 - Any relevant diagrams or explanations
+- Extract any URLs from the detailed description and include them in a "## References" section at the end
 
 ## Instructions for Workplan Structure
 
@@ -1111,6 +1112,8 @@ Your response will be published directly to a GitHub issue without modification,
    - The specific code changes using formatted code blocks with syntax highlighting
    - Explanations of WHY each change is needed, not just WHAT to change
    - Detailed context that would help a less-experienced developer or LLM understand the change
+
+4. If any URLs are provided in the detailed description, extract them and include a "## References" section at the end (before metrics) with those URLs as a numbered or bulleted list.
 
 The workplan should be comprehensive enough that a developer or AI assistant could implement it without additional context, and structured in a way that makes it easy for an LLM to quickly understand and work with the contained information.
 
@@ -1286,7 +1289,7 @@ def is_git_repository(path: Path) -> bool:
 
 @mcp.tool(
     name="create_workplan",
-    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full', 'lsp', 'file_structure', or 'none'). Respects .yellhorncontext and .yellhornignore for file filtering. Set debug=True to see the full prompt.",
+    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full', 'lsp', 'file_structure', or 'none'). Respects .yellhorncontext and .yellhornignore for file filtering. Set debug=True to see the full prompt. Any URLs provided in the detailed_description will be included as references in the workplan.",
 )
 async def create_workplan(
     title: str,
@@ -1592,6 +1595,9 @@ Note any code quality issues, potential bugs, or suggest alternative approaches.
 
 ## Intentional Divergence Notes
 If the implementation intentionally deviates from the workplan for good reasons, explain those reasons.
+
+## References
+Extract any URLs mentioned in the workplan or that would be helpful for understanding the implementation and list them here. This ensures important links are preserved.
 
 IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
@@ -2257,7 +2263,7 @@ Don't include explanations for your choices, just return the list in the specifi
 
 @mcp.tool(
     name="judge_workplan",
-    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background). Control context with 'codebase_reasoning' ('full', 'lsp', 'file_structure', or 'none'). Respects .yellhorncontext and .yellhornignore for file filtering. Set debug=True to see the full prompt.",
+    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background). Control context with 'codebase_reasoning' ('full', 'lsp', 'file_structure', or 'none'). Respects .yellhorncontext and .yellhornignore for file filtering. Set debug=True to see the full prompt. Any URLs mentioned in the issue will be included as references in the judgement.",
 )
 async def judge_workplan(
     ctx: Context,

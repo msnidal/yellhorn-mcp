@@ -100,7 +100,7 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 **Input**:
 
 - `title`: Title for the GitHub issue (will be used as issue title and header)
-- `detailed_description`: Detailed description for the workplan
+- `detailed_description`: Detailed description for the workplan. Any URLs provided here will be extracted and included in a References section.
 - `codebase_reasoning`: (optional) Control whether AI enhancement is performed:
   - `"full"`: (default) Use AI to enhance the workplan with full codebase context
   - `"lsp"`: Use AI with lightweight codebase context (function/method signatures, class attributes and struct fields for Python and Go)
@@ -143,6 +143,8 @@ Triggers an asynchronous code judgement comparing two git refs (branches or comm
   - `"none"`: Skip codebase context completely for fastest processing
 - `debug`: (optional) If set to `true`, adds a comment to the sub-issue with the full prompt used for generation
 - `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
+
+Any URLs mentioned in the workplan will be extracted and preserved in a References section in the judgement.
 
 **Output**:
 
