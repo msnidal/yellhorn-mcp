@@ -163,7 +163,7 @@ def test_create_model_with_search():
     # Create mock client and model
     mock_client = MagicMock()
     mock_model = MagicMock()
-    mock_model.tools = []
+    mock_model.tools = None
 
     # Mock client.GenerativeModel to return our mock model
     mock_client.GenerativeModel.return_value = mock_model
@@ -176,10 +176,12 @@ def test_create_model_with_search():
     with patch.object(tools, "GoogleSearchResults", return_value=mock_search_results):
         result = create_model_with_search(mock_client, "test-model")
 
-    # Verify model was created and search tool was added
-    mock_client.GenerativeModel.assert_called_once_with(model_name="test-model")
-    assert len(result.tools) == 1
-    assert result.tools[0].__class__.__name__ == "GoogleSearchResults"
+    # Verify model was created with search tools in constructor
+    mock_client.GenerativeModel.assert_called_once_with(
+        model_name="test-model", tools=[mock_search_results]
+    )
+    # Result should be the mock model
+    assert result is mock_model
 
 
 def test_create_model_with_search_handles_errors():
@@ -252,7 +254,7 @@ def test_model_creation_with_search_grounding():
     # This test replaces the previous integration test that had dependency issues
     mock_client = MagicMock()
     mock_model = MagicMock()
-    mock_model.tools = []
+    mock_model.tools = None
 
     # Setup for model creation
     mock_client.GenerativeModel.return_value = mock_model
@@ -263,9 +265,11 @@ def test_model_creation_with_search_grounding():
     with patch.object(tools, "GoogleSearchResults", return_value=mock_search):
         model_with_search = create_model_with_search(mock_client, "test-model")
 
-    # Verify model was created with search tool
+    # Verify model was created with search tool in constructor
+    mock_client.GenerativeModel.assert_called_once_with(
+        model_name="test-model", tools=[mock_search]
+    )
     assert model_with_search is mock_model
-    assert len(model_with_search.tools) == 1
 
     # Test create_model_for_request with search enabled
     with patch(

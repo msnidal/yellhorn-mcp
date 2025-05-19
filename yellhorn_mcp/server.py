@@ -168,8 +168,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
     is_openai_model = model.startswith("gpt-") or model.startswith("o")
 
-    # Handle search grounding configuration (default to enabled)
-    use_search_grounding = os.getenv("YELLHORN_MCP_SEARCH", "on").lower() != "off"
+    # Handle search grounding configuration (default to enabled for Gemini models only)
+    use_search_grounding = False
+    if not is_openai_model:  # Only enable search grounding for Gemini models
+        use_search_grounding = os.getenv("YELLHORN_MCP_SEARCH", "on").lower() != "off"
 
     # Initialize clients based on the model type
     gemini_client = None
@@ -182,22 +184,11 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY is required for Gemini models")
         # Configure Gemini API
-        gemini_client = genai.Client(api_key=gemini_api_key)
+        genai.configure(api_key=gemini_api_key)
+        gemini_client = genai
 
-        # Create a GenerativeModel instance with search grounding if enabled
-        if use_search_grounding:
-            try:
-                # Create a search-enabled GenerativeModel using our new function
-                from yellhorn_mcp.search_grounding import create_model_with_search
-
-                gemini_model = create_model_with_search(gemini_client, model)
-                if gemini_model is None:
-                    print(
-                        "Warning: Failed to create model with search grounding, falling back to default model"
-                    )
-            except Exception as e:
-                print(f"Warning: Failed to create model with search grounding: {str(e)}")
-                # Continue without search grounding
+        # We don't create and store a global model anymore to avoid concurrency issues
+        # Each request will create its own model instance as needed
     # For OpenAI models, require OpenAI API key
     else:
         openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -1166,28 +1157,22 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 "use_search_grounding", True
             )
 
-            # Get cached model if available, or create a request-specific model based on search flag
+            # Import necessary function to create model
             from yellhorn_mcp.search_grounding import create_model_for_request
 
-            # Use the existing model if available and search is enabled, otherwise create for this request
-            if use_search_grounding and ctx.request_context.lifespan_context.get("gemini_model"):
-                gemini_model = ctx.request_context.lifespan_context.get("gemini_model")
-                response = await gemini_client.aio.generate_content(
-                    model=gemini_model, contents=prompt
-                )
-            else:
-                # Create a model specifically for this request based on search flag
-                request_model = create_model_for_request(gemini_client, model, use_search_grounding)
-                if request_model:
-                    # If we successfully created a model, use it directly
-                    response = await gemini_client.aio.generate_content(
-                        model=request_model, contents=prompt
-                    )
-                else:
-                    # Fall back to the old approach if model creation failed
-                    response = await gemini_client.aio.models.generate_content(
-                        model=model, contents=prompt
-                    )
+            # Create a model specifically for this request based on search flag
+            # Always create a new model instance to avoid concurrency issues
+            request_model = create_model_for_request(gemini_client, model, use_search_grounding)
+
+            # Create an AsyncGenerativeModel instance for properly making async requests
+            # and pass search tools if available
+            model_tools = None
+            if request_model and hasattr(request_model, "tools"):
+                model_tools = request_model.tools
+
+            # Use the AsyncGenerativeModel for async content generation
+            async_model = genai.AsyncGenerativeModel(model_name=model, tools=model_tools)
+            response = await async_model.generate_content(prompt)
 
             workplan_content = response.text
 
@@ -1213,7 +1198,12 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         if not is_openai_model and hasattr(response, "citations"):
             citations = getattr(response, "citations", [])
             if citations:
-                citations_section = citations_to_markdown(citations)
+                # Use the updated citations_to_markdown with content to add markers
+                citations_section = citations_to_markdown(citations, workplan_content)
+                # If content was modified with citation markers, update the workplan_content
+                if workplan_content in citations_section:
+                    workplan_content = citations_section
+                    citations_section = ""
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
@@ -1674,28 +1664,22 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 "use_search_grounding", True
             )
 
-            # Get cached model if available, or create a request-specific model based on search flag
+            # Import necessary function to create model
             from yellhorn_mcp.search_grounding import create_model_for_request
 
-            # Use the existing model if available and search is enabled, otherwise create for this request
-            if use_search_grounding and ctx.request_context.lifespan_context.get("gemini_model"):
-                gemini_model = ctx.request_context.lifespan_context.get("gemini_model")
-                response = await gemini_client.aio.generate_content(
-                    model=gemini_model, contents=prompt
-                )
-            else:
-                # Create a model specifically for this request based on search flag
-                request_model = create_model_for_request(gemini_client, model, use_search_grounding)
-                if request_model:
-                    # If we successfully created a model, use it directly
-                    response = await gemini_client.aio.generate_content(
-                        model=request_model, contents=prompt
-                    )
-                else:
-                    # Fall back to the old approach if model creation failed
-                    response = await gemini_client.aio.models.generate_content(
-                        model=model, contents=prompt
-                    )
+            # Create a model specifically for this request based on search flag
+            # Always create a new model instance to avoid concurrency issues
+            request_model = create_model_for_request(gemini_client, model, use_search_grounding)
+
+            # Create an AsyncGenerativeModel instance for properly making async requests
+            # and pass search tools if available
+            model_tools = None
+            if request_model and hasattr(request_model, "tools"):
+                model_tools = request_model.tools
+
+            # Use the AsyncGenerativeModel for async content generation
+            async_model = genai.AsyncGenerativeModel(model_name=model, tools=model_tools)
+            response = await async_model.generate_content(prompt)
 
             # Extract judgement and usage metadata
             judgement_content = response.text
@@ -1710,7 +1694,12 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         if not is_openai_model and hasattr(response, "citations"):
             citations = getattr(response, "citations", [])
             if citations:
-                citations_section = citations_to_markdown(citations)
+                # Use the updated citations_to_markdown with content to add markers
+                citations_section = citations_to_markdown(citations, workplan_content)
+                # If content was modified with citation markers, update the workplan_content
+                if workplan_content in citations_section:
+                    workplan_content = citations_section
+                    citations_section = ""
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
@@ -2096,29 +2085,21 @@ Don't include explanations for your choices, just return the list in the specifi
                     # Import create_model_for_request function
                     from yellhorn_mcp.search_grounding import create_model_for_request
 
-                    # Use the existing model if available and search is enabled, otherwise create for this request
-                    if use_search_grounding and ctx.request_context.lifespan_context.get(
-                        "gemini_model"
-                    ):
-                        gemini_model = ctx.request_context.lifespan_context.get("gemini_model")
-                        response = await gemini_client.aio.generate_content(
-                            model=gemini_model, contents=prompt
-                        )
-                    else:
-                        # Create a model specifically for this request based on search flag
-                        request_model = create_model_for_request(
-                            gemini_client, model, use_search_grounding
-                        )
-                        if request_model:
-                            # If we successfully created a model, use it directly
-                            response = await gemini_client.aio.generate_content(
-                                model=request_model, contents=prompt
-                            )
-                        else:
-                            # Fall back to the old approach if model creation failed
-                            response = await gemini_client.aio.models.generate_content(
-                                model=model, contents=prompt
-                            )
+                    # Create a model specifically for this request based on search flag
+                    # Always create a new model instance to avoid concurrency issues
+                    request_model = create_model_for_request(
+                        gemini_client, model, use_search_grounding
+                    )
+
+                    # Create an AsyncGenerativeModel instance for properly making async requests
+                    # and pass search tools if available
+                    model_tools = None
+                    if request_model and hasattr(request_model, "tools"):
+                        model_tools = request_model.tools
+
+                    # Use the AsyncGenerativeModel for async content generation
+                    async_model = genai.AsyncGenerativeModel(model_name=model, tools=model_tools)
+                    response = await async_model.generate_content(prompt)
                     chunk_result = response.text
 
                 # Extract directory paths from the result

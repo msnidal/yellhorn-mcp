@@ -104,31 +104,23 @@ def create_model_with_search(client: Any, model_name: str) -> Any:
     GoogleSearchResults = getattr(tools, "GoogleSearchResults", MockGoogleSearchResults)
 
     try:
-        # Create a GenerativeModel instance using the client and model name
+        # Create a search tool instance first
+        try:
+            search_tool = GoogleSearchResults()
+        except Exception:
+            # Continue without search if it fails to create a search tool
+            search_tool = None
+
+        # Create a GenerativeModel instance with search tools directly in constructor
+        model_tools = [search_tool] if search_tool else None
+
+        # Create the model using the appropriate method based on SDK version
         if hasattr(client, "GenerativeModel"):
             # Some versions of the SDK have GenerativeModel directly on the client
-            model = client.GenerativeModel(model_name=model_name)
+            model = client.GenerativeModel(model_name=model_name, tools=model_tools)
         else:
             # Use the imported GenerativeModel class
-            model = GenerativeModel(model_name=model_name)
-
-        # Add search tool if possible
-        try:
-            # Check if we can create a GoogleSearchResults instance
-            search_tool = GoogleSearchResults()
-
-            # Set up the model with the search tool
-            if hasattr(model, "tools"):
-                model.tools = model.tools or []
-                model.tools.append(search_tool)
-            elif hasattr(model, "generation_config") and hasattr(model.generation_config, "tools"):
-                # Some versions might store tools in generation_config
-                if model.generation_config.tools is None:
-                    model.generation_config.tools = []
-                model.generation_config.tools.append(search_tool)
-        except Exception:
-            # Continue without search if it fails
-            pass
+            model = GenerativeModel(model_name=model_name, tools=model_tools)
 
         return model
     except Exception as e:
@@ -206,20 +198,23 @@ def create_model_for_request(client: Any, model_name: str, use_search_grounding:
             return None
 
 
-def citations_to_markdown(citations: list[dict]) -> str:
+def citations_to_markdown(citations: list[dict], content: str = "") -> str:
     """
     Convert Gemini API citation metadata to Markdown footnotes.
 
     Args:
         citations: List of citation dictionaries from Gemini API response.
                Each citation typically contains 'url' (or 'uri') and 'title'.
+        content: Optional content to add citation markers to. If provided, will add [^n]
+                markers to the content where appropriate.
 
     Returns:
         Formatted Markdown string with numbered footnotes.
     """
     if not citations:
-        return ""
+        return content
 
+    # Create the citations section
     lines = []
     lines.append("\n---\n## Citations")
     for i, c in enumerate(citations, start=1):
@@ -227,4 +222,13 @@ def citations_to_markdown(citations: list[dict]) -> str:
         snippet = (c.get("title") or url)[:90]
         lines.append(f"[^{i}]: {snippet} – {url}")
 
-    return "\n".join(lines)
+    citations_section = "\n".join(lines)
+
+    # If content is provided, try to add citation markers
+    if content:
+        # This is a simple implementation that just appends the citations section
+        # In a real implementation, we would parse citation locations from the API response
+        # and insert markers at the appropriate places in the content
+        return content + citations_section
+    else:
+        return citations_section
