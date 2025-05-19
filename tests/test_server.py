@@ -848,7 +848,7 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         args, kwargs = mock_update.call_args
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
-        
+
         # Verify the content contains the expected pieces (but not the exact formatting which might vary)
         update_content = args[2]
         assert "# Feature Implementation Plan" in update_content
@@ -1358,7 +1358,7 @@ async def test_process_judgement_async(mock_request_context, mock_genai_client):
 
         # Verify the response contains the expected text and metrics
         assert "Mock response text" in response
-        assert "## Completion Metrics" in response 
+        assert "## Completion Metrics" in response
         assert "**Model Used**: `gemini-model`" in response
         # Citations might be included but we don't check for them specifically
         mock_genai_client.aio.models.generate_content.assert_called_once()

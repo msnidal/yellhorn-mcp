@@ -7,11 +7,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from yellhorn_mcp.search_grounding import (
+    MockGenerativeModel,
+    MockGoogleSearchResults,
     attach_search,
     citations_to_markdown,
-    MockGoogleSearchResults,
-    MockGenerativeModel,
-    tools
+    tools,
 )
 
 
@@ -23,7 +23,7 @@ def test_attach_search_adds_search_if_not_present():
     # Create a mock for GoogleSearchResults
     mock_search_results = MagicMock()
     mock_search_results.__class__.__name__ = "GoogleSearchResults"
-    
+
     # Patch the tools module's GoogleSearchResults class
     with patch.object(tools, "GoogleSearchResults", return_value=mock_search_results):
         result = attach_search(mock_model)
@@ -59,7 +59,7 @@ def test_attach_search_initializes_tools_list_if_none():
     # Create a mock for GoogleSearchResults
     mock_search_results = MagicMock()
     mock_search_results.__class__.__name__ = "GoogleSearchResults"
-    
+
     # Patch the tools module's GoogleSearchResults class
     with patch.object(tools, "GoogleSearchResults", return_value=mock_search_results):
         result = attach_search(mock_model)
@@ -147,10 +147,10 @@ def test_mock_classes_exist():
     assert MockGoogleSearchResults is not None
     assert MockGenerativeModel is not None
     assert tools is not None
-    
+
     # Verify we can instantiate the mocks without errors
     search_results = MockGoogleSearchResults()
     model = MockGenerativeModel()
-    
+
     # Verify expected attributes
     assert model.tools is None
