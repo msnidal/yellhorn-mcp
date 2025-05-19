@@ -352,9 +352,7 @@ tests/test_data
                 gemini_client_mock.aio.models.generate_content = AsyncMock(
                     return_value=mock_response
                 )
-                gemini_client_mock.aio.generate_content = AsyncMock(
-                    return_value=mock_response
-                )
+                gemini_client_mock.aio.generate_content = AsyncMock(return_value=mock_response)
 
                 # Call curate_context
                 result = await curate_context(mock_ctx, user_task)

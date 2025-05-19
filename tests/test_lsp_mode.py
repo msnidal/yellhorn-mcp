@@ -318,11 +318,11 @@ async def test_integration_process_workplan_lsp_mode():
         "candidates_token_count": 500,
         "total_token_count": 1500,
     }
-    
+
     # Set up both old and new API patterns for backward compatibility with tests
     gemini_client.aio.models.generate_content = AsyncMock(return_value=response)
     gemini_client.aio.generate_content = AsyncMock(return_value=response)
-    
+
     model = "mock-model"
     title = "Test Workplan"
     issue_number = "123"
@@ -394,11 +394,11 @@ async def test_integration_process_judgement_lsp_mode():
         "candidates_token_count": 500,
         "total_token_count": 1500,
     }
-    
+
     # Set up both old and new API patterns for backward compatibility with tests
     gemini_client.aio.models.generate_content = AsyncMock(return_value=response)
     gemini_client.aio.generate_content = AsyncMock(return_value=response)
-    
+
     model = "mock-model"
     workplan = "Mock workplan"
     diff = "Mock diff"
