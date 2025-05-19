@@ -111,12 +111,12 @@ def create_model_with_search(client: Any, model_name: str) -> Any:
         else:
             # Use the imported GenerativeModel class
             model = GenerativeModel(model_name=model_name)
-            
+
         # Add search tool if possible
         try:
             # Check if we can create a GoogleSearchResults instance
             search_tool = GoogleSearchResults()
-            
+
             # Set up the model with the search tool
             if hasattr(model, "tools"):
                 model.tools = model.tools or []
@@ -129,7 +129,7 @@ def create_model_with_search(client: Any, model_name: str) -> Any:
         except Exception:
             # Continue without search if it fails
             pass
-            
+
         return model
     except Exception as e:
         # If model creation fails, return None
@@ -139,7 +139,7 @@ def create_model_with_search(client: Any, model_name: str) -> Any:
 def attach_search(model: Any) -> Any:
     """
     Attach Google Search to a Gemini model if not already present.
-    
+
     Note: This function is maintained for backward compatibility.
     For new code, use create_model_with_search instead.
 

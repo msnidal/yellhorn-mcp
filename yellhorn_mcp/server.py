@@ -189,9 +189,12 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             try:
                 # Create a search-enabled GenerativeModel using our new function
                 from yellhorn_mcp.search_grounding import create_model_with_search
+
                 gemini_model = create_model_with_search(gemini_client, model)
                 if gemini_model is None:
-                    print("Warning: Failed to create model with search grounding, falling back to default model")
+                    print(
+                        "Warning: Failed to create model with search grounding, falling back to default model"
+                    )
             except Exception as e:
                 print(f"Warning: Failed to create model with search grounding: {str(e)}")
                 # Continue without search grounding
@@ -1159,11 +1162,13 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             )
 
             # Get the use_search_grounding flag from context
-            use_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
-            
+            use_search_grounding = ctx.request_context.lifespan_context.get(
+                "use_search_grounding", True
+            )
+
             # Get cached model if available, or create a request-specific model based on search flag
             from yellhorn_mcp.search_grounding import create_model_for_request
-            
+
             # Use the existing model if available and search is enabled, otherwise create for this request
             if use_search_grounding and ctx.request_context.lifespan_context.get("gemini_model"):
                 gemini_model = ctx.request_context.lifespan_context.get("gemini_model")
@@ -1183,7 +1188,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                     response = await gemini_client.aio.models.generate_content(
                         model=model, contents=prompt
                     )
-                    
+
             workplan_content = response.text
 
             # Capture usage metadata
@@ -1665,11 +1670,13 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             )
 
             # Get the use_search_grounding flag from context
-            use_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
-            
+            use_search_grounding = ctx.request_context.lifespan_context.get(
+                "use_search_grounding", True
+            )
+
             # Get cached model if available, or create a request-specific model based on search flag
             from yellhorn_mcp.search_grounding import create_model_for_request
-            
+
             # Use the existing model if available and search is enabled, otherwise create for this request
             if use_search_grounding and ctx.request_context.lifespan_context.get("gemini_model"):
                 gemini_model = ctx.request_context.lifespan_context.get("gemini_model")
@@ -2082,20 +2089,26 @@ Don't include explanations for your choices, just return the list in the specifi
                         )
 
                     # Get the use_search_grounding flag from context
-                    use_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
-                    
+                    use_search_grounding = ctx.request_context.lifespan_context.get(
+                        "use_search_grounding", True
+                    )
+
                     # Import create_model_for_request function
                     from yellhorn_mcp.search_grounding import create_model_for_request
-                    
+
                     # Use the existing model if available and search is enabled, otherwise create for this request
-                    if use_search_grounding and ctx.request_context.lifespan_context.get("gemini_model"):
+                    if use_search_grounding and ctx.request_context.lifespan_context.get(
+                        "gemini_model"
+                    ):
                         gemini_model = ctx.request_context.lifespan_context.get("gemini_model")
                         response = await gemini_client.aio.generate_content(
                             model=gemini_model, contents=prompt
                         )
                     else:
                         # Create a model specifically for this request based on search flag
-                        request_model = create_model_for_request(gemini_client, model, use_search_grounding)
+                        request_model = create_model_for_request(
+                            gemini_client, model, use_search_grounding
+                        )
                         if request_model:
                             # If we successfully created a model, use it directly
                             response = await gemini_client.aio.generate_content(
