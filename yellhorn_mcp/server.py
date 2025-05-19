@@ -1164,15 +1164,15 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             # Always create a new model instance to avoid concurrency issues
             request_model = create_model_for_request(gemini_client, model, use_search_grounding)
 
-            # Create an AsyncGenerativeModel instance for properly making async requests
-            # and pass search tools if available
-            model_tools = None
-            if request_model and hasattr(request_model, "tools"):
-                model_tools = request_model.tools
-
-            # Use the AsyncGenerativeModel for async content generation
-            async_model = genai.AsyncGenerativeModel(model_name=model, tools=model_tools)
-            response = await async_model.generate_content(prompt)
+            # The Gemini client has built-in async APIs
+            if hasattr(gemini_client, "aio") and hasattr(gemini_client.aio, "generate_content"):
+                # Use direct async method if available (newer SDK versions)
+                response = await gemini_client.aio.generate_content(contents=prompt)
+            else:
+                # Otherwise use the models interface
+                response = await gemini_client.aio.models.generate_content(
+                    model=model, contents=prompt, tools=getattr(request_model, "tools", None)
+                )
 
             workplan_content = response.text
 
@@ -1671,15 +1671,15 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             # Always create a new model instance to avoid concurrency issues
             request_model = create_model_for_request(gemini_client, model, use_search_grounding)
 
-            # Create an AsyncGenerativeModel instance for properly making async requests
-            # and pass search tools if available
-            model_tools = None
-            if request_model and hasattr(request_model, "tools"):
-                model_tools = request_model.tools
-
-            # Use the AsyncGenerativeModel for async content generation
-            async_model = genai.AsyncGenerativeModel(model_name=model, tools=model_tools)
-            response = await async_model.generate_content(prompt)
+            # The Gemini client has built-in async APIs
+            if hasattr(gemini_client, "aio") and hasattr(gemini_client.aio, "generate_content"):
+                # Use direct async method if available (newer SDK versions)
+                response = await gemini_client.aio.generate_content(contents=prompt)
+            else:
+                # Otherwise use the models interface
+                response = await gemini_client.aio.models.generate_content(
+                    model=model, contents=prompt, tools=getattr(request_model, "tools", None)
+                )
 
             # Extract judgement and usage metadata
             judgement_content = response.text
@@ -1695,10 +1695,10 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             citations = getattr(response, "citations", [])
             if citations:
                 # Use the updated citations_to_markdown with content to add markers
-                citations_section = citations_to_markdown(citations, workplan_content)
-                # If content was modified with citation markers, update the workplan_content
-                if workplan_content in citations_section:
-                    workplan_content = citations_section
+                citations_section = citations_to_markdown(citations, judgement_content)
+                # If content was modified with citation markers, update the judgement_content
+                if judgement_content in citations_section:
+                    judgement_content = citations_section
                     citations_section = ""
 
         # Format metrics section
@@ -2091,15 +2091,19 @@ Don't include explanations for your choices, just return the list in the specifi
                         gemini_client, model, use_search_grounding
                     )
 
-                    # Create an AsyncGenerativeModel instance for properly making async requests
-                    # and pass search tools if available
-                    model_tools = None
-                    if request_model and hasattr(request_model, "tools"):
-                        model_tools = request_model.tools
-
-                    # Use the AsyncGenerativeModel for async content generation
-                    async_model = genai.AsyncGenerativeModel(model_name=model, tools=model_tools)
-                    response = await async_model.generate_content(prompt)
+                    # The Gemini client has built-in async APIs
+                    if hasattr(gemini_client, "aio") and hasattr(
+                        gemini_client.aio, "generate_content"
+                    ):
+                        # Use direct async method if available (newer SDK versions)
+                        response = await gemini_client.aio.generate_content(contents=prompt)
+                    else:
+                        # Otherwise use the models interface
+                        response = await gemini_client.aio.models.generate_content(
+                            model=model,
+                            contents=prompt,
+                            tools=getattr(request_model, "tools", None),
+                        )
                     chunk_result = response.text
 
                 # Extract directory paths from the result
