@@ -184,8 +184,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY is required for Gemini models")
         # Configure Gemini API
-        genai.configure(api_key=gemini_api_key)
-        gemini_client = genai
+        gemini_client = genai.Client(api_key=gemini_api_key)
 
         # We don't create and store a global model anymore to avoid concurrency issues
         # Each request will create its own model instance as needed
