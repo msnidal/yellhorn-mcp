@@ -53,6 +53,9 @@ def _safe_import(module_name: str, attribute_name: Optional[str] = None) -> Any:
             if spec is None:
                 return None
             module = importlib.util.module_from_spec(spec)
+            # Guard against spec.loader being None
+            if spec.loader is None:
+                return None
             spec.loader.exec_module(module)
             return getattr(module, attribute_name, None)
         else:
@@ -86,9 +89,59 @@ if tools_module is None:
 tools = tools_module
 
 
+def create_model_with_search(client: Any, model_name: str) -> Any:
+    """
+    Create a GenerativeModel instance with Google Search attached.
+
+    Args:
+        client: A Gemini client instance.
+        model_name: The name of the model to create.
+
+    Returns:
+        A GenerativeModel instance with search capabilities attached.
+    """
+    # Get GoogleSearchResults class from the tools module if available
+    GoogleSearchResults = getattr(tools, "GoogleSearchResults", MockGoogleSearchResults)
+
+    try:
+        # Create a GenerativeModel instance using the client and model name
+        if hasattr(client, "GenerativeModel"):
+            # Some versions of the SDK have GenerativeModel directly on the client
+            model = client.GenerativeModel(model_name=model_name)
+        else:
+            # Use the imported GenerativeModel class
+            model = GenerativeModel(model_name=model_name)
+            
+        # Add search tool if possible
+        try:
+            # Check if we can create a GoogleSearchResults instance
+            search_tool = GoogleSearchResults()
+            
+            # Set up the model with the search tool
+            if hasattr(model, "tools"):
+                model.tools = model.tools or []
+                model.tools.append(search_tool)
+            elif hasattr(model, "generation_config") and hasattr(model.generation_config, "tools"):
+                # Some versions might store tools in generation_config
+                if model.generation_config.tools is None:
+                    model.generation_config.tools = []
+                model.generation_config.tools.append(search_tool)
+        except Exception:
+            # Continue without search if it fails
+            pass
+            
+        return model
+    except Exception as e:
+        # If model creation fails, return None
+        return None
+
+
 def attach_search(model: Any) -> Any:
     """
     Attach Google Search to a Gemini model if not already present.
+    
+    Note: This function is maintained for backward compatibility.
+    For new code, use create_model_with_search instead.
 
     Args:
         model: A Gemini GenerativeModel instance.
@@ -125,6 +178,32 @@ def attach_search(model: Any) -> Any:
             pass
 
     return model
+
+
+def create_model_for_request(client: Any, model_name: str, use_search_grounding: bool) -> Any:
+    """
+    Create a model instance for a specific request with search grounding controlled.
+
+    Args:
+        client: The Gemini client instance.
+        model_name: The name of the model to use.
+        use_search_grounding: Whether to enable search grounding.
+
+    Returns:
+        A GenerativeModel instance with or without search grounding based on the flag.
+    """
+    if use_search_grounding:
+        # Create model with search
+        return create_model_with_search(client, model_name)
+    else:
+        # Create model without search
+        try:
+            if hasattr(client, "GenerativeModel"):
+                return client.GenerativeModel(model_name=model_name)
+            else:
+                return GenerativeModel(model_name=model_name)
+        except Exception:
+            return None
 
 
 def citations_to_markdown(citations: list[dict]) -> str:
