@@ -1,16 +1,12 @@
 """Tests for OpenAI integration in Yellhorn MCP server."""
 
-import asyncio
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from google import genai
 from mcp.server.fastmcp import Context
 
 from yellhorn_mcp.server import (
-    YellhornMCPError,
     calculate_cost,
     format_metrics_section,
     process_judgement_async,

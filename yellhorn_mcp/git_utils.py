@@ -8,7 +8,6 @@ and GitHub, used by the Yellhorn MCP server.
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, List
 
 from mcp import Resource
 from mcp.server.fastmcp import Context

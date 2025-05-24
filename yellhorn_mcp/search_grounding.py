@@ -7,8 +7,7 @@ formatting citation metadata into Markdown for embedding in responses.
 
 # Import with careful handling for different versions of the genai library
 import importlib.util
-import sys
-from typing import Any, Callable, Optional, Type, Union
+from typing import Any, Optional
 
 
 # ==== Mock classes for testing and CI environments ====
@@ -123,7 +122,7 @@ def create_model_with_search(client: Any, model_name: str) -> Any:
             model = GenerativeModel(model_name=model_name, tools=model_tools)
 
         return model
-    except Exception as e:
+    except Exception:
         # If model creation fails, return None
         return None
 
