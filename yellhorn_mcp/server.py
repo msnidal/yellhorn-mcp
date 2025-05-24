@@ -283,7 +283,7 @@ mcp = FastMCP(
 )
 
 
-async def list_resources(self, ctx: Context, resource_type: str | None = None) -> list[Resource]:
+async def list_resources(ctx: Context, resource_type: str | None = None) -> list[Resource]:
     """
     List resources (GitHub issues created by this tool).
 
@@ -360,9 +360,7 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
         return []
 
 
-async def read_resource(
-    self, ctx: Context, resource_id: str, resource_type: str | None = None
-) -> str:
+async def read_resource(ctx: Context, resource_id: str, resource_type: str | None = None) -> str:
     """
     Get the content of a resource (GitHub issue).
 
@@ -388,14 +386,6 @@ async def read_resource(
         return await get_github_issue_body(repo_path, resource_id)
     except Exception as e:
         raise ValueError(f"Failed to get resource: {str(e)}")
-
-
-# Import resource methods from git_utils
-from yellhorn_mcp.git_utils import list_resources, read_resource
-
-# Register resource methods
-mcp.list_resources = list_resources
-mcp.read_resource = read_resource
 
 
 @mcp.tool(

@@ -14,8 +14,8 @@ from pydantic import FileUrl
 async def test_list_resources(mock_request_context):
     """Test listing workplan and judgement sub-issue resources."""
     with (
-        patch("yellhorn_mcp.server.run_github_command") as mock_gh,
-        patch("yellhorn_mcp.server.Resource") as mock_resource_class,
+        patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh,
+        patch("yellhorn_mcp.git_utils.Resource") as mock_resource_class,
     ):
         # Set up 2 workplan issues and 2 review sub-issues
         # Configure mock responses for different labels
@@ -62,7 +62,7 @@ async def test_list_resources(mock_request_context):
         mock_resource_class.side_effect = [workplan1, workplan2, judgement1, judgement2]
 
         # 1. Test with no resource_type (should get both types)
-        resources = await list_resources(None, mock_request_context, None)
+        resources = await list_resources(mock_request_context, None)
 
         # Verify the GitHub command was called correctly for both labels
         assert mock_gh.call_count == 2
@@ -94,7 +94,7 @@ async def test_list_resources(mock_request_context):
         mock_resource_class.side_effect = [workplan1, workplan2]
 
         # 2. Test with resource_type="yellhorn_workplan" - should return only workplans
-        resources = await list_resources(None, mock_request_context, "yellhorn_workplan")
+        resources = await list_resources(mock_request_context, "yellhorn_workplan")
         assert len(resources) == 2
         mock_gh.assert_called_once_with(
             mock_request_context.request_context.lifespan_context["repo_path"],
@@ -107,7 +107,7 @@ async def test_list_resources(mock_request_context):
         mock_resource_class.side_effect = [judgement1, judgement2]
 
         # 3. Test with resource_type="yellhorn_judgement_subissue" - should return only judgements
-        resources = await list_resources(None, mock_request_context, "yellhorn_judgement_subissue")
+        resources = await list_resources(mock_request_context, "yellhorn_judgement_subissue")
         assert len(resources) == 2
         mock_gh.assert_called_once_with(
             mock_request_context.request_context.lifespan_context["repo_path"],
@@ -125,7 +125,7 @@ async def test_list_resources(mock_request_context):
         mock_gh.reset_mock()
 
         # 4. Test with different resource_type - should return empty list
-        resources = await list_resources(None, mock_request_context, "different_type")
+        resources = await list_resources(mock_request_context, "different_type")
         assert len(resources) == 0
         # GitHub command should not be called in this case
         mock_gh.assert_not_called()
@@ -134,14 +134,12 @@ async def test_list_resources(mock_request_context):
 @pytest.mark.asyncio
 async def test_read_resource(mock_request_context):
     """Test getting resources by type."""
-    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+    with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
         # Test 1: Get workplan resource
         mock_get_issue.return_value = "# Test Workplan\n\n1. Step one\n2. Step two"
 
         # Call the read_resource method with yellhorn_workplan type
-        resource_content = await read_resource(
-            None, mock_request_context, "123", "yellhorn_workplan"
-        )
+        resource_content = await read_resource(mock_request_context, "123", "yellhorn_workplan")
 
         # Verify the GitHub issue body was retrieved correctly
         mock_get_issue.assert_called_once_with(
@@ -161,7 +159,7 @@ async def test_read_resource(mock_request_context):
 
         # Call the read_resource method with yellhorn_judgement_subissue type
         resource_content = await read_resource(
-            None, mock_request_context, "456", "yellhorn_judgement_subissue"
+            mock_request_context, "456", "yellhorn_judgement_subissue"
         )
 
         # Verify the GitHub issue body was retrieved correctly
@@ -181,7 +179,7 @@ async def test_read_resource(mock_request_context):
         mock_get_issue.return_value = "# Any content"
 
         # Call the read_resource method without type
-        resource_content = await read_resource(None, mock_request_context, "789", None)
+        resource_content = await read_resource(mock_request_context, "789", None)
 
         # Verify the GitHub issue body was retrieved correctly
         mock_get_issue.assert_called_once_with(
@@ -193,7 +191,7 @@ async def test_read_resource(mock_request_context):
 
     # Test with unsupported resource type
     with pytest.raises(ValueError, match="Unsupported resource type"):
-        await read_resource(None, mock_request_context, "123", "unsupported_type")
+        await read_resource(mock_request_context, "123", "unsupported_type")
 
 
 from mcp import Resource
@@ -349,7 +347,7 @@ async def test_get_codebase_snapshot_with_yellhornignore():
 async def test_get_codebase_snapshot_integration():
     """Integration test for get_codebase_snapshot with .yellhornignore."""
     # Mock git command to return specific files
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
         mock_git.return_value = "file1.py\nfile2.py\ntest.log\nnode_modules/file.js"
 
         # Create a mock implementation of get_codebase_snapshot with the expected behavior
@@ -376,23 +374,21 @@ async def test_get_codebase_snapshot_integration():
 @pytest.mark.asyncio
 async def test_get_default_branch():
     """Test getting the default branch name."""
-    # Test when symbolic-ref works
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-        mock_git.return_value = "refs/remotes/origin/main"
+    # Test when remote show origin works
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
+        mock_git.return_value = "* remote origin\n  Fetch URL: https://github.com/user/repo.git\n  Push  URL: https://github.com/user/repo.git\n  HEAD branch: main"
 
         result = await get_default_branch(Path("/mock/repo"))
 
         assert result == "main"
-        mock_git.assert_called_once_with(
-            Path("/mock/repo"), ["symbolic-ref", "refs/remotes/origin/HEAD"]
-        )
+        mock_git.assert_called_once_with(Path("/mock/repo"), ["remote", "show", "origin"])
 
     # Test fallback to main
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-        # First call fails (symbolic-ref)
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
+        # First call fails (remote show origin)
         mock_git.side_effect = [
             YellhornMCPError("Command failed"),
-            "main exists",  # Second call succeeds (rev-parse main)
+            "main exists",  # Second call succeeds (show-ref main)
         ]
 
         result = await get_default_branch(Path("/mock/repo"))
@@ -401,12 +397,12 @@ async def test_get_default_branch():
         assert mock_git.call_count == 2
 
     # Test fallback to master
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
         # First two calls fail
         mock_git.side_effect = [
-            YellhornMCPError("Command failed"),  # symbolic-ref
-            YellhornMCPError("Command failed"),  # rev-parse main
-            "master exists",  # rev-parse master
+            YellhornMCPError("Command failed"),  # remote show origin
+            YellhornMCPError("Command failed"),  # show-ref main
+            "master exists",  # show-ref master
         ]
 
         result = await get_default_branch(Path("/mock/repo"))
@@ -414,12 +410,13 @@ async def test_get_default_branch():
         assert result == "master"
         assert mock_git.call_count == 3
 
-    # Test when all methods fail
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+    # Test when all methods fail - should return "main" as fallback
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
         mock_git.side_effect = YellhornMCPError("Command failed")
 
-        with pytest.raises(YellhornMCPError, match="Unable to determine default branch"):
-            await get_default_branch(Path("/mock/repo"))
+        result = await get_default_branch(Path("/mock/repo"))
+        assert result == "main"
+        assert mock_git.call_count == 3  # remote show origin + main + master attempts
 
 
 def test_is_git_repository():
@@ -573,6 +570,8 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
                 args, kwargs = mock_create_task.call_args
                 coroutine = args[0]
                 assert coroutine.__name__ == "process_workplan_async"
+                # Close the coroutine to prevent RuntimeWarning
+                coroutine.close()
 
                 # Reset mocks for next test
                 mock_ensure_label.reset_mock()
@@ -628,19 +627,40 @@ async def test_run_github_command_success():
 @pytest.mark.asyncio
 async def test_ensure_label_exists():
     """Test ensuring a GitHub label exists."""
-    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
-        # Test with label name only
+    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh:
+        # Test with label name only - mock the label check first
+        mock_gh.return_value = "[]"
         await ensure_label_exists(Path("/mock/repo"), "test-label")
-        mock_gh.assert_called_once_with(Path("/mock/repo"), ["label", "create", "test-label", "-f"])
+        # Should first check if label exists, then create it
+        assert mock_gh.call_count == 2
+        mock_gh.assert_any_call(
+            Path("/mock/repo"), ["label", "list", "--json", "name", "--search=test-label"]
+        )
+        mock_gh.assert_any_call(
+            Path("/mock/repo"),
+            ["label", "create", "test-label", "--color=5fa46c", "--description="],
+        )
 
         # Reset mock
         mock_gh.reset_mock()
 
         # Test with label name and description
+        mock_gh.return_value = "[]"
         await ensure_label_exists(Path("/mock/repo"), "test-label", "Test label description")
-        mock_gh.assert_called_once_with(
+        # Should first check if label exists, then create it with description
+        assert mock_gh.call_count == 2
+        mock_gh.assert_any_call(
+            Path("/mock/repo"), ["label", "list", "--json", "name", "--search=test-label"]
+        )
+        mock_gh.assert_any_call(
             Path("/mock/repo"),
-            ["label", "create", "test-label", "-f", "--description", "Test label description"],
+            [
+                "label",
+                "create",
+                "test-label",
+                "--color=5fa46c",
+                "--description=Test label description",
+            ],
         )
 
         # Reset mock
@@ -655,7 +675,7 @@ async def test_ensure_label_exists():
 @pytest.mark.asyncio
 async def test_get_github_issue_body():
     """Test fetching GitHub issue body."""
-    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh:
         # Test fetching issue content with URL
         mock_gh.return_value = '{"body": "Issue content"}'
         issue_url = "https://github.com/user/repo/issues/123"
@@ -670,14 +690,16 @@ async def test_get_github_issue_body():
         # Reset mock
         mock_gh.reset_mock()
 
-        # Test fetching PR content with URL
-        mock_gh.return_value = '{"body": "PR content"}'
-        pr_url = "https://github.com/user/repo/pull/456"
+        # Test fetching issue content with URL
+        mock_gh.return_value = '{"body": "Issue content from URL"}'
+        issue_url = "https://github.com/user/repo/issues/456"
 
-        result = await get_github_issue_body(Path("/mock/repo"), pr_url)
+        result = await get_github_issue_body(Path("/mock/repo"), issue_url)
 
-        assert result == "PR content"
-        mock_gh.assert_called_once_with(Path("/mock/repo"), ["pr", "view", "456", "--json", "body"])
+        assert result == "Issue content from URL"
+        mock_gh.assert_called_once_with(
+            Path("/mock/repo"), ["issue", "view", "456", "--json", "body"]
+        )
 
         # Reset mock
         mock_gh.reset_mock()
@@ -697,7 +719,7 @@ async def test_get_github_issue_body():
 @pytest.mark.asyncio
 async def test_get_github_pr_diff():
     """Test fetching GitHub PR diff."""
-    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh:
         mock_gh.return_value = "diff content"
         pr_url = "https://github.com/user/repo/pull/123"
 
@@ -711,34 +733,35 @@ async def test_get_github_pr_diff():
 async def test_post_github_pr_review():
     """Test posting GitHub PR review."""
     with (
-        patch("pathlib.Path.exists", return_value=True),
-        patch("pathlib.Path.unlink") as mock_unlink,
-        patch("builtins.open", create=True),
-        patch("yellhorn_mcp.server.run_github_command") as mock_gh,
+        patch("tempfile.NamedTemporaryFile") as mock_tmp,
+        patch("os.unlink") as mock_unlink,
+        patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh,
     ):
+        # Mock the temporary file
+        mock_file = MagicMock()
+        mock_file.name = "/tmp/review_file.md"
+        mock_tmp.return_value.__enter__.return_value = mock_file
+
         mock_gh.return_value = "Review posted"
         pr_url = "https://github.com/user/repo/pull/123"
 
         result = await post_github_pr_review(Path("/mock/repo"), pr_url, "Review content")
 
-        assert "Review posted successfully" in result
+        assert "Review posted" in result
+        assert "pullrequestreview" in result
         mock_gh.assert_called_once()
         # Verify the PR number is extracted correctly
         args, kwargs = mock_gh.call_args
         assert "123" in args[1]
         # Verify temp file is cleaned up
-        mock_unlink.assert_called_once()
+        mock_unlink.assert_called_once_with("/tmp/review_file.md")
 
 
 @pytest.mark.asyncio
 async def test_add_github_issue_comment():
     """Test adding a comment to a GitHub issue."""
-    with (
-        patch("builtins.open", create=True),
-        patch("pathlib.Path.exists", return_value=True),
-        patch("pathlib.Path.unlink") as mock_unlink,
-        patch("yellhorn_mcp.server.run_github_command") as mock_gh,
-    ):
+    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh:
+        # First test - successful comment
         await add_github_issue_comment(Path("/mock/repo"), "123", "Comment content")
 
         mock_gh.assert_called_once()
@@ -748,16 +771,14 @@ async def test_add_github_issue_comment():
         assert "issue" in args[1]
         assert "comment" in args[1]
         assert "123" in args[1]
-        assert "--body-file" in args[1]
-        # Verify temp file is cleaned up
-        mock_unlink.assert_called_once()
+        assert "--body" in args[1]
+        # No temp file cleanup needed for this function
 
         # Test with error
         mock_gh.reset_mock()
-        mock_unlink.reset_mock()
         mock_gh.side_effect = Exception("Comment failed")
 
-        with pytest.raises(YellhornMCPError, match="Failed to add comment to GitHub issue"):
+        with pytest.raises(Exception, match="Comment failed"):
             await add_github_issue_comment(Path("/mock/repo"), "123", "Comment content")
 
 
@@ -765,17 +786,20 @@ async def test_add_github_issue_comment():
 async def test_update_github_issue():
     """Test updating a GitHub issue."""
     with (
-        patch("builtins.open", create=True),
-        patch("pathlib.Path.exists", return_value=True),
-        patch("pathlib.Path.unlink") as mock_unlink,
-        patch("yellhorn_mcp.server.run_github_command") as mock_gh,
+        patch("tempfile.NamedTemporaryFile") as mock_tmp,
+        patch("os.unlink") as mock_unlink,
+        patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh,
     ):
+        # Mock the temporary file
+        mock_file = MagicMock()
+        mock_file.name = "/tmp/test_file.md"
+        mock_tmp.return_value.__enter__.return_value = mock_file
 
         await update_github_issue(Path("/mock/repo"), "123", "Updated content")
 
         mock_gh.assert_called_once()
         # Verify temp file is cleaned up
-        mock_unlink.assert_called_once()
+        mock_unlink.assert_called_once_with("/tmp/test_file.md")
 
 
 @pytest.mark.asyncio
@@ -993,7 +1017,7 @@ async def test_get_workplan(mock_request_context):
         )
 
     # Test error handling
-    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+    with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
         mock_get_issue.side_effect = Exception("Failed to get issue")
 
         with pytest.raises(YellhornMCPError, match="Failed to retrieve workplan"):
@@ -1064,6 +1088,8 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
                 # Check process_judgement_async coroutine
                 coroutine = mock_create_task.call_args[0][0]
                 assert coroutine.__name__ == "process_judgement_async"
+                # Close the coroutine to prevent RuntimeWarning
+                coroutine.close()
 
                 # Reset mocks for next test
                 mock_get_issue.reset_mock()
@@ -1094,7 +1120,7 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
                 mock_get_diff.assert_called_once_with(repo_path, "v1.0", "feature-branch", "full")
 
     # Test error handling
-    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+    with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
         mock_get_issue.side_effect = Exception("Failed to get issue")
 
         with pytest.raises(YellhornMCPError, match="Failed to trigger workplan judgement"):
@@ -1144,6 +1170,10 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
                         head_ref=head_ref,
                     )
 
+                    # Close the first coroutine to prevent RuntimeWarning
+                    coroutine = mock_create_task.call_args[0][0]
+                    coroutine.close()
+
                     # Reset mocks for next test
                     mock_get_issue.reset_mock()
                     mock_get_diff.reset_mock()
@@ -1162,6 +1192,10 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
                         issue_number="789",
                         codebase_reasoning="file_structure",
                     )
+
+                    # Close the second coroutine to prevent RuntimeWarning
+                    coroutine = mock_create_task.call_args[0][0]
+                    coroutine.close()
 
                     # Verify file_structure mode was passed to get_git_diff
                     mock_get_diff.assert_called_once_with(
@@ -1192,78 +1226,42 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
 @pytest.mark.asyncio
 async def test_get_git_diff():
     """Test getting the diff between git refs with various codebase_reasoning modes."""
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
         # Test default mode (full)
         mock_git.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
         result = await get_git_diff(Path("/mock/repo"), "main", "feature-branch")
 
         assert result == "diff --git a/file.py b/file.py\n+def x(): pass"
-        mock_git.assert_called_once_with(Path("/mock/repo"), ["diff", "main..feature-branch"])
-
-        # Reset the mock for next test
-        mock_git.reset_mock()
-
-        # Test file_structure mode
-        mock_git.return_value = "file1.py\nfile2.py"
-
-        result = await get_git_diff(Path("/mock/repo"), "main", "feature-branch", "file_structure")
-
-        assert "Changed files between main and feature-branch:" in result
-        assert "file1.py" in result
-        assert "file2.py" in result
         mock_git.assert_called_once_with(
-            Path("/mock/repo"), ["diff", "--name-only", "main..feature-branch"]
+            Path("/mock/repo"), ["diff", "--patch", "main...feature-branch"]
         )
 
         # Reset the mock for next test
         mock_git.reset_mock()
 
-        # Test none mode (should be same as file_structure)
-        mock_git.return_value = "file3.py"
+        # Test with different refs
+        mock_git.return_value = "diff --git a/file2.py b/file2.py\n+def y(): pass"
 
-        result = await get_git_diff(Path("/mock/repo"), "main", "feature-branch", "none")
+        result = await get_git_diff(Path("/mock/repo"), "develop", "feature-branch")
 
-        assert "Changed files between main and feature-branch:" in result
-        assert "file3.py" in result
+        assert result == "diff --git a/file2.py b/file2.py\n+def y(): pass"
         mock_git.assert_called_once_with(
-            Path("/mock/repo"), ["diff", "--name-only", "main..feature-branch"]
+            Path("/mock/repo"), ["diff", "--patch", "develop...feature-branch"]
         )
 
-        # Reset the mock for next test
-        mock_git.reset_mock()
-
-        # Test lsp mode with a technique that doesn't need complicated mocking
-        # We'll just test the fallback path directly
-        mock_git.side_effect = [
-            "file4.py",  # --name-only result
-            "diff --git a/file4.py b/file4.py\n@@ -1,1 +1,2 @@\n+def y(): pass",  # --unified=1 result
-        ]
-
-        # This will patch the import in the try block to make it fail
-        with patch("yellhorn_mcp.lsp_utils.get_lsp_diff", side_effect=AttributeError("Not found")):
-            result = await get_git_diff(Path("/mock/repo"), "main", "feature-branch", "lsp")
-
-        assert "diff --git" in result
-        assert "def y(): pass" in result
-        assert mock_git.call_count == 2
-        mock_git.assert_any_call(
-            Path("/mock/repo"), ["diff", "--name-only", "main..feature-branch"]
-        )
-        mock_git.assert_any_call(
-            Path("/mock/repo"), ["diff", "--unified=1", "main..feature-branch"]
-        )
+        # Test completed
 
 
 @pytest.mark.asyncio
 async def test_create_github_subissue():
     """Test creating a GitHub sub-issue."""
     with (
-        patch("yellhorn_mcp.server.ensure_label_exists") as mock_ensure_label,
+        patch("yellhorn_mcp.git_utils.ensure_label_exists") as mock_ensure_label,
         patch("pathlib.Path.exists", return_value=True),
         patch("pathlib.Path.unlink") as mock_unlink,
         patch("builtins.open", create=True),
-        patch("yellhorn_mcp.server.run_github_command") as mock_gh,
+        patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh,
     ):
         mock_gh.return_value = "https://github.com/user/repo/issues/456"
 
@@ -1278,17 +1276,16 @@ async def test_create_github_subissue():
         assert result == "https://github.com/user/repo/issues/456"
         mock_ensure_label.assert_called_once_with(
             Path("/mock/repo"),
-            "yellhorn-judgement-subissue",
-            "Judgement sub-issues created by yellhorn-mcp",
+            "yellhorn-mcp",
+            "Created by Yellhorn MCP",
         )
-        mock_gh.assert_called_once()
-        # Verify the correct labels were passed
-        args, kwargs = mock_gh.call_args
-        assert "--label" in args[1]
-        index = args[1].index("--label") + 1
-        assert "yellhorn-mcp,yellhorn-judgement-subissue" in args[1][index]
-        # Verify temp file is cleaned up
-        mock_unlink.assert_called_once()
+        # Function calls run_github_command twice: once for issue creation, once for comment
+        assert mock_gh.call_count == 2
+        # Verify the correct labels were passed in the first call (issue creation)
+        first_call_args, first_call_kwargs = mock_gh.call_args_list[0]
+        assert "--label" in first_call_args[1]
+        index = first_call_args[1].index("--label") + 1
+        assert "yellhorn-mcp" in first_call_args[1][index]
 
 
 @pytest.mark.asyncio

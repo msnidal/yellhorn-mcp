@@ -84,9 +84,7 @@ async def run_github_command(repo_path: Path, command: list[str]) -> str:
 
         return stdout.decode("utf-8").strip()
     except FileNotFoundError:
-        raise YellhornMCPError(
-            "GitHub CLI executable not found. Please ensure GitHub CLI is installed."
-        )
+        raise YellhornMCPError("GitHub CLI not found. Please ensure GitHub CLI is installed.")
 
 
 async def ensure_label_exists(repo_path: Path, label: str, description: str = "") -> None:
@@ -154,23 +152,26 @@ async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> 
     Raises:
         YellhornMCPError: If the command fails.
     """
-    # GitHub CLI doesn't have a direct command to update issue body,
-    # so we create a temporary file with the new body
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
-        tmp.write(body)
-        tmp_path = tmp.name
-
     try:
-        await run_github_command(
-            repo_path, ["issue", "edit", issue_number, "--body-file", tmp_path]
-        )
-    finally:
-        # Clean up the temporary file
-        import os
+        # GitHub CLI doesn't have a direct command to update issue body,
+        # so we create a temporary file with the new body
+        import tempfile
 
-        os.unlink(tmp_path)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+            tmp.write(body)
+            tmp_path = tmp.name
+
+        try:
+            await run_github_command(
+                repo_path, ["issue", "edit", issue_number, "--body-file", tmp_path]
+            )
+        finally:
+            # Clean up the temporary file
+            import os
+
+            os.unlink(tmp_path)
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to update GitHub issue: {str(e)}")
 
 
 async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
@@ -254,15 +255,18 @@ async def get_github_pr_diff(repo_path: Path, pr_url: str) -> str:
     Raises:
         YellhornMCPError: If the command fails.
     """
-    # Extract PR number from URL
-    import re
+    try:
+        # Extract PR number from URL
+        import re
 
-    pr_match = re.search(r"/pull/(\d+)", pr_url)
-    if not pr_match:
-        raise YellhornMCPError(f"Invalid GitHub PR URL: {pr_url}")
+        pr_match = re.search(r"/pull/(\d+)", pr_url)
+        if not pr_match:
+            raise YellhornMCPError(f"Invalid GitHub PR URL: {pr_url}")
 
-    pr_number = pr_match.group(1)
-    return await run_github_command(repo_path, ["pr", "diff", pr_number])
+        pr_number = pr_match.group(1)
+        return await run_github_command(repo_path, ["pr", "diff", pr_number])
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to fetch GitHub PR diff: {str(e)}")
 
 
 async def create_github_subissue(
@@ -270,7 +274,7 @@ async def create_github_subissue(
     parent_issue: str,
     title: str,
     body: str,
-    label: str = "yellhorn-mcp",
+    labels: list[str] | str = "yellhorn-mcp",
 ) -> str:
     """
     Create a GitHub sub-issue linked to a parent issue.
@@ -280,7 +284,7 @@ async def create_github_subissue(
         parent_issue: The parent issue number.
         title: The title for the new issue.
         body: The body for the new issue.
-        label: Optional label for the new issue (default: "yellhorn-mcp").
+        labels: Optional labels for the new issue (default: "yellhorn-mcp").
 
     Returns:
         The URL of the created issue.
@@ -288,50 +292,64 @@ async def create_github_subissue(
     Raises:
         YellhornMCPError: If the command fails.
     """
-    # Ensure the label exists
-    await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP")
-
-    # Create temporary file for issue body
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
-        tmp.write(body)
-        tmp_path = tmp.name
-
     try:
-        # Create the issue
-        result = await run_github_command(
-            repo_path,
-            [
+        # Normalize labels to a list
+        if isinstance(labels, str):
+            labels_list = [labels]
+        else:
+            labels_list = labels
+
+        # Ensure all labels exist
+        for label in labels_list:
+            await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP")
+
+        # Create temporary file for issue body
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+            tmp.write(body)
+            tmp_path = tmp.name
+
+        try:
+            # Build command with multiple labels
+            command = [
                 "issue",
                 "create",
                 "--title",
                 title,
                 "--body-file",
                 tmp_path,
-                "--label",
-                label,
-            ],
-        )
+            ]
 
-        # Extract issue URL from result
-        import re
+            # Add each label as a separate --label argument
+            for label in labels_list:
+                command.extend(["--label", label])
 
-        url_match = re.search(r"(https://github\.com/[^\s]+)", result)
-        if not url_match:
-            raise YellhornMCPError(f"Failed to extract issue URL from result: {result}")
+            # Create the issue
+            result = await run_github_command(repo_path, command)
 
-        issue_url = url_match.group(1)
+            # Extract issue URL from result
+            import re
 
-        # Link the issue to the parent
-        await add_github_issue_comment(repo_path, parent_issue, f"Sub-issue created: {issue_url}")
+            url_match = re.search(r"(https://github\.com/[^\s]+)", result)
+            if not url_match:
+                raise YellhornMCPError(f"Failed to extract issue URL from result: {result}")
 
-        return issue_url
-    finally:
-        # Clean up the temporary file
-        import os
+            issue_url = url_match.group(1)
 
-        os.unlink(tmp_path)
+            # Link the issue to the parent
+            await add_github_issue_comment(
+                repo_path, parent_issue, f"Sub-issue created: {issue_url}"
+            )
+
+            return issue_url
+        finally:
+            # Clean up the temporary file
+            import os
+
+            os.unlink(tmp_path)
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to create GitHub sub-issue: {str(e)}")
 
 
 async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: str) -> str:
@@ -349,41 +367,44 @@ async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: st
     Raises:
         YellhornMCPError: If the command fails.
     """
-    # Extract PR number from URL
-    import re
-
-    pr_match = re.search(r"/pull/(\d+)", pr_url)
-    if not pr_match:
-        raise YellhornMCPError(f"Invalid GitHub PR URL: {pr_url}")
-
-    pr_number = pr_match.group(1)
-
-    # Create temporary file for review content
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
-        tmp.write(review_content)
-        tmp_path = tmp.name
-
     try:
-        # Post the review
-        result = await run_github_command(
-            repo_path,
-            [
-                "pr",
-                "review",
-                pr_number,
-                "--body-file",
-                tmp_path,
-                "--comment",  # Just a comment, not approve/request changes
-            ],
-        )
-        return f"{pr_url}#pullrequestreview-{result}"
-    finally:
-        # Clean up the temporary file
-        import os
+        # Extract PR number from URL
+        import re
 
-        os.unlink(tmp_path)
+        pr_match = re.search(r"/pull/(\d+)", pr_url)
+        if not pr_match:
+            raise YellhornMCPError(f"Invalid GitHub PR URL: {pr_url}")
+
+        pr_number = pr_match.group(1)
+
+        # Create temporary file for review content
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+            tmp.write(review_content)
+            tmp_path = tmp.name
+
+        try:
+            # Post the review
+            result = await run_github_command(
+                repo_path,
+                [
+                    "pr",
+                    "review",
+                    pr_number,
+                    "--body-file",
+                    tmp_path,
+                    "--comment",  # Just a comment, not approve/request changes
+                ],
+            )
+            return f"{pr_url}#pullrequestreview-{result}"
+        finally:
+            # Clean up the temporary file
+            import os
+
+            os.unlink(tmp_path)
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to post GitHub PR review: {str(e)}")
 
 
 async def get_default_branch(repo_path: Path) -> str:
@@ -401,14 +422,18 @@ async def get_default_branch(repo_path: Path) -> str:
     """
     try:
         # Try to get the default branch using git
-        result = await run_git_command(repo_path, ["remote", "show", "origin"])
+        try:
+            result = await run_git_command(repo_path, ["remote", "show", "origin"])
 
-        # Parse the output to find the default branch
-        import re
+            # Parse the output to find the default branch
+            import re
 
-        match = re.search(r"HEAD branch: ([^\s]+)", result)
-        if match:
-            return match.group(1)
+            match = re.search(r"HEAD branch: ([^\s]+)", result)
+            if match:
+                return match.group(1)
+        except Exception:
+            # remote show origin failed, try fallback
+            pass
 
         # Fallback to common default branch names
         for branch in ["main", "master"]:

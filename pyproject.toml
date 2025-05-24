@@ -51,5 +51,8 @@ line_length = 100
 max-line-length = 100
 exclude = ["venv", ".git", "__pycache__", "build", "dist"]
 
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+
 [tool.hatch.build.targets.wheel]
 packages = ["yellhorn_mcp"]
