@@ -5,87 +5,40 @@ This module provides helpers for attaching Google Search to Gemini models and
 formatting citation metadata into Markdown for embedding in responses.
 """
 
-# Import with careful handling for different versions of the genai library
-import importlib.util
-from typing import Any, Optional
+from typing import Any
 
-
-# ==== Mock classes for testing and CI environments ====
-class MockGoogleSearchResults:
-    """Mock for GoogleSearchResults when not available."""
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-
-class MockGenerativeModel:
-    """Mock class for GenerativeModel when not available."""
-
-    tools = None
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-
-class MockTools:
-    """Mock tools module for tests."""
-
-    def __init__(self):
-        self.GoogleSearchResults = MockGoogleSearchResults
-
-
-# ==== Safe import functions ====
-def _safe_import(module_name: str, attribute_name: Optional[str] = None) -> Any:
-    """Safely import a module or attribute without raising exceptions.
-
-    Args:
-        module_name: The name of the module to import
-        attribute_name: Optional name of an attribute to import from the module
-
-    Returns:
-        The imported module/attribute or None if import fails
-    """
+try:
+    from google.genai import GenerativeModel, tools
+except ImportError:
     try:
-        if attribute_name:
-            # Try to import a specific attribute from a module
-            spec = importlib.util.find_spec(module_name)
-            if spec is None:
-                return None
-            module = importlib.util.module_from_spec(spec)
-            # Guard against spec.loader being None
-            if spec.loader is None:
-                return None
-            spec.loader.exec_module(module)
-            return getattr(module, attribute_name, None)
-        else:
-            # Import the whole module
-            return __import__(module_name, fromlist=[""])
-    except (ImportError, AttributeError):
-        return None
+        import google.generativeai as genai
+        from google.generativeai import tools
 
+        GenerativeModel = genai.GenerativeModel
+    except ImportError:
+        # Mock implementations for testing
+        class MockGenerativeModel:
+            """Mock class for GenerativeModel when not available."""
 
-# ==== Import GenerativeModel and tools with fallbacks ====
+            tools = None
 
-# First try google.genai (newer versions)
-GenerativeModel = _safe_import("google.genai", "GenerativeModel")
-tools_module = _safe_import("google.genai", "tools")
+            def __init__(self, *args, **kwargs):
+                pass
 
-# If not found, try alternative import paths
-if GenerativeModel is None:
-    genai = _safe_import("google.generativeai")
-    if genai is not None:
-        GenerativeModel = getattr(genai, "GenerativeModel", MockGenerativeModel)
-    else:
+        class MockGoogleSearchResults:
+            """Mock for GoogleSearchResults when not available."""
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class MockTools:
+            """Mock tools module for tests."""
+
+            def __init__(self):
+                self.GoogleSearchResults = MockGoogleSearchResults
+
         GenerativeModel = MockGenerativeModel
-
-# If tools not found in first attempt, try alternative path
-if tools_module is None:
-    tools_module = _safe_import("google.generativeai.tools")
-    if tools_module is None:
-        tools_module = MockTools()
-
-# Assign to a consistent variable name for use in the module
-tools = tools_module
+        tools = MockTools()
 
 
 def create_model_with_search(client: Any, model_name: str) -> Any:
@@ -100,7 +53,17 @@ def create_model_with_search(client: Any, model_name: str) -> Any:
         A GenerativeModel instance with search capabilities attached.
     """
     # Get GoogleSearchResults class from the tools module if available
-    GoogleSearchResults = getattr(tools, "GoogleSearchResults", MockGoogleSearchResults)
+    GoogleSearchResults = getattr(tools, "GoogleSearchResults", None)
+
+    if GoogleSearchResults is None:
+        # Create model without search if GoogleSearchResults is not available
+        try:
+            if hasattr(client, "GenerativeModel"):
+                return client.GenerativeModel(model_name=model_name)
+            else:
+                return GenerativeModel(model_name=model_name)
+        except Exception:
+            return None
 
     try:
         # Create a search tool instance first
@@ -141,7 +104,10 @@ def attach_search(model: Any) -> Any:
         The same model with search capabilities attached.
     """
     # Get GoogleSearchResults class from the tools module if available
-    GoogleSearchResults = getattr(tools, "GoogleSearchResults", MockGoogleSearchResults)
+    GoogleSearchResults = getattr(tools, "GoogleSearchResults", None)
+
+    if GoogleSearchResults is None:
+        return model
 
     # If model doesn't have tools attribute or tools doesn't have GoogleSearchResults
     # Just return the model unchanged
