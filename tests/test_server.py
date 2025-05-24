@@ -1289,6 +1289,195 @@ async def test_create_github_subissue():
 
 
 @pytest.mark.asyncio
+async def test_process_workplan_async_with_citations(mock_request_context, mock_genai_client):
+    """Test process_workplan_async with Gemini response containing citations."""
+    # Set the mock client in the context
+    mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["openai_client"] = None
+    mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
+
+    # Set up both API patterns for the mock with AsyncMock
+    mock_genai_client.aio.generate_content = AsyncMock()
+    mock_genai_client.aio.generate_content.return_value = (
+        mock_genai_client.aio.models.generate_content.return_value
+    )
+
+    with (
+        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+    ):
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+        mock_format_metrics.return_value = (
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+        )
+
+        # Mock a Gemini response with citations
+        mock_response = mock_genai_client.aio.models.generate_content.return_value
+        mock_response.text = """## Summary
+This workplan implements feature X.
+
+## Implementation Steps
+1. Add new function to process data
+2. Update tests
+
+## Citations
+1. https://docs.python.org/3/library/json.html
+2. https://github.com/user/repo/issues/123"""
+        mock_response.usage_metadata = {
+            "prompt_token_count": 1000,
+            "candidates_token_count": 500,
+            "total_token_count": 1500,
+        }
+
+        # Test with required parameters
+        await process_workplan_async(
+            Path("/mock/repo"),
+            mock_genai_client,
+            None,  # No OpenAI client
+            "gemini-model",
+            "Feature Implementation Plan",
+            "123",
+            mock_request_context,
+            detailed_description="Create a new feature to support X",
+        )
+
+        # Check that either API was called for generation
+        assert (
+            mock_genai_client.aio.models.generate_content.called
+            or mock_genai_client.aio.generate_content.called
+        )
+
+        # Check that the issue was updated with the workplan including citations
+        mock_update.assert_called_once()
+        args, kwargs = mock_update.call_args
+        assert args[0] == Path("/mock/repo")
+        assert args[1] == "123"
+
+        # Verify the content contains citations
+        update_content = args[2]
+        assert "# Feature Implementation Plan" in update_content
+        assert "## Citations" in update_content
+        assert "https://docs.python.org/3/library/json.html" in update_content
+        assert "https://github.com/user/repo/issues/123" in update_content
+        assert "## Completion Metrics" in update_content
+        assert "**Model Used**: `gemini-model`" in update_content
+
+
+@pytest.mark.asyncio
+async def test_process_judgement_async_with_citations(mock_request_context, mock_genai_client):
+    """Test process_judgement_async with Gemini response containing citations."""
+    # Set the mock client in the context
+    mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["openai_client"] = None
+    mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
+
+    # Set up both API patterns for the mock with AsyncMock
+    mock_genai_client.aio.generate_content = AsyncMock()
+    mock_genai_client.aio.generate_content.return_value = (
+        mock_genai_client.aio.models.generate_content.return_value
+    )
+
+    with (
+        patch("yellhorn_mcp.server.create_github_subissue") as mock_create_subissue,
+        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+    ):
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+        mock_create_subissue.return_value = "https://github.com/user/repo/issues/456"
+        mock_format_metrics.return_value = (
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+        )
+
+        # Mock a Gemini response with citations
+        mock_response = mock_genai_client.aio.models.generate_content.return_value
+        mock_response.text = """## Judgement Summary
+The implementation correctly follows the workplan.
+
+## Completed Items
+- Feature X implemented successfully
+- Tests added
+
+## Missing Items
+None
+
+## Citations
+1. https://docs.python.org/3/library/unittest.html
+2. https://github.com/user/repo/pull/456"""
+        mock_response.usage_metadata = {
+            "prompt_token_count": 2000,
+            "candidates_token_count": 800,
+            "total_token_count": 2800,
+        }
+
+        workplan = "1. Implement X\n2. Test X"
+        diff = "diff --git a/file.py b/file.py\n+def x(): pass"
+        base_ref = "main"
+        head_ref = "feature-branch"
+        issue_number = "42"
+
+        # With issue number (should create sub-issue)
+        response = await process_judgement_async(
+            mock_request_context.request_context.lifespan_context["repo_path"],
+            mock_genai_client,
+            None,  # No OpenAI client
+            "gemini-model",
+            workplan,
+            diff,
+            base_ref,
+            head_ref,
+            issue_number,
+            mock_request_context,
+        )
+
+        # Check that the response mentions the sub-issue URL
+        assert "Judgement sub-issue created: https://github.com/user/repo/issues/456" in response
+
+        # Check that either API was called for generation
+        assert (
+            mock_genai_client.aio.models.generate_content.called
+            or mock_genai_client.aio.generate_content.called
+        )
+
+        # Get args from whichever was called
+        if mock_genai_client.aio.models.generate_content.called:
+            args, kwargs = mock_genai_client.aio.models.generate_content.call_args
+        else:
+            args, kwargs = mock_genai_client.aio.generate_content.call_args
+
+        # Verify structured output instructions are present
+        assert "## Judgement Summary" in kwargs.get("contents", "")
+        assert "## Completed Items" in kwargs.get("contents", "")
+        assert "## Missing Items" in kwargs.get("contents", "")
+        assert "## Incorrect Implementation" in kwargs.get("contents", "")
+        assert "## Suggested Improvements / Issues" in kwargs.get("contents", "")
+        assert "## Intentional Divergence Notes" in kwargs.get("contents", "")
+        assert "## References" in kwargs.get("contents", "")
+
+        # Check that format_metrics_section was called with the correct parameters
+        mock_format_metrics.assert_called_once_with("gemini-model", mock_response.usage_metadata)
+
+        # Check that the sub-issue was created with the right parameters
+        mock_create_subissue.assert_called_once()
+        args, kwargs = mock_create_subissue.call_args
+        assert args[0] == Path("/mock/repo")
+        assert args[1] == issue_number
+        assert f"Judgement: {base_ref}..{head_ref}" in args[2]
+        assert "## Comparison Metadata" in args[3]
+        # Check that citations are preserved in sub-issue body
+        assert "## Citations" in args[3]
+        assert "https://docs.python.org/3/library/unittest.html" in args[3]
+        assert "https://github.com/user/repo/pull/456" in args[3]
+        # Check that metrics section is included in the sub-issue body
+        assert "## Completion Metrics" in args[3]
+        assert args[4] == ["yellhorn-mcp"]
+
+
+@pytest.mark.asyncio
 async def test_process_judgement_async(mock_request_context, mock_genai_client):
     """Test processing judgement asynchronously."""
     # Set the mock client in the context
