@@ -79,7 +79,8 @@ async def test_openai_gemini_errors():
                     "Diff content",
                     "main",
                     "HEAD",
-                    None,  # No issue number
+                    None,  # subissue_to_update
+                    "123",  # parent_workplan_issue_number
                     mock_ctx,
                 )
 

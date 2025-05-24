@@ -179,7 +179,8 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
                 "Diff content",
                 "main",
                 "HEAD",
-                None,
+                None,  # subissue_to_update
+                "123",  # parent_workplan_issue_number
                 mock_ctx,
             )
 
@@ -206,7 +207,8 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
                 "Diff content",
                 "main",
                 "HEAD",
-                None,
+                None,  # subissue_to_update
+                "123",  # parent_workplan_issue_number
                 mock_ctx,
             )
 
@@ -253,6 +255,7 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
                 "Diff content",
                 "main",
                 "HEAD",
-                None,
+                None,  # subissue_to_update
+                "123",  # parent_workplan_issue_number
                 mock_ctx,
             )

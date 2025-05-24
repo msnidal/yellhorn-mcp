@@ -437,38 +437,38 @@ async def test_integration_process_judgement_lsp_mode():
                             "https://github.com/mock/repo/issues/456"
                         )
 
-                        # Call the function with LSP mode
-                        result = await process_judgement_async(
-                            repo_path,
-                            gemini_client,
-                            None,  # No OpenAI client
-                            model,
-                            workplan,
-                            diff,
-                            base_ref,
-                            head_ref,
-                            issue_number,
-                            ctx,
-                            codebase_reasoning="lsp",
-                        )
+                        with patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue:
 
-                        # Verify LSP snapshot was used
-                        mock_lsp_snapshot.assert_called_once_with(repo_path)
+                            # Call the function with LSP mode
+                            result = await process_judgement_async(
+                                repo_path,
+                                gemini_client,
+                                None,  # No OpenAI client
+                                model,
+                                workplan,
+                                diff,
+                                base_ref,
+                                head_ref,
+                                "subissue-123",  # subissue_to_update
+                                issue_number,  # parent_workplan_issue_number
+                                ctx,
+                                codebase_reasoning="lsp",
+                            )
 
-                        # Verify diff files were processed
-                        mock_update_diff.assert_called_once_with(
-                            repo_path,
-                            base_ref,
-                            head_ref,
-                            ["file1.py"],
-                            {"file1.py": "```py\ndef function1()\n```"},
-                        )
+                            # Verify LSP snapshot was used
+                            mock_lsp_snapshot.assert_called_once_with(repo_path)
 
-                        # Verify sub-issue was created
-                        mock_create_subissue.assert_called_once()
+                            # Verify diff files were processed
+                            mock_update_diff.assert_called_once_with(
+                                repo_path,
+                                base_ref,
+                                head_ref,
+                                ["file1.py"],
+                                {"file1.py": "```py\ndef function1()\n```"},
+                            )
 
-                        # Verify result includes sub-issue URL
-                        assert "Judgement sub-issue created:" in result
+                            # Verify GitHub issue was updated
+                            mock_update_issue.assert_called_once()
 
 
 @pytest.mark.asyncio

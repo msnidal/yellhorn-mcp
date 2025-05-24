@@ -213,6 +213,7 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
         patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+        patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -224,7 +225,7 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         diff = "diff --git a/file.py b/file.py\n+def x(): pass"
 
         # Test without issue number (direct output)
-        result = await process_judgement_async(
+        await process_judgement_async(
             Path("/mock/repo"),
             None,  # No Gemini client
             mock_openai_client,
@@ -233,7 +234,8 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
             diff,
             "main",
             "feature-branch",
-            None,  # No issue number for sub-issue
+            "456",  # subissue_to_update
+            "123",  # parent_workplan_issue_number
             mock_request_context,
         )
 
@@ -250,6 +252,9 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         assert messages[0]["role"] == "user"
         assert "<Original Workplan>" in messages[0]["content"]
 
-        # Verify the result includes both judgement and metrics
-        assert "Mock OpenAI response text" in result
-        assert "## Completion Metrics" in result
+        # Verify the GitHub issue was updated with judgement and metrics
+        mock_update_issue.assert_called_once()
+        update_args = mock_update_issue.call_args[0]
+        issue_body = update_args[2]  # Third argument is the issue body
+        assert "Mock OpenAI response text" in issue_body
+        assert "## Completion Metrics" in issue_body

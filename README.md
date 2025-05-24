@@ -130,7 +130,7 @@ Retrieves the workplan content (GitHub issue body) associated with a workplan.
 
 ### judge_workplan
 
-Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background).
+Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a placeholder GitHub sub-issue immediately and then processes the AI judgement asynchronously, updating the sub-issue with results.
 
 **Input**:
 
@@ -140,6 +140,7 @@ Triggers an asynchronous code judgement comparing two git refs (branches or comm
 - `codebase_reasoning`: (optional) Control which codebase context is provided:
   - `"full"`: (default) Use full codebase context
   - `"lsp"`: Use lighter codebase context (only function signatures for Python and Go, plus full diff files)
+  - `"file_structure"`: Use only directory structure without file contents for faster processing
   - `"none"`: Skip codebase context completely for fastest processing
 - `debug`: (optional) If set to `true`, adds a comment to the sub-issue with the full prompt used for generation
 - `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
@@ -148,7 +149,10 @@ Any URLs mentioned in the workplan will be extracted and preserved in a Referenc
 
 **Output**:
 
-- A confirmation message that the judgement task has been initiated
+- JSON string containing:
+  - `message`: Confirmation that the judgement task has been initiated
+  - `subissue_url`: URL to the created placeholder sub-issue where results will be posted
+  - `subissue_number`: The GitHub issue number of the placeholder sub-issue
 
 ## Resource Access
 
