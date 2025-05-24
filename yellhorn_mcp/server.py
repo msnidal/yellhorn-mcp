@@ -76,19 +76,19 @@ async def async_generate_content_with_config(
     ):
         raise YellhornMCPError("Gemini client does not support aio.models.generate_content.")
 
-    return await client.aio.models.generate_content(
-        model=model_name, contents=prompt, generation_config=generation_config
-    )
+    # For Gemini AsyncModels, generation_config is not supported as a parameter
+    # We'll ignore it for now and use the default configuration
+    return await client.aio.models.generate_content(model=model_name, contents=prompt)
 
 
 # Pricing configuration for models (USD per 1M tokens)
 MODEL_PRICING = {
     # Gemini models
-    "gemini-2.5-pro-preview-03-25": {
+    "gemini-2.5-pro-preview-05-06": {
         "input": {"default": 1.25, "above_200k": 2.50},
         "output": {"default": 10.00, "above_200k": 15.00},
     },
-    "gemini-2.5-flash-preview-04-17": {
+    "gemini-2.5-flash-preview-05-20": {
         "input": {
             "default": 0.15,
             "above_200k": 0.15,  # Flash doesn't have different pricing tiers
@@ -208,7 +208,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     """
     # Get configuration from environment variables
     repo_path = os.getenv("REPO_PATH", ".")
-    model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
+    model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-05-06")
     is_openai_model = model.startswith("gpt-") or model.startswith("o")
 
     # Handle search grounding configuration (default to enabled for Gemini models only)

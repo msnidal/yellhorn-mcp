@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
 - Added Google Gemini Search Grounding as default feature for all Gemini models
 - Added `YELLHORN_MCP_SEARCH` environment variable (default: "on") to control search grounding
 - Added `--no-search-grounding` CLI flag to disable search grounding
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2025-04-30
 
 ### Added
+
 - Added new "lsp" codebase reasoning mode that only extracts function signatures and docstrings, resulting in lighter prompts
 - Added directory tree visualization to all prompt formats for better codebase structure understanding
 - Added Go language support to LSP mode with exported function and type signatures
@@ -34,12 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated CLI, documentation, and example client to support the new mode
 
 ### Changed
+
 - Removed redundant `<codebase_structure>` section from prompt format to improve conciseness
-- Fixed code fence handling in LSP mode to prevent nested code fences (no more ```py inside another ```py)
+- Fixed code fence handling in LSP mode to prevent nested code fences (no more ```py inside another```py)
 
 ## [0.3.3] - 2025-04-28
 
 ### Removed
+
 - Removed git worktree generation tool and all related helpers, CLI commands, docs and tests.
 
 ## [0.3.2] - 2025-04-28
@@ -85,10 +89,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Default Gemini model updated to `gemini-2.5-pro-preview-03-25`.
+- Default Gemini model updated to `gemini-2.5-pro-preview-05-06`.
 - Renamed "review" functionality to "judge" across the application (functions, MCP tool, GitHub labels, resource types, documentation) for better semantic alignment with AI evaluation tasks. The MCP tool is now `judge_workplan`. The associated GitHub label is now `yellhorn-judgement-subissue`. The resource type is now `yellhorn_judgement_subissue`.
 
 ### Added
 
-- Added `gemini-2.5-flash-preview-04-17` as an available model option.
+- Added `gemini-2.5-flash-preview-05-20` as an available model option.
 - Added `CHANGELOG.md` to track changes.

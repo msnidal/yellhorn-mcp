@@ -32,8 +32,8 @@ The server requires the following environment variables:
 - `GEMINI_API_KEY`: Your Gemini API key (required for Gemini models)
 - `OPENAI_API_KEY`: Your OpenAI API key (required for OpenAI models)
 - `REPO_PATH`: Path to your repository (defaults to current directory)
-- `YELLHORN_MCP_MODEL`: Model to use (defaults to "gemini-2.5-pro-preview-03-25"). Available options:
-  - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
+- `YELLHORN_MCP_MODEL`: Model to use (defaults to "gemini-2.5-pro-preview-05-06"). Available options:
+  - Gemini models: "gemini-2.5-pro-preview-05-06", "gemini-2.5-flash-preview-05-20"
   - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
 - `YELLHORN_MCP_SEARCH`: Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
@@ -113,7 +113,6 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 - JSON string containing:
   - `issue_url`: URL to the created GitHub issue
   - `issue_number`: The GitHub issue number
-
 
 ### get_workplan
 

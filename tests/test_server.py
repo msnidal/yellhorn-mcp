@@ -232,7 +232,7 @@ def mock_request_context():
         "repo_path": Path("/mock/repo"),
         "gemini_client": MagicMock(spec=genai.Client),
         "openai_client": None,
-        "model": "gemini-2.5-pro-preview-03-25",
+        "model": "gemini-2.5-pro-preview-05-06",
     }
     return mock_ctx
 
@@ -442,22 +442,22 @@ def test_is_git_repository():
 def test_calculate_cost():
     """Test the calculate_cost function with different token counts and models."""
     # Test with standard model and default tier (below 200k tokens)
-    cost = calculate_cost("gemini-2.5-pro-preview-03-25", 100_000, 50_000)
+    cost = calculate_cost("gemini-2.5-pro-preview-05-06", 100_000, 50_000)
     # Expected: (100,000 / 1M) * 1.25 + (50,000 / 1M) * 10.00 = 0.125 + 0.5 = 0.625
     assert cost == 0.625
 
     # Test with standard model and higher tier (above 200k tokens)
-    cost = calculate_cost("gemini-2.5-pro-preview-03-25", 250_000, 300_000)
+    cost = calculate_cost("gemini-2.5-pro-preview-05-06", 250_000, 300_000)
     # Expected: (250,000 / 1M) * 2.50 + (300,000 / 1M) * 15.00 = 0.625 + 4.5 = 5.125
     assert cost == 5.125
 
     # Test with standard model and mixed tiers
-    cost = calculate_cost("gemini-2.5-pro-preview-03-25", 150_000, 250_000)
+    cost = calculate_cost("gemini-2.5-pro-preview-05-06", 150_000, 250_000)
     # Expected: (150,000 / 1M) * 1.25 + (250,000 / 1M) * 15.00 = 0.1875 + 3.75 = 3.9375
     assert cost == 3.9375
 
     # Test with flash model (same pricing across tiers)
-    cost = calculate_cost("gemini-2.5-flash-preview-04-17", 150_000, 50_000)
+    cost = calculate_cost("gemini-2.5-flash-preview-05-20", 150_000, 50_000)
     # Expected: (150,000 / 1M) * 0.15 + (50,000 / 1M) * 3.50 = 0.0225 + 0.175 = 0.1975
     assert cost == 0.1975
 
@@ -474,7 +474,7 @@ def test_format_metrics_section():
     metadata.candidates_token_count = 500
     metadata.total_token_count = 1500
 
-    model = "gemini-2.5-pro-preview-03-25"
+    model = "gemini-2.5-pro-preview-05-06"
 
     with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
         mock_calculate_cost.return_value = 0.0175
@@ -1373,7 +1373,7 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                         repo_path=Path("/test/repo"),
                         gemini_client=mock_genai_client,
                         openai_client=None,
-                        model="gemini-2.5-pro-preview-03-25",
+                        model="gemini-2.5-pro-preview-05-06",
                         workplan_content="# Workplan\n1. Do something",
                         diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
                         base_ref="main",
@@ -1399,7 +1399,7 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                     assert "**Base Ref**: `main` (Commit: `abc1234`)" in body
                     assert "**Head Ref**: `HEAD` (Commit: `def5678`)" in body
                     assert "**Codebase Reasoning Mode**: `full`" in body
-                    assert "**AI Model**: `gemini-2.5-pro-preview-03-25`" in body
+                    assert "**AI Model**: `gemini-2.5-pro-preview-05-06`" in body
                     assert "## Judgement Summary" in body
                     assert "Implementation looks good." in body
                     assert "## Completion Metrics" in body
@@ -1415,7 +1415,7 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                         repo_path=Path("/test/repo"),
                         gemini_client=mock_genai_client,
                         openai_client=None,
-                        model="gemini-2.5-pro-preview-03-25",
+                        model="gemini-2.5-pro-preview-05-06",
                         workplan_content="# Workplan\n1. Do something",
                         diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
                         base_ref="main",
@@ -1670,5 +1670,5 @@ async def test_async_generate_content_with_config_error_handling(mock_genai_clie
 
     assert result == mock_response
     mock_genai_client.aio.models.generate_content.assert_called_once_with(
-        model="test-model", contents="test prompt", generation_config=None
+        model="test-model", contents="test prompt"
     )
