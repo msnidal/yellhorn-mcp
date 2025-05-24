@@ -1121,44 +1121,47 @@ async def process_judgement_async(
     gemini_client: genai.Client | None,
     openai_client: Any | None,
     model: str,
-    workplan: str,
-    diff: str,
+    workplan_content: str,
+    diff_content: str,
     base_ref: str,
     head_ref: str,
-    workplan_issue_number: str | None,
+    subissue_to_update: str,
+    parent_workplan_issue_number: str,
     ctx: Context,
     base_commit_hash: str | None = None,
     head_commit_hash: str | None = None,
     debug: bool = False,
-    _meta: dict[str, Any] | None = None,
     codebase_reasoning: str = "full",
-) -> str:
+    _meta: dict[str, Any] | None = None,
+) -> None:
     """
-    Process the judgement of a workplan and diff asynchronously, creating a GitHub sub-issue.
+    Process the judgement of a workplan and diff asynchronously, updating an existing placeholder sub-issue.
 
     Args:
         repo_path: Path to the repository.
         gemini_client: Gemini API client (None for OpenAI models).
         openai_client: OpenAI API client (None for Gemini models).
         model: Model name to use (Gemini or OpenAI).
-        workplan: The original workplan.
-        diff: The code diff to judge.
+        workplan_content: The original workplan content.
+        diff_content: The code diff to judge.
         base_ref: Base Git ref (commit SHA, branch name, tag) for comparison.
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison.
-        workplan_issue_number: Optional GitHub issue number with the original workplan.
+        subissue_to_update: GitHub issue number of the placeholder sub-issue to update.
+        parent_workplan_issue_number: GitHub issue number of the original workplan.
         ctx: Server context.
         base_commit_hash: Optional base commit hash for better reference in the output.
         head_commit_hash: Optional head commit hash for better reference in the output.
-        debug: If True, adds a comment to the issue with the full prompt used for generation.
+        debug: If True, adds a comment to the sub-issue with the full prompt used for generation.
                Useful for debugging and improving prompt engineering.
         codebase_reasoning: The mode for codebase reasoning, one of:
                - "full": Full codebase content (default)
                - "lsp": LSP-style signatures only (faster)
                - "file_structure": Only directory structure (fastest)
                - "none": No codebase context
+        _meta: Optional metadata dict for context restoration patterns.
 
     Returns:
-        The judgement content and URL of the created sub-issue.
+        None (function updates the existing sub-issue).
     """
     try:
         # Process LSP snapshot if requested
@@ -1183,11 +1186,11 @@ async def process_judgement_async(
         # Construct a more structured prompt
         prompt = f"""You are an expert code evaluator judging if a code diff correctly implements a workplan.
 <Original Workplan>
-{workplan}
+{workplan_content}
 </Original Workplan>
 
 <Code Diff>
-{diff}
+{diff_content}
 </Code Diff>
 
 Please judge if this code diff correctly implements the workplan and provide detailed feedback.
@@ -1292,44 +1295,34 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
 
-        if workplan_issue_number:
-            # Create a title for the sub-issue
-            # Use commit hashes if available, otherwise use the ref names
-            base_display = f"{base_ref} ({base_commit_hash})" if base_commit_hash else base_ref
-            head_display = f"{head_ref} ({head_commit_hash})" if head_commit_hash else head_ref
-            judgement_title = (
-                f"Judgement: {base_display}..{head_display} for Workplan #{workplan_issue_number}"
-            )
+        # Construct metadata section for the final body
+        metadata_section = f"""## Comparison Metadata
+- **Workplan Issue**: `#{parent_workplan_issue_number}`
+- **Base Ref**: `{base_ref}` (Commit: `{base_commit_hash}`)
+- **Head Ref**: `{head_ref}` (Commit: `{head_commit_hash}`)
+- **Codebase Reasoning Mode**: `{codebase_reasoning}`
+- **AI Model**: `{model}`
 
-            # Add metadata to the judgement content with commit hashes
-            base_hash_info = f" (`{base_commit_hash}`)" if base_commit_hash else ""
-            head_hash_info = f" (`{head_commit_hash}`)" if head_commit_hash else ""
-            metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`{base_hash_info}\n- Head ref: `{head_ref}`{head_hash_info}\n- Workplan: #{workplan_issue_number}\n\n"
+"""
 
-            # Combine metadata, judgement content, citations and metrics
-            judgement_with_metadata_and_metrics = (
-                metadata + judgement_content + citations_section + metrics_section
-            )
+        # Combine into final body: metadata + judgement + citations + metrics
+        final_body = metadata_section + judgement_content + citations_section + metrics_section
 
-            # Create a sub-issue
-            await ctx.log(
-                level="info",
-                message=f"Creating GitHub sub-issue for judgement of workplan #{workplan_issue_number}",
-            )
-            subissue_url = await create_github_subissue(
-                repo_path,
-                workplan_issue_number,
-                judgement_title,
-                judgement_with_metadata_and_metrics,
-                ["yellhorn-mcp"],
-            )
+        # Update the placeholder sub-issue with the final judgement
+        await ctx.log(
+            level="info",
+            message=f"Updating sub-issue #{subissue_to_update} with generated judgement",
+        )
+        await update_github_issue(repo_path, subissue_to_update, final_body)
 
-            # If debug mode is enabled, add a comment with the full prompt
-            if debug:
-                # Extract the sub-issue number
-                subissue_number = subissue_url.split("/")[-1]
+        await ctx.log(
+            level="info",
+            message=f"Successfully updated sub-issue #{subissue_to_update} with judgement and metrics",
+        )
 
-                debug_comment = f"""
+        # If debug mode is enabled, add a comment with the full prompt
+        if debug:
+            debug_comment = f"""
 ## Debug Information - Prompt Used for Judgement
 
 ```
@@ -1338,17 +1331,11 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
 *This debug information is provided to help evaluate and improve prompt engineering.*
 """
-                await add_github_issue_comment(repo_path, subissue_number, debug_comment)
-                await ctx.log(
-                    level="info",
-                    message=f"Added debug information (prompt) as comment to judgement sub-issue #{subissue_number}",
-                )
-
-            # Return both the judgement content and the sub-issue URL
-            return f"Judgement sub-issue created: {subissue_url}\n\n{judgement_content}"
-        else:
-            # For direct output, include citations and metrics
-            return f"{judgement_content}{citations_section}{metrics_section}"
+            await add_github_issue_comment(repo_path, subissue_to_update, debug_comment)
+            await ctx.log(
+                level="info",
+                message=f"Added debug information (prompt) as comment to sub-issue #{subissue_to_update}",
+            )
 
     except Exception as e:
         error_message = f"Failed to generate judgement: {str(e)}"
@@ -1929,8 +1916,8 @@ async def judge_workplan(
     Trigger an asynchronous code judgement comparing two git refs against a workplan.
 
     This tool fetches the original workplan from the specified GitHub issue, generates a diff
-    between the specified git refs, and initiates an asynchronous AI judgement process that creates
-    a GitHub sub-issue with the judgement.
+    between the specified git refs, and creates a placeholder GitHub sub-issue immediately.
+    The AI judgement is then processed asynchronously and the sub-issue is updated with results.
 
     Respects file filtering from:
     - .yellhorncontext (if present, takes priority)
@@ -1954,14 +1941,17 @@ async def judge_workplan(
                Default is False (search grounding enabled) for Gemini models.
 
     Returns:
-        A confirmation message that the judgement task has been initiated.
+        A JSON string with the sub-issue URL and number where results will be posted.
 
     Raises:
         YellhornMCPError: If errors occur during the judgement process.
     """
     try:
-        # Get the repository path from context
+        # Get the repository path and other context data
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+        model = ctx.request_context.lifespan_context["model"]
+        gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
+        openai_client = ctx.request_context.lifespan_context.get("openai_client")
 
         # Handle search grounding override if specified
         original_search_grounding = ctx.request_context.lifespan_context.get(
@@ -1973,11 +1963,6 @@ async def judge_workplan(
                 level="info",
                 message="Search grounding disabled for workplan judgement per request parameter.",
             )
-
-        await ctx.log(
-            level="info",
-            message=f"Judging code for workplan issue #{issue_number}.",
-        )
 
         # Resolve git references to commit hashes for better tracking
         base_commit_hash = await run_git_command(repo_path, ["rev-parse", base_ref])
@@ -1996,11 +1981,6 @@ async def judge_workplan(
         if is_empty:
             return f"No differences found between {base_ref} ({base_commit_hash}) and {head_ref} ({head_commit_hash}). Nothing to judge."
 
-        # Trigger the judgement asynchronously
-        gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
-        openai_client = ctx.request_context.lifespan_context.get("openai_client")
-        model = ctx.request_context.lifespan_context["model"]
-
         # Validate codebase_reasoning
         if codebase_reasoning not in ["full", "lsp", "file_structure", "none"]:
             await ctx.log(
@@ -2009,18 +1989,46 @@ async def judge_workplan(
             )
             codebase_reasoning = "full"
 
-        # Store codebase_reasoning in context
-        ctx.request_context.lifespan_context["codebase_reasoning"] = codebase_reasoning
+        # Construct the title for the placeholder sub-issue
+        placeholder_title = f"Judgement: {base_ref} ({base_commit_hash})..{head_ref} ({head_commit_hash}) for Workplan #{issue_number}"
 
-        reasoning_mode_desc = {
-            "full": "full codebase",
-            "lsp": "function signatures",
-            "file_structure": "file structure only",
-            "none": "no codebase",
-        }.get(codebase_reasoning, "full codebase")
+        # Construct the body for the placeholder sub-issue
+        placeholder_body = f"""# {placeholder_title}
 
+🔄 Generating judgement with AI analysis... This may take a few minutes.
+
+This judgement will be updated here once complete.
+
+---
+## Judgement Task Details
+- **Workplan Issue**: `#{issue_number}`
+- **Base Ref**: `{base_ref}` (Commit: `{base_commit_hash}`)
+- **Head Ref**: `{head_ref}` (Commit: `{head_commit_hash}`)
+- **Codebase Reasoning Mode**: `{codebase_reasoning}`
+- **AI Model**: `{model}`
+"""
+
+        # Create the placeholder sub-issue immediately
         await ctx.log(
-            level="info", message=f"Starting judgement with {reasoning_mode_desc} context"
+            level="info",
+            message=f"Creating placeholder sub-issue for workplan #{issue_number} judgement",
+        )
+
+        subissue_url = await create_github_subissue(
+            repo_path,
+            issue_number,
+            placeholder_title,
+            placeholder_body,
+            ["yellhorn-judgement-subissue"],
+        )
+
+        # Extract subissue number from URL
+        subissue_number = subissue_url.split("/")[-1]
+
+        # Launch background task to process the judgement with AI
+        await ctx.log(
+            level="info",
+            message=f"Starting asynchronous judgement generation for sub-issue #{subissue_number}",
         )
 
         asyncio.create_task(
@@ -2033,6 +2041,7 @@ async def judge_workplan(
                 diff,
                 base_ref,
                 head_ref,
+                subissue_number,
                 issue_number,
                 ctx,
                 base_commit_hash=base_commit_hash,
@@ -2047,10 +2056,13 @@ async def judge_workplan(
         if disable_search_grounding:
             ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
 
-        return (
-            f"Judgement task initiated comparing {base_ref} (`{base_commit_hash}`)..{head_ref} (`{head_commit_hash}`) "
-            f"against workplan issue #{issue_number}. "
-            f"Results will be posted as a GitHub sub-issue linked to the workplan."
+        # Return the sub-issue URL and number as JSON
+        return json.dumps(
+            {
+                "message": "Judgement task initiated. Results will be posted to the sub-issue.",
+                "subissue_url": subissue_url,
+                "subissue_number": subissue_number,
+            }
         )
 
     except Exception as e:

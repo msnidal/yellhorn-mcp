@@ -238,7 +238,14 @@ Once your PR is created, you can request a judgement against the original workpl
 Please judge the PR comparing "main" and "feature-branch" against the workplan in issue #456.
 ```
 
-This will use the `judge_workplan` tool to fetch the original workplan from the specified GitHub issue, generate a diff between the specified git references, and trigger an asynchronous judgement. The judgement will be posted as a GitHub sub-issue linked to the original workplan.
+This will use the `judge_workplan` tool to:
+
+1. **Immediately create** a placeholder sub-issue with the judgement task details
+2. **Return the sub-issue URL** so you can track progress
+3. **Process the judgement asynchronously** by fetching the original workplan, generating a diff between the specified git references, and running AI analysis
+4. **Update the placeholder sub-issue** with the complete judgement results, including detailed analysis, citations, and completion metrics
+
+The placeholder sub-issue is labeled with `yellhorn-judgement-subissue` and linked to the original workplan issue for easy reference.
 
 ## MCP Tools
 
@@ -333,7 +340,13 @@ This will analyze your codebase with your specific task in mind, creating a .yel
 
 ### judge_workplan
 
-Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background).
+Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a placeholder GitHub sub-issue immediately and then processes the AI judgement asynchronously, updating the sub-issue with results.
+
+**Workflow**:
+
+1. **Immediate Response**: Creates a placeholder sub-issue with task details and metadata
+2. **Asynchronous Processing**: Generates the AI judgement in the background  
+3. **Sub-issue Update**: Updates the placeholder with the complete judgement, including comparison metadata, detailed analysis, citations (if available), and completion metrics
 
 **Input**:
 
@@ -343,6 +356,7 @@ Triggers an asynchronous code judgement comparing two git refs (branches or comm
 - `codebase_reasoning`: (optional) Control which codebase context is provided:
   - `"full"`: (default) Use full codebase context
   - `"lsp"`: Use lighter codebase context (function signatures, class attributes, etc. for Python and Go, plus full diff files)
+  - `"file_structure"`: Use only directory structure without file contents for faster processing
   - `"none"`: Skip codebase context completely for fastest processing
 - `debug`: (optional) If set to `true`, adds a comment to the sub-issue with the full prompt used for generation
 - `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
@@ -351,7 +365,14 @@ Any URLs mentioned in the workplan will be extracted and preserved in a Referenc
 
 **Output**:
 
-- A confirmation message that the judgement task has been initiated
+- JSON string containing:
+  - `message`: Confirmation that the judgement task has been initiated
+  - `subissue_url`: URL to the created placeholder sub-issue where results will be posted
+  - `subissue_number`: The GitHub issue number of the placeholder sub-issue
+
+**Labels**:
+
+The created sub-issue is labeled with `yellhorn-judgement-subissue` for easy identification and filtering.
 
 ## MCP Resources
 
