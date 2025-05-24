@@ -1660,7 +1660,7 @@ async def test_async_generate_content_with_config_error_handling(mock_genai_clie
     with pytest.raises(YellhornMCPError, match="does not support aio.models.generate_content"):
         await async_generate_content_with_config(invalid_client, "test-model", "test prompt")
 
-    # Test successful call
+    # Test successful call without generation_config
     mock_response = MagicMock()
     mock_genai_client.aio.models.generate_content.return_value = mock_response
 
@@ -1672,3 +1672,177 @@ async def test_async_generate_content_with_config_error_handling(mock_genai_clie
     mock_genai_client.aio.models.generate_content.assert_called_once_with(
         model="test-model", contents="test prompt"
     )
+
+
+@pytest.mark.asyncio
+async def test_async_generate_content_with_config_with_generation_config(mock_genai_client):
+    """Test async_generate_content_with_config with generation_config parameter."""
+    from yellhorn_mcp.server import async_generate_content_with_config
+
+    # Test successful call with generation_config
+    mock_response = MagicMock()
+    mock_genai_client.aio.models.generate_content.return_value = mock_response
+
+    mock_generation_config = MagicMock()
+
+    result = await async_generate_content_with_config(
+        mock_genai_client, "test-model", "test prompt", generation_config=mock_generation_config
+    )
+
+    assert result == mock_response
+    mock_genai_client.aio.models.generate_content.assert_called_once_with(
+        model="test-model", contents="test prompt", config=mock_generation_config
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_workplan_async_search_grounding_enabled(
+    mock_request_context, mock_genai_client
+):
+    """Test process_workplan_async with search grounding enabled and verify generation_config is passed."""
+    # Set the mock client in the context
+    mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["openai_client"] = None
+    mock_request_context.request_context.lifespan_context["use_search_grounding"] = True
+
+    with (
+        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+        patch("yellhorn_mcp.server.async_generate_content_with_config") as mock_generate,
+        patch("yellhorn_mcp.server._get_gemini_search_tools") as mock_get_tools,
+        patch("yellhorn_mcp.server.citations_to_markdown") as mock_citations,
+    ):
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+        mock_format_metrics.return_value = (
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+        )
+
+        # Mock search tools
+        mock_search_tools = [MagicMock()]
+        mock_get_tools.return_value = mock_search_tools
+
+        # Mock response with grounding metadata
+        mock_response = MagicMock()
+        mock_response.text = "Generated workplan content"
+        mock_response.usage_metadata = {
+            "prompt_token_count": 1000,
+            "candidates_token_count": 500,
+            "total_token_count": 1500,
+        }
+        mock_response.grounding_metadata = MagicMock()
+        mock_generate.return_value = mock_response
+
+        # Mock citations processing
+        mock_citations.return_value = "Generated workplan content with citations"
+
+        await process_workplan_async(
+            Path("/mock/repo"),
+            mock_genai_client,
+            None,  # No OpenAI client
+            "gemini-2.5-pro-preview-05-06",
+            "Feature Implementation Plan",
+            "123",
+            mock_request_context,
+            detailed_description="Create a new feature to support X",
+        )
+
+        # Verify that _get_gemini_search_tools was called
+        mock_get_tools.assert_called_once_with("gemini-2.5-pro-preview-05-06")
+
+        # Verify that async_generate_content_with_config was called with generation_config
+        mock_generate.assert_called_once()
+        call_args = mock_generate.call_args
+        assert call_args[0][0] == mock_genai_client  # client
+        assert call_args[0][1] == "gemini-2.5-pro-preview-05-06"  # model
+        assert call_args[1]["generation_config"] is not None  # generation_config should be passed
+
+        # Verify citations processing was called
+        mock_citations.assert_called_once_with(
+            mock_response.grounding_metadata, "Generated workplan content"
+        )
+
+        # Verify the final content includes citations
+        mock_update.assert_called_once()
+        update_args = mock_update.call_args
+        update_content = update_args[0][2]
+        assert "Generated workplan content with citations" in update_content
+
+
+@pytest.mark.asyncio
+async def test_process_judgement_async_search_grounding_enabled(
+    mock_request_context, mock_genai_client
+):
+    """Test process_judgement_async with search grounding enabled and verify generation_config is passed."""
+    from yellhorn_mcp.server import process_judgement_async
+
+    # Mock the response with grounding metadata
+    mock_response = MagicMock()
+    mock_response.text = "## Judgement Summary\nImplementation looks good."
+    mock_response.usage_metadata = MagicMock()
+    mock_response.usage_metadata.prompt_token_count = 1000
+    mock_response.usage_metadata.candidates_token_count = 500
+    mock_response.usage_metadata.total_token_count = 1500
+    mock_response.grounding_metadata = MagicMock()
+
+    with (
+        patch("yellhorn_mcp.server.async_generate_content_with_config") as mock_generate,
+        patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.server._get_gemini_search_tools") as mock_get_tools,
+        patch("yellhorn_mcp.server.citations_to_markdown") as mock_citations,
+    ):
+        mock_generate.return_value = mock_response
+
+        # Mock search tools
+        mock_search_tools = [MagicMock()]
+        mock_get_tools.return_value = mock_search_tools
+
+        # Mock citations processing
+        mock_citations.return_value = (
+            "## Judgement Summary\nImplementation looks good.\n\n## Citations\n[1] Example citation"
+        )
+
+        # Set context for search grounding enabled
+        mock_request_context.request_context.lifespan_context["use_search_grounding"] = True
+
+        await process_judgement_async(
+            repo_path=Path("/test/repo"),
+            gemini_client=mock_genai_client,
+            openai_client=None,
+            model="gemini-2.5-pro-preview-05-06",
+            workplan_content="# Workplan\n1. Do something",
+            diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
+            base_ref="main",
+            head_ref="HEAD",
+            subissue_to_update="789",
+            parent_workplan_issue_number="123",
+            ctx=mock_request_context,
+            base_commit_hash="abc1234",
+            head_commit_hash="def5678",
+            debug=False,
+            codebase_reasoning="full",
+        )
+
+        # Verify that _get_gemini_search_tools was called
+        mock_get_tools.assert_called_once_with("gemini-2.5-pro-preview-05-06")
+
+        # Verify that async_generate_content_with_config was called with generation_config
+        mock_generate.assert_called_once()
+        call_args = mock_generate.call_args
+        assert call_args[0][0] == mock_genai_client  # client
+        assert call_args[0][1] == "gemini-2.5-pro-preview-05-06"  # model
+        assert call_args[1]["generation_config"] is not None  # generation_config should be passed
+
+        # Verify citations processing was called
+        mock_citations.assert_called_once_with(
+            mock_response.grounding_metadata, "## Judgement Summary\nImplementation looks good."
+        )
+
+        # Verify update_github_issue was called with citations
+        mock_update_issue.assert_called_once()
+        call_args = mock_update_issue.call_args
+        body = call_args[0][2]
+        assert "## Citations" in body
+        assert "Example citation" in body

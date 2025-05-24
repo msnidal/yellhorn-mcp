@@ -76,9 +76,13 @@ async def async_generate_content_with_config(
     ):
         raise YellhornMCPError("Gemini client does not support aio.models.generate_content.")
 
-    # For Gemini AsyncModels, generation_config is not supported as a parameter
-    # We'll ignore it for now and use the default configuration
-    return await client.aio.models.generate_content(model=model_name, contents=prompt)
+    # Call Gemini API with optional generation_config
+    if generation_config is not None:
+        return await client.aio.models.generate_content(
+            model=model_name, contents=prompt, config=generation_config
+        )
+    else:
+        return await client.aio.models.generate_content(model=model_name, contents=prompt)
 
 
 # Pricing configuration for models (USD per 1M tokens)
@@ -1026,7 +1030,8 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                     if search_tools:
                         gen_config = GenerateContentConfig(tools=search_tools)
                         await ctx.log(
-                            level="info", message=f"Search tools configured for model {model}"
+                            level="info",
+                            message=f"Search tools configured for model {model}: {search_tools}",
                         )
                     else:
                         await ctx.log(
