@@ -35,7 +35,7 @@ def test_cli_missing_gemini_api_key():
     ):
         # Set up the args returned by parse_args
         args = MagicMock()
-        args.model = "gemini-2.5-pro-preview-03-25"
+        args.model = "gemini-2.5-pro-preview-05-06"
         args.repo_path = "/mock/repo"
         args.host = "127.0.0.1"
         args.port = 8000
@@ -99,7 +99,7 @@ def test_main_invalid_repo_path():
     ):
         # Set up the args returned by parse_args
         args = MagicMock()
-        args.model = "gemini-2.5-pro-preview-03-25"
+        args.model = "gemini-2.5-pro-preview-05-06"
         args.repo_path = "/nonexistent/path"
         args.host = "127.0.0.1"
         args.port = 8000
@@ -133,7 +133,7 @@ def test_main_not_git_repo():
     ):
         # Set up the args returned by parse_args
         args = MagicMock()
-        args.model = "gemini-2.5-pro-preview-03-25"
+        args.model = "gemini-2.5-pro-preview-05-06"
         args.repo_path = "/mock/path"
         args.host = "127.0.0.1"
         args.port = 8000

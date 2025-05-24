@@ -28,8 +28,8 @@ The server requires the following environment variables:
 - `GEMINI_API_KEY` (required for Gemini models): Your Gemini API key
 - `OPENAI_API_KEY` (required for OpenAI models): Your OpenAI API key
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
-- `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro-preview-03-25"). Available options:
-  - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
+- `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro-preview-05-06"). Available options:
+  - Gemini models: "gemini-2.5-pro-preview-05-06", "gemini-2.5-flash-preview-05-20"
   - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
 - `YELLHORN_MCP_SEARCH` (optional): Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
@@ -100,12 +100,14 @@ Both files use the same pattern syntax as `.gitignore`:
 - Patterns starting with `!` are whitelist patterns (exceptions to ignores)
 
 **Blacklist and Whitelist Processing:**
+
 - Standard patterns (without `!`) will ignore matching files
 - Patterns starting with `!` will whitelist matching files, even if they match an ignore pattern
 - Whitelist patterns are checked first, so they take precedence over blacklist patterns
 - This allows you to have broad blacklist patterns with specific exceptions
 
 **Priority Order:**
+
 1. `.yellhorncontext` (if it exists) is used first
 2. `.yellhornignore` (if `.yellhorncontext` doesn't exist) is used as fallback
 3. `.gitignore` (already respected by Git commands used to list files)
@@ -139,7 +141,7 @@ gh auth login
 # Set environment variables for Gemini models
 export GEMINI_API_KEY=your_gemini_api_key_here
 export REPO_PATH=/path/to/your/repo
-export YELLHORN_MCP_MODEL=gemini-2.5-pro-preview-03-25
+export YELLHORN_MCP_MODEL=gemini-2.5-pro-preview-05-06
 
 # OR for OpenAI models
 export OPENAI_API_KEY=your_openai_api_key_here
@@ -274,7 +276,6 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 
 If AI enhancement fails when using `codebase_reasoning="full"`, a comment will be added to the issue with the error details, but the original issue body with title and description will be preserved.
 
-
 ### get_workplan
 
 Retrieves the workplan content (GitHub issue body) associated with a specified GitHub issue.
@@ -333,6 +334,7 @@ Please create a .yellhorncontext file optimized for "implementing a user authent
 ```
 
 This will analyze your codebase with your specific task in mind, creating a .yellhorncontext file that:
+
 1. Preserves existing filtering from .yellhornignore (if it exists)
 2. Identifies the most important directories relevant to authentication and JWT tokens
 3. Creates explicit whitelist rules for those directories
@@ -642,7 +644,7 @@ The LSP mode extracts the following Go language constructs:
 
 - **Function signatures** with parameter types and return types
 - **Struct definitions** with field names and types
-- **Interface definitions** 
+- **Interface definitions**
 - **Type definitions** (e.g., type aliases)
 - **Receiver methods** with support for pointer receivers and generics
 

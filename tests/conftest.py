@@ -19,7 +19,7 @@ def mock_request_context():
         "repo_path": Path("/mock/repo"),
         "gemini_client": MagicMock(spec=genai.Client),
         "openai_client": None,
-        "model": "gemini-2.5-pro-preview-03-25",
+        "model": "gemini-2.5-pro-preview-05-06",
     }
     return mock_ctx
 

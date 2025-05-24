@@ -35,9 +35,9 @@ def main():
     parser.add_argument(
         "--model",
         dest="model",
-        default=os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25"),
-        help="Model to use (e.g., gemini-2.5-pro-preview-03-25, gemini-2.5-flash-preview-04-17, "
-        "gpt-4o, gpt-4o-mini, o4-mini, o3). Default: gemini-2.5-pro-preview-03-25 or YELLHORN_MCP_MODEL env var.",
+        default=os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-05-06"),
+        help="Model to use (e.g., gemini-2.5-pro-preview-05-06, gemini-2.5-flash-preview-05-20, "
+        "gpt-4o, gpt-4o-mini, o4-mini, o3). Default: gemini-2.5-pro-preview-05-06 or YELLHORN_MCP_MODEL env var.",
     )
 
     parser.add_argument(
