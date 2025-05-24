@@ -9,7 +9,7 @@ from mcp import Resource
 from pydantic import FileUrl
 
 from tests.helpers import DummyContext
-from yellhorn_mcp.server import YellhornMCPError, list_resources, read_resource
+from yellhorn_mcp.git_utils import YellhornMCPError, list_resources, read_resource
 
 
 @pytest.mark.asyncio
@@ -22,11 +22,11 @@ async def test_list_resources_exception_handling():
     mock_ctx.log = AsyncMock()
 
     # Test with exception during GitHub command
-    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh:
         mock_gh.side_effect = YellhornMCPError("GitHub command failed")
 
         # Should return empty list without raising exception
-        resources = await list_resources(None, mock_ctx, None)
+        resources = await list_resources(mock_ctx, None)
 
         assert resources == []
         mock_ctx.log.assert_called_once()
@@ -44,12 +44,12 @@ async def test_list_resources_malformed_json():
     mock_ctx.log = AsyncMock()
 
     # Test with malformed JSON response
-    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh:
         # Return malformed JSON
         mock_gh.return_value = "{ this is not valid JSON"
 
         # Should return empty list without raising exception
-        resources = await list_resources(None, mock_ctx, None)
+        resources = await list_resources(mock_ctx, None)
 
         assert resources == []
         mock_ctx.log.assert_called_once()
@@ -66,12 +66,12 @@ async def test_read_resource_failure():
     mock_ctx.request_context.lifespan_context = {"repo_path": Path("/mock/repo")}
 
     # Test with get_github_issue_body failure
-    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+    with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
         mock_get_issue.side_effect = YellhornMCPError("Failed to get GitHub issue")
 
         # Should raise ValueError
         with pytest.raises(ValueError, match="Failed to get resource"):
-            await read_resource(None, mock_ctx, "123", "yellhorn_workplan")
+            await read_resource(mock_ctx, "123", "yellhorn_workplan")
 
 
 @pytest.mark.asyncio
@@ -83,10 +83,10 @@ async def test_read_resource_nonexistent():
     mock_ctx.request_context.lifespan_context = {"repo_path": Path("/mock/repo")}
 
     # Test with nonexistent issue
-    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+    with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
         # Simulate GitHub API returning empty result
         mock_get_issue.return_value = ""
 
         # Should return empty string
-        result = await read_resource(None, mock_ctx, "999", "yellhorn_workplan")
+        result = await read_resource(mock_ctx, "999", "yellhorn_workplan")
         assert result == ""

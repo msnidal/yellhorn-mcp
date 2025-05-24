@@ -318,12 +318,19 @@ async def test_integration_process_workplan_lsp_mode():
         "candidates_token_count": 500,
         "total_token_count": 1500,
     }
+
+    # Set up both old and new API patterns for backward compatibility with tests
     gemini_client.aio.models.generate_content = AsyncMock(return_value=response)
+    gemini_client.aio.generate_content = AsyncMock(return_value=response)
+
     model = "mock-model"
     title = "Test Workplan"
     issue_number = "123"
     ctx = MagicMock()
-    ctx.request_context.lifespan_context = {"codebase_reasoning": "lsp"}
+    ctx.request_context.lifespan_context = {
+        "codebase_reasoning": "lsp",
+        "use_search_grounding": False,  # Disable search grounding for test
+    }
     ctx.log = AsyncMock()
     detailed_description = "Test description"
 
@@ -354,8 +361,15 @@ async def test_integration_process_workplan_lsp_mode():
                     mock_lsp_snapshot.assert_called_once_with(repo_path)
 
                     # Verify formatted snapshot was passed to the prompt
-                    prompt = gemini_client.aio.models.generate_content.call_args[1]["contents"]
-                    assert "<formatted LSP snapshot>" in prompt
+                    # The prompt might be in either the old or new API call
+                    if gemini_client.aio.models.generate_content.called:
+                        prompt = gemini_client.aio.models.generate_content.call_args[1]["contents"]
+                        assert "<formatted LSP snapshot>" in prompt
+                    elif gemini_client.aio.generate_content.called:
+                        prompt = gemini_client.aio.generate_content.call_args[1]["contents"]
+                        assert "<formatted LSP snapshot>" in prompt
+                    else:
+                        assert False, "Neither generate_content method was called"
 
                     # Verify GitHub issue was updated
                     mock_update.assert_called_once()
@@ -380,7 +394,11 @@ async def test_integration_process_judgement_lsp_mode():
         "candidates_token_count": 500,
         "total_token_count": 1500,
     }
+
+    # Set up both old and new API patterns for backward compatibility with tests
     gemini_client.aio.models.generate_content = AsyncMock(return_value=response)
+    gemini_client.aio.generate_content = AsyncMock(return_value=response)
+
     model = "mock-model"
     workplan = "Mock workplan"
     diff = "Mock diff"
@@ -388,7 +406,10 @@ async def test_integration_process_judgement_lsp_mode():
     head_ref = "feature"
     issue_number = "123"
     ctx = MagicMock()
-    ctx.request_context.lifespan_context = {"codebase_reasoning": "lsp"}
+    ctx.request_context.lifespan_context = {
+        "codebase_reasoning": "lsp",
+        "use_search_grounding": False,  # Disable search grounding for test
+    }
     ctx.log = AsyncMock()
 
     # Patch necessary functions

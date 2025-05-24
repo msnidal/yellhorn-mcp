@@ -32,6 +32,64 @@ from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import FileUrl
 
+from yellhorn_mcp.git_utils import (
+    YellhornMCPError,
+    add_github_issue_comment,
+    create_github_subissue,
+    ensure_label_exists,
+    get_default_branch,
+    get_git_diff,
+    get_github_issue_body,
+    get_github_pr_diff,
+    is_git_repository,
+    post_github_pr_review,
+    run_git_command,
+    run_github_command,
+    update_github_issue,
+)
+from yellhorn_mcp.search_grounding import attach_search, citations_to_markdown
+
+
+async def async_generate_content_with_tools(client, model, prompt, request_model=None):
+    """Helper function to call generate_content with proper tool handling for async API.
+
+    The async API doesn't support the tools parameter directly,
+    so we need to use generation_config parameter instead.
+
+    Args:
+        client: The Gemini client instance.
+        model: The model name.
+        prompt: The prompt content.
+        request_model: Optional model instance that may have tools attached.
+
+    Returns:
+        The response from the Gemini API.
+    """
+    # Check if we can use the direct method first
+    if hasattr(client, "aio") and hasattr(client.aio, "generate_content"):
+        # Use direct async method if available (newer SDK versions)
+        return await client.aio.generate_content(contents=prompt)
+    else:
+        # Otherwise use the models interface
+        # The async API uses generation_config parameter instead of tools
+        tools = getattr(request_model, "tools", None) if request_model else None
+
+        if tools:
+            # Import necessary generation config types if tools are being used
+            try:
+                from google.genai.types import GenerateContentConfig
+
+                config = GenerateContentConfig(tools=tools)
+                return await client.aio.models.generate_content(
+                    model=model, contents=prompt, generation_config=config
+                )
+            except ImportError:
+                # Fall back to no tools if types aren't available
+                return await client.aio.models.generate_content(model=model, contents=prompt)
+        else:
+            return await client.aio.models.generate_content(model=model, contents=prompt)
+
+
 # Pricing configuration for models (USD per 1M tokens)
 MODEL_PRICING = {
     # Gemini models
@@ -143,10 +201,6 @@ def format_metrics_section(model: str, usage_metadata: Any) -> str:
 *   **Estimated Cost**: {cost_str}"""
 
 
-class YellhornMCPError(Exception):
-    """Custom exception for Yellhorn MCP server."""
-
-
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     """
@@ -166,9 +220,15 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-03-25")
     is_openai_model = model.startswith("gpt-") or model.startswith("o")
 
+    # Handle search grounding configuration (default to enabled for Gemini models only)
+    use_search_grounding = False
+    if not is_openai_model:  # Only enable search grounding for Gemini models
+        use_search_grounding = os.getenv("YELLHORN_MCP_SEARCH", "on").lower() != "off"
+
     # Initialize clients based on the model type
     gemini_client = None
     openai_client = None
+    gemini_model = None
 
     # For Gemini models, require Gemini API key
     if not is_openai_model:
@@ -177,6 +237,9 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             raise ValueError("GEMINI_API_KEY is required for Gemini models")
         # Configure Gemini API
         gemini_client = genai.Client(api_key=gemini_api_key)
+
+        # We don't create and store a global model anymore to avoid concurrency issues
+        # Each request will create its own model instance as needed
     # For OpenAI models, require OpenAI API key
     else:
         openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -205,6 +268,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             "gemini_client": gemini_client,
             "openai_client": openai_client,
             "model": model,
+            "use_search_grounding": use_search_grounding,
+            "gemini_model": gemini_model,
         }
     finally:
         pass
@@ -218,7 +283,7 @@ mcp = FastMCP(
 )
 
 
-async def list_resources(self, ctx: Context, resource_type: str | None = None) -> list[Resource]:
+async def list_resources(ctx: Context, resource_type: str | None = None) -> list[Resource]:
     """
     List resources (GitHub issues created by this tool).
 
@@ -295,9 +360,7 @@ async def list_resources(self, ctx: Context, resource_type: str | None = None) -
         return []
 
 
-async def read_resource(
-    self, ctx: Context, resource_id: str, resource_type: str | None = None
-) -> str:
+async def read_resource(ctx: Context, resource_id: str, resource_type: str | None = None) -> str:
     """
     Get the content of a resource (GitHub issue).
 
@@ -325,42 +388,180 @@ async def read_resource(
         raise ValueError(f"Failed to get resource: {str(e)}")
 
 
-# Register resource methods
-mcp.list_resources = list_resources.__get__(mcp)
-mcp.read_resource = read_resource.__get__(mcp)
-
-
-async def run_git_command(repo_path: Path, command: list[str]) -> str:
+@mcp.tool(
+    name="create_workplan",
+    description="Creates a GitHub issue with a detailed implementation plan. Optionally, use codebase_reasoning='none' to skip AI-generated workplan enhancement.",
+)
+async def create_workplan(
+    ctx: Context,
+    title: str,
+    detailed_description: str,
+    codebase_reasoning: str = "full",
+    debug: bool = False,
+    disable_search_grounding: bool = False,
+) -> str:
     """
-    Run a Git command in the repository.
+    Create a GitHub issue with implementation plan for a task.
+
+    This function creates a new GitHub issue with the given title and description.
+    Depending on the codebase_reasoning mode, it can also enhance the description with
+    an AI-generated implementation plan based on analysis of the codebase structure.
 
     Args:
-        repo_path: Path to the repository.
-        command: Git command to run.
+        ctx: The request context.
+        title: The title for the GitHub issue.
+        detailed_description: Detailed description of the task.
+        codebase_reasoning: Controls how much codebase context is provided to the AI:
+            - "full": (default) Full codebase analysis with file contents
+            - "lsp": LSP-style function/class signature analysis (faster, more focused)
+            - "file_structure": Only directory/file structure analysis (faster)
+            - "none": Skip AI enhancement completely (fastest)
+        debug: If True, adds a comment to the issue with the full prompt used for generation.
+               Useful for debugging and improving prompt engineering.
+        disable_search_grounding: If True, disables Google Search Grounding for this request.
+               Default is False (search grounding enabled) for Gemini models.
 
     Returns:
-        Command output as string.
+        A JSON string with the GitHub issue URL and issue number.
 
     Raises:
-        YellhornMCPError: If the command fails.
+        YellhornMCPError: If any GitHub operation fails.
     """
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=repo_path,
+        repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+
+        # Handle search grounding override if specified
+        original_search_grounding = ctx.request_context.lifespan_context.get(
+            "use_search_grounding", True
         )
-        stdout, stderr = await proc.communicate()
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = False
+            await ctx.log(
+                level="info",
+                message="Search grounding disabled for workplan creation per request parameter.",
+            )
 
-        if proc.returncode != 0:
-            error_msg = stderr.decode("utf-8").strip()
-            raise YellhornMCPError(f"Git command failed: {error_msg}")
+        # Ensure we have the required label
+        await ensure_label_exists(repo_path, "yellhorn-mcp", "Issues created by yellhorn-mcp")
 
-        return stdout.decode("utf-8").strip()
-    except FileNotFoundError:
-        raise YellhornMCPError("Git executable not found. Please ensure Git is installed.")
+        # Prepare initial issue body
+        if codebase_reasoning == "none":
+            # Simple issue without AI enhancement
+            issue_body = f"# {title}\n\n## Description\n\n{detailed_description}"
+        else:
+            # Create initial issue with placeholder for AI enhancement
+            issue_body = f"""# {title}
+
+## Description
+
+{detailed_description}
+
+## Implementation Plan
+
+🔄 Generating detailed workplan with AI analysis of the codebase...
+
+This workplan will be updated asynchronously with a comprehensive implementation plan.
+"""
+
+        # Log what we're going to do
+        await ctx.log(
+            level="info",
+            message=f"Creating GitHub issue for '{title}' with {codebase_reasoning} codebase reasoning",
+        )
+
+        # Create the GitHub issue
+        result = await run_github_command(
+            repo_path,
+            [
+                "issue",
+                "create",
+                "--title",
+                title,
+                "--body",
+                issue_body,
+                "--label",
+                "yellhorn-mcp",
+            ],
+        )
+
+        # Extract issue URL and number from the result
+        import re
+
+        url_match = re.search(r"(https://github\.com/[^\s]+)", result)
+        if not url_match:
+            raise YellhornMCPError(f"Failed to extract issue URL from result: {result}")
+
+        issue_url = url_match.group(1)
+        issue_number = issue_url.split("/")[-1]
+
+        # Start async task to process workplan with AI if codebase_reasoning != "none"
+        if codebase_reasoning != "none":
+            # Get clients from context
+            gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
+            openai_client = ctx.request_context.lifespan_context.get("openai_client")
+            model = ctx.request_context.lifespan_context["model"]
+
+            # Store codebase_reasoning in context for process_workplan_async
+            ctx.request_context.lifespan_context["codebase_reasoning"] = codebase_reasoning
+
+            # Launch background task to process the workplan with AI
+            import asyncio
+
+            asyncio.create_task(
+                process_workplan_async(
+                    repo_path,
+                    gemini_client,
+                    openai_client,
+                    model,
+                    title,
+                    issue_number,
+                    ctx,
+                    detailed_description,
+                    debug=debug,
+                    _meta={"original_search_grounding": original_search_grounding},
+                )
+            )
+
+            # Log that we've started the async task
+            await ctx.log(
+                level="info",
+                message=f"Started asynchronous workplan generation for issue #{issue_number}",
+            )
+
+        # Restore original search grounding setting if modified
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
+
+        # Return the issue URL and number as JSON
+        return json.dumps({"issue_url": issue_url, "issue_number": issue_number})
+
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to create workplan: {str(e)}")
+
+
+@mcp.tool(
+    name="get_workplan",
+    description="Retrieves the workplan content (GitHub issue body) associated with a specified issue number.",
+)
+async def get_workplan(ctx: Context, issue_number: str) -> str:
+    """
+    Get the workplan content from a GitHub issue.
+
+    Args:
+        ctx: Server context.
+        issue_number: The GitHub issue number containing the workplan.
+
+    Returns:
+        The workplan content (GitHub issue body) as a string.
+
+    Raises:
+        YellhornMCPError: If the workplan cannot be retrieved.
+    """
+    try:
+        repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+        return await get_github_issue_body(repo_path, issue_number)
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to retrieve workplan: {str(e)}")
 
 
 async def get_codebase_snapshot(
@@ -611,190 +812,6 @@ async def format_codebase_for_prompt(file_paths: List[str], file_contents: Dict[
 </codebase_tree>"""
 
 
-async def run_github_command(repo_path: Path, command: list[str]) -> str:
-    """
-    Run a GitHub CLI command in the repository.
-
-    Args:
-        repo_path: Path to the repository.
-        command: GitHub CLI command to run.
-
-    Returns:
-        Command output as string.
-
-    Raises:
-        YellhornMCPError: If the command fails.
-    """
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "gh",
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=repo_path,
-        )
-        stdout, stderr = await proc.communicate()
-
-        if proc.returncode != 0:
-            error_msg = stderr.decode("utf-8").strip()
-            raise YellhornMCPError(f"GitHub CLI command failed: {error_msg}")
-
-        return stdout.decode("utf-8").strip()
-    except FileNotFoundError:
-        raise YellhornMCPError(
-            "GitHub CLI not found. Please ensure 'gh' is installed and authenticated."
-        )
-
-
-async def ensure_label_exists(repo_path: Path, label: str, description: str = "") -> None:
-    """
-    Ensure a GitHub label exists, creating it if necessary.
-
-    Args:
-        repo_path: Path to the repository.
-        label: Name of the label to create or ensure exists.
-        description: Optional description for the label.
-
-    Raises:
-        YellhornMCPError: If there's an error creating the label.
-    """
-    try:
-        command = ["label", "create", label, "-f"]
-        if description:
-            command.extend(["--description", description])
-
-        await run_github_command(repo_path, command)
-    except Exception as e:
-        # Don't fail the main operation if label creation fails
-        # Just log the error and continue
-        print(f"Warning: Failed to create label '{label}': {str(e)}")
-        # This is non-critical, so we don't raise an exception
-
-
-async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str) -> None:
-    """
-    Adds a comment to a specific GitHub issue.
-
-    Args:
-        repo_path: Path to the repository.
-        issue_number: The issue number to comment on.
-        body: The comment content to add.
-
-    Raises:
-        YellhornMCPError: If there's an error adding the comment.
-    """
-    import tempfile
-
-    try:
-        # Create a temporary file to hold the comment body
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".md", delete=False, encoding="utf-8"
-        ) as temp:
-            temp.write(body)
-            temp_file = Path(temp.name)
-
-        try:
-            # Add the comment using the temp file
-            await run_github_command(
-                repo_path, ["issue", "comment", issue_number, "--body-file", str(temp_file)]
-            )
-        finally:
-            # Clean up the temp file
-            if temp_file.exists():
-                temp_file.unlink()
-    except Exception as e:
-        raise YellhornMCPError(f"Failed to add comment to GitHub issue: {str(e)}")
-
-
-async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> None:
-    """
-    Update a GitHub issue with new content.
-
-    Args:
-        repo_path: Path to the repository.
-        issue_number: The issue number to update.
-        body: The new body content for the issue.
-
-    Raises:
-        YellhornMCPError: If there's an error updating the issue.
-    """
-    import tempfile
-
-    try:
-        # Create a temporary file to hold the issue body
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".md", delete=False, encoding="utf-8"
-        ) as temp:
-            temp.write(body)
-            temp_file = Path(temp.name)
-
-        try:
-            # Update the issue using the temp file
-            await run_github_command(
-                repo_path, ["issue", "edit", issue_number, "--body-file", str(temp_file)]
-            )
-        finally:
-            # Clean up the temp file
-            if temp_file.exists():
-                temp_file.unlink()
-    except Exception as e:
-        raise YellhornMCPError(f"Failed to update GitHub issue: {str(e)}")
-
-
-async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
-    """
-    Get the body content of a GitHub issue or PR.
-
-    Args:
-        repo_path: Path to the repository.
-        issue_identifier: Either a URL of the GitHub issue/PR or just the issue number.
-
-    Returns:
-        The body content of the issue or PR.
-
-    Raises:
-        YellhornMCPError: If there's an error fetching the issue or PR.
-    """
-    try:
-        # Determine if it's a URL or just an issue number
-        if issue_identifier.startswith("http"):
-            # It's a URL, extract the number and determine if it's an issue or PR
-            issue_number = issue_identifier.split("/")[-1]
-
-            if "/pull/" in issue_identifier:
-                # For pull requests
-                result = await run_github_command(
-                    repo_path, ["pr", "view", issue_number, "--json", "body"]
-                )
-                # Parse JSON response to extract the body
-                import json
-
-                pr_data = json.loads(result)
-                return pr_data.get("body", "")
-            else:
-                # For issues
-                result = await run_github_command(
-                    repo_path, ["issue", "view", issue_number, "--json", "body"]
-                )
-                # Parse JSON response to extract the body
-                import json
-
-                issue_data = json.loads(result)
-                return issue_data.get("body", "")
-        else:
-            # It's just an issue number
-            result = await run_github_command(
-                repo_path, ["issue", "view", issue_identifier, "--json", "body"]
-            )
-            # Parse JSON response to extract the body
-            import json
-
-            issue_data = json.loads(result)
-            return issue_data.get("body", "")
-    except Exception as e:
-        raise YellhornMCPError(f"Failed to fetch GitHub issue/PR content: {str(e)}")
-
-
 async def get_git_diff(
     repo_path: Path, base_ref: str, head_ref: str, codebase_reasoning: str = "full"
 ) -> str:
@@ -858,138 +875,6 @@ async def get_git_diff(
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to generate git diff: {str(e)}")
-
-
-async def get_github_pr_diff(repo_path: Path, pr_url: str) -> str:
-    """
-    Get the diff content of a GitHub PR.
-
-    Args:
-        repo_path: Path to the repository.
-        pr_url: URL of the GitHub PR.
-
-    Returns:
-        The diff content of the PR.
-
-    Raises:
-        YellhornMCPError: If there's an error fetching the PR diff.
-    """
-    try:
-        # Extract PR number from URL
-        pr_number = pr_url.split("/")[-1]
-
-        # Fetch PR diff using GitHub CLI
-        result = await run_github_command(repo_path, ["pr", "diff", pr_number])
-        return result
-    except Exception as e:
-        raise YellhornMCPError(f"Failed to fetch GitHub PR diff: {str(e)}")
-
-
-async def create_github_subissue(
-    repo_path: Path, parent_issue_number: str, title: str, body: str, labels: list[str]
-) -> str:
-    """
-    Create a GitHub sub-issue with reference to the parent issue.
-
-    Args:
-        repo_path: Path to the repository.
-        parent_issue_number: The parent issue number to reference.
-        title: The title for the sub-issue.
-        body: The body content for the sub-issue.
-        labels: List of labels to apply to the sub-issue.
-
-    Returns:
-        The URL of the created sub-issue.
-
-    Raises:
-        YellhornMCPError: If there's an error creating the sub-issue.
-    """
-    import tempfile
-
-    try:
-        # Ensure the yellhorn-judgement-subissue label exists
-        await ensure_label_exists(
-            repo_path, "yellhorn-judgement-subissue", "Judgement sub-issues created by yellhorn-mcp"
-        )
-
-        # Add the parent issue reference to the body
-        body_with_reference = f"Parent Workplan: #{parent_issue_number}\n\n{body}"
-
-        # Create a temporary file to hold the issue body
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".md", delete=False, encoding="utf-8"
-        ) as temp:
-            temp.write(body_with_reference)
-            temp_file = Path(temp.name)
-
-        try:
-            # Create the issue with all specified labels plus the judgement subissue label
-            all_labels = list(labels) + ["yellhorn-judgement-subissue"]
-            labels_arg = ",".join(all_labels)
-
-            # Create the issue using GitHub CLI
-            result = await run_github_command(
-                repo_path,
-                [
-                    "issue",
-                    "create",
-                    "--title",
-                    title,
-                    "--body-file",
-                    str(temp_file),
-                    "--label",
-                    labels_arg,
-                ],
-            )
-            return result  # Returns the issue URL
-        finally:
-            # Clean up the temp file
-            if temp_file.exists():
-                temp_file.unlink()
-    except Exception as e:
-        raise YellhornMCPError(f"Failed to create GitHub sub-issue: {str(e)}")
-
-
-async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: str) -> str:
-    """
-    Post a review comment on a GitHub PR.
-
-    Args:
-        repo_path: Path to the repository.
-        pr_url: URL of the GitHub PR.
-        review_content: The content of the review to post.
-
-    Returns:
-        The URL of the posted review.
-
-    Raises:
-        YellhornMCPError: If there's an error posting the review.
-    """
-    import tempfile
-
-    try:
-        # Extract PR number from URL
-        pr_number = pr_url.split("/")[-1]
-
-        # Create a temporary file to hold the review content
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".md", delete=False, encoding="utf-8"
-        ) as temp:
-            temp.write(review_content)
-            temp_file = Path(temp.name)
-
-        try:
-            # Post the review using GitHub CLI
-            result = await run_github_command(
-                repo_path, ["pr", "review", pr_number, "--comment", "--body-file", str(temp_file)]
-            )
-            return f"Review posted successfully on PR {pr_url}"
-        finally:
-            # Clean up the temp file
-            if temp_file.exists():
-                temp_file.unlink()
-    except Exception as e:
-        raise YellhornMCPError(f"Failed to post GitHub PR review: {str(e)}")
 
 
 async def process_workplan_async(
@@ -1078,6 +963,7 @@ Your response will be published directly to a GitHub issue without modification,
 - Code blocks with appropriate language syntax highlighting
 - Checkboxes for action items that can be marked as completed
 - Any relevant diagrams or explanations
+- Extract any URLs from the detailed description and include them in a "## References" section at the end
 
 ## Instructions for Workplan Structure
 
@@ -1097,6 +983,8 @@ Your response will be published directly to a GitHub issue without modification,
    - The specific code changes using formatted code blocks with syntax highlighting
    - Explanations of WHY each change is needed, not just WHAT to change
    - Detailed context that would help a less-experienced developer or LLM understand the change
+
+4. If any URLs are provided in the detailed description, extract them and include a "## References" section at the end (before metrics) with those URLs as a numbered or bulleted list.
 
 The workplan should be comprehensive enough that a developer or AI assistant could implement it without additional context, and structured in a way that makes it easy for an LLM to quickly understand and work with the contained information.
 
@@ -1135,8 +1023,23 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 message=f"Generating workplan with Gemini API for title: {title} with model {model}",
             )
 
-            # Call Gemini API
-            response = await gemini_client.aio.models.generate_content(model=model, contents=prompt)
+            # Get the use_search_grounding flag from context
+            use_search_grounding = ctx.request_context.lifespan_context.get(
+                "use_search_grounding", True
+            )
+
+            # Import necessary function to create model
+            from yellhorn_mcp.search_grounding import create_model_for_request
+
+            # Create a model specifically for this request based on search flag
+            # Always create a new model instance to avoid concurrency issues
+            request_model = create_model_for_request(gemini_client, model, use_search_grounding)
+
+            # Use the helper function for API compatibility
+            response = await async_generate_content_with_tools(
+                gemini_client, model, prompt, request_model
+            )
+
             workplan_content = response.text
 
             # Capture usage metadata
@@ -1156,11 +1059,23 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             await add_github_issue_comment(repo_path, issue_number, error_message_comment)
             return
 
+        # Extract citations from Gemini response if available
+        citations_section = ""
+        if not is_openai_model and hasattr(response, "citations"):
+            citations = getattr(response, "citations", [])
+            if citations:
+                # Use the updated citations_to_markdown with content to add markers
+                citations_section = citations_to_markdown(citations, workplan_content)
+                # If content was modified with citation markers, update the workplan_content
+                if workplan_content in citations_section:
+                    workplan_content = citations_section
+                    citations_section = ""
+
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
 
-        # Add the title as header and append metrics to the final body
-        full_body = f"# {title}\n\n{workplan_content}{metrics_section}"
+        # Add the title as header and append citations and metrics to the final body
+        full_body = f"# {title}\n\n{workplan_content}{citations_section}{metrics_section}"
 
         # Update the GitHub issue with the generated workplan and metrics
         await update_github_issue(repo_path, issue_number, full_body)
@@ -1199,240 +1114,6 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 level="error",
                 message=f"Additionally failed to add error comment to issue #{issue_number}: {str(comment_error)}",
             )
-
-
-async def get_default_branch(repo_path: Path) -> str:
-    """
-    Determine the default branch name of the repository.
-
-    Args:
-        repo_path: Path to the repository.
-
-    Returns:
-        The name of the default branch (e.g., 'main', 'master').
-
-    Raises:
-        YellhornMCPError: If unable to determine the default branch.
-    """
-    try:
-        # Try to get the default branch using git symbolic-ref
-        result = await run_git_command(repo_path, ["symbolic-ref", "refs/remotes/origin/HEAD"])
-        # The result is typically in the format "refs/remotes/origin/{branch_name}"
-        return result.split("/")[-1]
-    except YellhornMCPError:
-        # Fallback for repositories that don't have origin/HEAD configured
-        try:
-            # Check if main exists
-            await run_git_command(repo_path, ["rev-parse", "--verify", "main"])
-            return "main"
-        except YellhornMCPError:
-            try:
-                # Check if master exists
-                await run_git_command(repo_path, ["rev-parse", "--verify", "master"])
-                return "master"
-            except YellhornMCPError:
-                raise YellhornMCPError(
-                    "Unable to determine default branch. Please ensure the repository has a default branch."
-                )
-
-
-def is_git_repository(path: Path) -> bool:
-    """
-    Check if a path is a Git repository.
-
-    Args:
-        path: Path to check.
-
-    Returns:
-        True if the path is a Git repository, False otherwise.
-    """
-    git_path = path / ".git"
-
-    # Not a git repo if .git doesn't exist
-    if not git_path.exists():
-        return False
-
-    # Standard repository: .git is a directory
-    if git_path.is_dir():
-        return True
-
-    # Git worktree: .git is a file that contains a reference to the actual git directory
-    if git_path.is_file():
-        return True
-
-    return False
-
-
-@mcp.tool(
-    name="create_workplan",
-    description="Create a detailed workplan for implementing a task based on the current codebase. Creates a GitHub issue with customizable title and detailed description, labeled with 'yellhorn-mcp'. Control AI enhancement with the 'codebase_reasoning' parameter ('full', 'lsp', 'file_structure', or 'none'). Respects .yellhorncontext and .yellhornignore for file filtering. Set debug=True to see the full prompt.",
-)
-async def create_workplan(
-    title: str,
-    detailed_description: str,
-    ctx: Context,
-    codebase_reasoning: str = "full",
-    debug: bool = False,
-) -> str:
-    """
-    Create a workplan based on the provided title and detailed description.
-    Creates a GitHub issue and processes the workplan generation asynchronously.
-
-    Respects file filtering from:
-    - .yellhorncontext (if present, takes priority)
-    - .yellhornignore (used if .yellhorncontext is not present)
-
-    These files use gitignore-style syntax with blacklist and whitelist (!) patterns.
-
-    Args:
-        title: Title for the GitHub issue (will be used as issue title and header).
-        detailed_description: Detailed description for the workplan.
-        ctx: Server context with repository path and model.
-        codebase_reasoning: Control whether AI enhancement is performed:
-            - "full": (default) Use AI to enhance the workplan with full codebase context
-            - "lsp": Use AI with lighter codebase context (only function/method signatures)
-            - "file_structure": Use AI with only file structure information (no file contents)
-            - "none": Skip AI enhancement, use the provided description as-is
-        debug: If True, adds a comment to the issue with the full prompt used for generation.
-               Useful for debugging and improving prompt engineering.
-
-    Returns:
-        JSON string containing the GitHub issue URL.
-
-    Raises:
-        YellhornMCPError: If there's an error creating the workplan.
-    """
-    repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-    gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
-    openai_client = ctx.request_context.lifespan_context.get("openai_client")
-    model: str = ctx.request_context.lifespan_context["model"]
-
-    try:
-        # Ensure the yellhorn-mcp label exists
-        await ensure_label_exists(repo_path, "yellhorn-mcp", "Issues created by yellhorn-mcp")
-
-        # Prepare initial body based on reasoning mode
-        if codebase_reasoning == "none":
-            initial_body = f"# {title}\n\n## Description\n{detailed_description}"
-            await ctx.log(
-                level="info",
-                message="Skipping AI workplan enhancement as per codebase_reasoning='none'.",
-            )
-        elif codebase_reasoning == "full":
-            initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
-        elif codebase_reasoning == "lsp":
-            initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with lightweight codebase context (function signatures), please wait...*"
-        elif codebase_reasoning == "file_structure":
-            initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with file structure context (directory structure only), please wait...*"
-        else:
-            # If codebase_reasoning is not recognized, default to "full" with a log message
-            await ctx.log(
-                level="info",
-                message=f"Unrecognized codebase_reasoning value '{codebase_reasoning}', defaulting to 'full'.",
-            )
-            initial_body = f"# {title}\n\n## Description\n{detailed_description}\n\n*Generating detailed workplan using '{model}' with full codebase context, please wait...*"
-            codebase_reasoning = "full"  # Reset to full as the default
-
-        # Create a GitHub issue with the yellhorn-mcp label
-        issue_url = await run_github_command(
-            repo_path,
-            [
-                "issue",
-                "create",
-                "--title",
-                title,
-                "--body",
-                initial_body,
-                "--label",
-                "yellhorn-mcp",
-            ],
-        )
-
-        # Extract issue number and URL
-        await ctx.log(
-            level="info",
-            message=f"GitHub issue created: {issue_url}",
-        )
-        issue_number = issue_url.split("/")[-1]
-
-        # Only start async processing if AI enhancement is requested
-        if codebase_reasoning != "none":
-            await ctx.log(
-                level="info",
-                message=f"Initiating AI workplan enhancement for issue #{issue_number} with mode '{codebase_reasoning}'.",
-            )
-            # Store the codebase_reasoning mode in the context for process_workplan_async
-            ctx.request_context.lifespan_context["codebase_reasoning"] = codebase_reasoning
-            asyncio.create_task(
-                process_workplan_async(
-                    repo_path,
-                    gemini_client,
-                    openai_client,
-                    model,
-                    title,
-                    issue_number,
-                    ctx,
-                    detailed_description=detailed_description,
-                    debug=debug,
-                )
-            )
-        else:
-            await ctx.log(
-                level="info",
-                message=f"Created basic workplan issue #{issue_number} without AI enhancement.",
-            )
-
-        # Return the issue URL as JSON
-        result = {
-            "issue_url": issue_url,
-            "issue_number": issue_number,
-        }
-        return json.dumps(result)
-
-    except Exception as e:
-        raise YellhornMCPError(f"Failed to create GitHub issue: {str(e)}")
-
-
-@mcp.tool(
-    name="get_workplan",
-    description="Retrieves the workplan content (GitHub issue body) associated with a workplan.",
-)
-async def get_workplan(
-    ctx: Context,
-    issue_number: str,
-) -> str:
-    """
-    Retrieve the workplan content (GitHub issue body) associated with a workplan.
-
-    This tool fetches the content of a GitHub issue created by the 'generate_workplan' tool.
-    It retrieves the detailed implementation plan from the specified issue number.
-
-    Args:
-        ctx: Server context.
-        issue_number: The GitHub issue number for the workplan.
-
-    Returns:
-        The content of the workplan issue as a string.
-
-    Raises:
-        YellhornMCPError: If unable to fetch the issue content.
-    """
-    try:
-        # Get the repository path from context
-        repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-
-        await ctx.log(
-            level="info",
-            message=f"Fetching workplan for issue #{issue_number}.",
-        )
-
-        # Fetch the issue content
-        workplan = await get_github_issue_body(repo_path, issue_number)
-
-        return workplan
-
-    except Exception as e:
-        raise YellhornMCPError(f"Failed to retrieve workplan: {str(e)}")
 
 
 async def process_judgement_async(
@@ -1532,6 +1213,9 @@ Note any code quality issues, potential bugs, or suggest alternative approaches.
 ## Intentional Divergence Notes
 If the implementation intentionally deviates from the workplan for good reasons, explain those reasons.
 
+## References
+Extract any URLs mentioned in the workplan or that would be helpful for understanding the implementation and list them here. This ensures important links are preserved.
+
 IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
         is_openai_model = model.startswith("gpt-") or model.startswith("o")
@@ -1567,8 +1251,23 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 message=f"Generating judgement with Gemini API model {model}",
             )
 
-            # Call Gemini API
-            response = await gemini_client.aio.models.generate_content(model=model, contents=prompt)
+            # Get the use_search_grounding flag from context
+            use_search_grounding = ctx.request_context.lifespan_context.get(
+                "use_search_grounding", True
+            )
+
+            # Import necessary function to create model
+            from yellhorn_mcp.search_grounding import create_model_for_request
+
+            # Create a model specifically for this request based on search flag
+            # Always create a new model instance to avoid concurrency issues
+            request_model = create_model_for_request(gemini_client, model, use_search_grounding)
+
+            # The Gemini client has built-in async APIs
+            # Use the helper function for API compatibility
+            response = await async_generate_content_with_tools(
+                gemini_client, model, prompt, request_model
+            )
 
             # Extract judgement and usage metadata
             judgement_content = response.text
@@ -1577,6 +1276,18 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         if not judgement_content:
             api_name = "OpenAI" if is_openai_model else "Gemini"
             raise YellhornMCPError(f"Received an empty response from {api_name} API.")
+
+        # Extract citations from Gemini response if available
+        citations_section = ""
+        if not is_openai_model and hasattr(response, "citations"):
+            citations = getattr(response, "citations", [])
+            if citations:
+                # Use the updated citations_to_markdown with content to add markers
+                citations_section = citations_to_markdown(citations, judgement_content)
+                # If content was modified with citation markers, update the judgement_content
+                if judgement_content in citations_section:
+                    judgement_content = citations_section
+                    citations_section = ""
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
@@ -1595,8 +1306,10 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             head_hash_info = f" (`{head_commit_hash}`)" if head_commit_hash else ""
             metadata = f"## Comparison Metadata\n- Base ref: `{base_ref}`{base_hash_info}\n- Head ref: `{head_ref}`{head_hash_info}\n- Workplan: #{workplan_issue_number}\n\n"
 
-            # Combine metadata, judgement content and metrics
-            judgement_with_metadata_and_metrics = metadata + judgement_content + metrics_section
+            # Combine metadata, judgement content, citations and metrics
+            judgement_with_metadata_and_metrics = (
+                metadata + judgement_content + citations_section + metrics_section
+            )
 
             # Create a sub-issue
             await ctx.log(
@@ -1634,8 +1347,8 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             # Return both the judgement content and the sub-issue URL
             return f"Judgement sub-issue created: {subissue_url}\n\n{judgement_content}"
         else:
-            # For direct output, include metrics
-            return f"{judgement_content}{metrics_section}"
+            # For direct output, include citations and metrics
+            return f"{judgement_content}{citations_section}{metrics_section}"
 
     except Exception as e:
         error_message = f"Failed to generate judgement: {str(e)}"
@@ -1654,6 +1367,7 @@ async def curate_context(
     ignore_file_path: str = ".yellhornignore",
     output_path: str = ".yellhorncontext",
     depth_limit: int = 0,  # 0 means no limit
+    disable_search_grounding: bool = False,
 ) -> str:
     """
     Analyzes codebase and creates a .yellhorncontext file listing directories for AI context.
@@ -1671,6 +1385,8 @@ async def curate_context(
         ignore_file_path: Path to the .yellhornignore file to use. Defaults to ".yellhornignore".
         output_path: Path where the .yellhorncontext file will be created. Defaults to ".yellhorncontext".
         depth_limit: Maximum directory depth to analyze (0 means no limit).
+        disable_search_grounding: If True, disables Google Search Grounding for this request.
+            Default is False (search grounding enabled) for Gemini models.
 
     Returns:
         Success message with path to created .yellhorncontext file.
@@ -1684,6 +1400,17 @@ async def curate_context(
         gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
         openai_client = ctx.request_context.lifespan_context.get("openai_client")
         model: str = ctx.request_context.lifespan_context["model"]
+
+        # Handle search grounding override if specified
+        original_search_grounding = ctx.request_context.lifespan_context.get(
+            "use_search_grounding", True
+        )
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = False
+            await ctx.log(
+                level="info",
+                message="Search grounding disabled for context curation per request parameter.",
+            )
 
         await ctx.log(
             level="info",
@@ -1938,9 +1665,23 @@ Don't include explanations for your choices, just return the list in the specifi
                             "Gemini client not initialized. Is GEMINI_API_KEY set?"
                         )
 
-                    # Call Gemini API
-                    response = await gemini_client.aio.models.generate_content(
-                        model=model, contents=prompt
+                    # Get the use_search_grounding flag from context
+                    use_search_grounding = ctx.request_context.lifespan_context.get(
+                        "use_search_grounding", True
+                    )
+
+                    # Import create_model_for_request function
+                    from yellhorn_mcp.search_grounding import create_model_for_request
+
+                    # Create a model specifically for this request based on search flag
+                    # Always create a new model instance to avoid concurrency issues
+                    request_model = create_model_for_request(
+                        gemini_client, model, use_search_grounding
+                    )
+
+                    # Use the helper function for API compatibility
+                    response = await async_generate_content_with_tools(
+                        gemini_client, model, prompt, request_model
                     )
                     chunk_result = response.text
 
@@ -2153,6 +1894,12 @@ Don't include explanations for your choices, just return the list in the specifi
                 message=f"Generated .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories, blacklist and whitelist patterns",
             )
 
+            # Restore original search grounding setting if modified
+            if disable_search_grounding:
+                ctx.request_context.lifespan_context["use_search_grounding"] = (
+                    original_search_grounding
+                )
+
             # Return success message
             return f"Successfully created .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories and {'existing ignore patterns from .yellhornignore' if has_ignore_file else 'recommended blacklist patterns'}."
 
@@ -2167,7 +1914,7 @@ Don't include explanations for your choices, just return the list in the specifi
 
 @mcp.tool(
     name="judge_workplan",
-    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background). Control context with 'codebase_reasoning' ('full', 'lsp', 'file_structure', or 'none'). Respects .yellhorncontext and .yellhornignore for file filtering. Set debug=True to see the full prompt.",
+    description="Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a GitHub sub-issue with the judgement asynchronously after running (in the background). Control context with 'codebase_reasoning' ('full', 'lsp', 'file_structure', or 'none'). Respects .yellhorncontext and .yellhornignore for file filtering. Set debug=True to see the full prompt. Any URLs mentioned in the issue will be included as references in the judgement.",
 )
 async def judge_workplan(
     ctx: Context,
@@ -2176,6 +1923,7 @@ async def judge_workplan(
     head_ref: str = "HEAD",
     codebase_reasoning: str = "full",
     debug: bool = False,
+    disable_search_grounding: bool = False,
 ) -> str:
     """
     Trigger an asynchronous code judgement comparing two git refs against a workplan.
@@ -2202,6 +1950,8 @@ async def judge_workplan(
             - "none": Skip codebase context completely for fastest processing
         debug: If True, adds a comment to the sub-issue with the full prompt used for generation.
                Useful for debugging and improving prompt engineering.
+        disable_search_grounding: If True, disables Google Search Grounding for this request.
+               Default is False (search grounding enabled) for Gemini models.
 
     Returns:
         A confirmation message that the judgement task has been initiated.
@@ -2212,6 +1962,17 @@ async def judge_workplan(
     try:
         # Get the repository path from context
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+
+        # Handle search grounding override if specified
+        original_search_grounding = ctx.request_context.lifespan_context.get(
+            "use_search_grounding", True
+        )
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = False
+            await ctx.log(
+                level="info",
+                message="Search grounding disabled for workplan judgement per request parameter.",
+            )
 
         await ctx.log(
             level="info",
@@ -2278,8 +2039,13 @@ async def judge_workplan(
                 head_commit_hash=head_commit_hash,
                 debug=debug,
                 codebase_reasoning=codebase_reasoning,
+                _meta={"original_search_grounding": original_search_grounding},
             )
         )
+
+        # Restore original search grounding setting if modified
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
 
         return (
             f"Judgement task initiated comparing {base_ref} (`{base_commit_hash}`)..{head_ref} (`{head_commit_hash}`) "

@@ -11,6 +11,7 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro and OpenAI cap
 - **Seamless GitHub Integration**: Automatically creates labeled issues, posts judgement sub-issues with references to original workplan issues
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
 - **MCP Resources**: Exposes workplans as standard MCP resources for easy listing and retrieval
+- **Google Search Grounding**: Enabled by default for Gemini models, providing search capabilities with automatically formatted citations in Markdown
 
 ## Installation
 
@@ -34,6 +35,9 @@ The server requires the following environment variables:
 - `YELLHORN_MCP_MODEL`: Model to use (defaults to "gemini-2.5-pro-preview-03-25"). Available options:
   - Gemini models: "gemini-2.5-pro-preview-03-25", "gemini-2.5-flash-preview-04-17"
   - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
+- `YELLHORN_MCP_SEARCH`: Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
+  - "on" - Search grounding enabled for Gemini models
+  - "off" - Search grounding disabled for all models
 
 The server also requires the GitHub CLI (`gh`) to be installed and authenticated.
 
@@ -79,7 +83,9 @@ To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json
       "type": "stdio",
       "command": "yellhorn-mcp",
       "args": ["--model", "o3"],
-      "env": {}
+      "env": {
+        "YELLHORN_MCP_SEARCH": "on"
+      }
     }
   }
 }
@@ -94,12 +100,13 @@ Creates a GitHub issue with a detailed workplan based on the title and detailed 
 **Input**:
 
 - `title`: Title for the GitHub issue (will be used as issue title and header)
-- `detailed_description`: Detailed description for the workplan
+- `detailed_description`: Detailed description for the workplan. Any URLs provided here will be extracted and included in a References section.
 - `codebase_reasoning`: (optional) Control whether AI enhancement is performed:
   - `"full"`: (default) Use AI to enhance the workplan with full codebase context
   - `"lsp"`: Use AI with lightweight codebase context (function/method signatures, class attributes and struct fields for Python and Go)
   - `"none"`: Skip AI enhancement, use the provided description as-is
 - `debug`: (optional) If set to `true`, adds a comment to the issue with the full prompt used for generation
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
 
 **Output**:
 
@@ -115,6 +122,7 @@ Retrieves the workplan content (GitHub issue body) associated with a workplan.
 **Input**:
 
 - `issue_number`: The GitHub issue number for the workplan.
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
 
 **Output**:
 
@@ -134,6 +142,9 @@ Triggers an asynchronous code judgement comparing two git refs (branches or comm
   - `"lsp"`: Use lighter codebase context (only function signatures for Python and Go, plus full diff files)
   - `"none"`: Skip codebase context completely for fastest processing
 - `debug`: (optional) If set to `true`, adds a comment to the sub-issue with the full prompt used for generation
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
+
+Any URLs mentioned in the workplan will be extracted and preserved in a References section in the judgement.
 
 **Output**:
 

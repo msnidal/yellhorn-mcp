@@ -161,11 +161,9 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
         assert "## Completion Metrics" in args[2]
 
 
-# This test isn't critical, so we'll skip it for now
-@pytest.mark.skip(reason="Needs further investigation")
 @pytest.mark.asyncio
 async def test_openai_client_required():
-    """Test that an OpenAI client is required for OpenAI models."""
+    """Test that missing OpenAI client is handled gracefully with error comment."""
     # Create a simple context with a proper lifespan_context
     mock_ctx = MagicMock(spec=Context)
     mock_ctx.request_context.lifespan_context = {
@@ -179,22 +177,33 @@ async def test_openai_client_required():
     with (
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
 
-        # Test workplan generation should fail without OpenAI client
-        with pytest.raises(YellhornMCPError, match="OpenAI client not initialized"):
-            await process_workplan_async(
-                Path("/mock/repo"),
-                None,  # No Gemini client
-                None,  # No OpenAI client
-                "gpt-4o",  # OpenAI model name
-                "Feature Implementation Plan",
-                "123",
-                mock_ctx,
-                detailed_description="Create a new feature",
-            )
+        # Test workplan generation should handle OpenAI client error gracefully
+        await process_workplan_async(
+            Path("/mock/repo"),
+            None,  # No Gemini client
+            None,  # No OpenAI client
+            "gpt-4o",  # OpenAI model name
+            "Feature Implementation Plan",
+            "123",
+            mock_ctx,
+            detailed_description="Create a new feature",
+        )
+
+        # The function should not call update_github_issue since it failed
+        mock_update.assert_not_called()
+
+        # The function should add an error comment to the issue
+        mock_comment.assert_called_once()
+        args, kwargs = mock_comment.call_args
+        assert args[0] == Path("/mock/repo")
+        assert args[1] == "123"
+        assert "OpenAI client not initialized" in args[2]
 
 
 @pytest.mark.asyncio

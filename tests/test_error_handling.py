@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tests.helpers import DummyContext
-from yellhorn_mcp.server import YellhornMCPError, run_git_command, run_github_command
+from yellhorn_mcp.git_utils import YellhornMCPError, run_git_command, run_github_command
 
 
 @pytest.mark.asyncio
@@ -37,7 +37,7 @@ async def test_update_github_issue_error():
         mock_open.side_effect = PermissionError("Permission denied")
 
         with pytest.raises(YellhornMCPError, match="Failed to update GitHub issue"):
-            from yellhorn_mcp.server import update_github_issue
+            from yellhorn_mcp.git_utils import update_github_issue
 
             await update_github_issue(Path("/mock/repo"), "123", "Test content")
 
@@ -87,7 +87,7 @@ async def test_openai_gemini_errors():
 @pytest.mark.asyncio
 async def test_get_github_pr_diff_error():
     """Test get_github_pr_diff with error."""
-    from yellhorn_mcp.server import get_github_pr_diff
+    from yellhorn_mcp.git_utils import get_github_pr_diff
 
     with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
         mock_gh.side_effect = YellhornMCPError("Failed to fetch PR diff")
@@ -99,7 +99,7 @@ async def test_get_github_pr_diff_error():
 @pytest.mark.asyncio
 async def test_post_github_pr_review_error():
     """Test post_github_pr_review with error."""
-    from yellhorn_mcp.server import post_github_pr_review
+    from yellhorn_mcp.git_utils import post_github_pr_review
 
     with patch("pathlib.Path.exists", return_value=True):
         with patch("builtins.open", side_effect=PermissionError("Permission denied")):
@@ -112,7 +112,7 @@ async def test_post_github_pr_review_error():
 @pytest.mark.asyncio
 async def test_create_github_subissue_error():
     """Test create_github_subissue with error."""
-    from yellhorn_mcp.server import create_github_subissue
+    from yellhorn_mcp.git_utils import create_github_subissue
 
     # Test error when creating sub-issue
     with patch("yellhorn_mcp.server.ensure_label_exists"):

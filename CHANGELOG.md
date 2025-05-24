@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added Google Gemini Search Grounding as default feature for all Gemini models
+- Added `YELLHORN_MCP_SEARCH` environment variable (default: "on") to control search grounding
+- Added `--no-search-grounding` CLI flag to disable search grounding
+- Added `disable_search_grounding` parameter to all MCP tools
+- Added automatic conversion of Gemini citations to Markdown footnotes in responses
+- Added URL extraction from workplan descriptions and judgements to preserve links in References section
+
 ## [0.4.0] - 2025-04-30
 
 ### Added
