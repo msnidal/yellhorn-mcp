@@ -508,6 +508,7 @@ This workplan will be updated asynchronously with a comprehensive implementation
                     ctx,
                     detailed_description,
                     debug=debug,
+                    disable_search_grounding=disable_search_grounding,
                     _meta={"original_search_grounding": original_search_grounding},
                 )
             )
@@ -877,6 +878,7 @@ async def process_workplan_async(
     ctx: Context,
     detailed_description: str,
     debug: bool = False,
+    disable_search_grounding: bool = False,
     _meta: dict[str, Any] | None = None,
 ) -> None:
     """
@@ -892,6 +894,7 @@ async def process_workplan_async(
         ctx: Server context.
         detailed_description: Detailed description for the workplan.
         debug: If True, add a comment with the full prompt used for generation.
+        disable_search_grounding: If True, disables search grounding for this request, overriding the context's use_search_grounding setting.
     """
     try:
         # Get codebase snapshot based on reasoning mode
@@ -1013,10 +1016,19 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 message=f"Generating workplan with Gemini API for title: {title} with model {model}",
             )
 
-            # Get the use_search_grounding flag from context
-            actual_use_search_grounding = ctx.request_context.lifespan_context.get(
+            # Get the use_search_grounding flag from context, override with disable_search_grounding if specified
+            context_use_search_grounding = ctx.request_context.lifespan_context.get(
                 "use_search_grounding", False
             )
+            actual_use_search_grounding = (
+                context_use_search_grounding and not disable_search_grounding
+            )
+
+            if disable_search_grounding and context_use_search_grounding:
+                await ctx.log(
+                    level="info",
+                    message="Search grounding disabled for this workplan request, overriding context setting",
+                )
 
             gen_config = None
             if actual_use_search_grounding:
@@ -1134,6 +1146,7 @@ async def process_judgement_async(
     head_commit_hash: str | None = None,
     debug: bool = False,
     codebase_reasoning: str = "full",
+    disable_search_grounding: bool = False,
     _meta: dict[str, Any] | None = None,
 ) -> None:
     """
@@ -1160,6 +1173,7 @@ async def process_judgement_async(
                - "lsp": LSP-style signatures only (faster)
                - "file_structure": Only directory structure (fastest)
                - "none": No codebase context
+        disable_search_grounding: If True, disables search grounding for this request, overriding the context's use_search_grounding setting.
         _meta: Optional metadata dict for context restoration patterns.
 
     Returns:
@@ -1256,10 +1270,19 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 message=f"Generating judgement with Gemini API model {model}",
             )
 
-            # Get the use_search_grounding flag from context
-            actual_use_search_grounding = ctx.request_context.lifespan_context.get(
+            # Get the use_search_grounding flag from context, override with disable_search_grounding if specified
+            context_use_search_grounding = ctx.request_context.lifespan_context.get(
                 "use_search_grounding", False
             )
+            actual_use_search_grounding = (
+                context_use_search_grounding and not disable_search_grounding
+            )
+
+            if disable_search_grounding and context_use_search_grounding:
+                await ctx.log(
+                    level="info",
+                    message="Search grounding disabled for this judgement request, overriding context setting",
+                )
 
             gen_config = None
             if actual_use_search_grounding:
@@ -2062,6 +2085,7 @@ This judgement will be updated here once complete.
                 head_commit_hash=head_commit_hash,
                 debug=debug,
                 codebase_reasoning=codebase_reasoning,
+                disable_search_grounding=disable_search_grounding,
                 _meta={"original_search_grounding": original_search_grounding},
             )
         )
