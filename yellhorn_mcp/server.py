@@ -47,47 +47,38 @@ from yellhorn_mcp.git_utils import (
     run_github_command,
     update_github_issue,
 )
-from yellhorn_mcp.search_grounding import attach_search, citations_to_markdown
+from yellhorn_mcp.search_grounding import _get_gemini_search_tools, citations_to_markdown
 
 
-async def async_generate_content_with_tools(client, model, prompt, request_model=None):
-    """Helper function to call generate_content with proper tool handling for async API.
-
-    The async API doesn't support the tools parameter directly,
-    so we need to use generation_config parameter instead.
+async def async_generate_content_with_config(
+    client, model_name: str, prompt: str, generation_config=None
+):
+    """
+    Helper function to call aio.models.generate_content with generation_config.
 
     Args:
         client: The Gemini client instance.
-        model: The model name.
+        model_name: The model name string.
         prompt: The prompt content.
-        request_model: Optional model instance that may have tools attached.
+        generation_config: Optional GenerateContentConfig instance.
 
     Returns:
         The response from the Gemini API.
+
+    Raises:
+        YellhornMCPError: If the client doesn't support the required API.
     """
-    # Check if we can use the direct method first
-    if hasattr(client, "aio") and hasattr(client.aio, "generate_content"):
-        # Use direct async method if available (newer SDK versions)
-        return await client.aio.generate_content(contents=prompt)
-    else:
-        # Otherwise use the models interface
-        # The async API uses generation_config parameter instead of tools
-        tools = getattr(request_model, "tools", None) if request_model else None
+    # Ensure client and its attributes are valid
+    if not (
+        hasattr(client, "aio")
+        and hasattr(client.aio, "models")
+        and hasattr(client.aio.models, "generate_content")
+    ):
+        raise YellhornMCPError("Gemini client does not support aio.models.generate_content.")
 
-        if tools:
-            # Import necessary generation config types if tools are being used
-            try:
-                from google.genai.types import GenerateContentConfig
-
-                config = GenerateContentConfig(tools=tools)
-                return await client.aio.models.generate_content(
-                    model=model, contents=prompt, generation_config=config
-                )
-            except ImportError:
-                # Fall back to no tools if types aren't available
-                return await client.aio.models.generate_content(model=model, contents=prompt)
-        else:
-            return await client.aio.models.generate_content(model=model, contents=prompt)
+    return await client.aio.models.generate_content(
+        model=model_name, contents=prompt, generation_config=generation_config
+    )
 
 
 # Pricing configuration for models (USD per 1M tokens)
@@ -228,7 +219,6 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     # Initialize clients based on the model type
     gemini_client = None
     openai_client = None
-    gemini_model = None
 
     # For Gemini models, require Gemini API key
     if not is_openai_model:
@@ -237,9 +227,6 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             raise ValueError("GEMINI_API_KEY is required for Gemini models")
         # Configure Gemini API
         gemini_client = genai.Client(api_key=gemini_api_key)
-
-        # We don't create and store a global model anymore to avoid concurrency issues
-        # Each request will create its own model instance as needed
     # For OpenAI models, require OpenAI API key
     else:
         openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -269,7 +256,6 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             "openai_client": openai_client,
             "model": model,
             "use_search_grounding": use_search_grounding,
-            "gemini_model": gemini_model,
         }
     finally:
         pass
@@ -1024,20 +1010,38 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             )
 
             # Get the use_search_grounding flag from context
-            use_search_grounding = ctx.request_context.lifespan_context.get(
-                "use_search_grounding", True
+            actual_use_search_grounding = ctx.request_context.lifespan_context.get(
+                "use_search_grounding", False
             )
 
-            # Import necessary function to create model
-            from yellhorn_mcp.search_grounding import create_model_for_request
+            gen_config = None
+            if actual_use_search_grounding:
+                await ctx.log(
+                    level="info", message=f"Attempting to enable search grounding for model {model}"
+                )
+                try:
+                    from google.genai.types import GenerateContentConfig
 
-            # Create a model specifically for this request based on search flag
-            # Always create a new model instance to avoid concurrency issues
-            request_model = create_model_for_request(gemini_client, model, use_search_grounding)
+                    search_tools = _get_gemini_search_tools(model)
+                    if search_tools:
+                        gen_config = GenerateContentConfig(tools=search_tools)
+                        await ctx.log(
+                            level="info", message=f"Search tools configured for model {model}"
+                        )
+                    else:
+                        await ctx.log(
+                            level="warning",
+                            message=f"Could not configure search tools for model {model}",
+                        )
+                except ImportError:
+                    await ctx.log(
+                        level="warning",
+                        message="GenerateContentConfig not available, skipping search grounding",
+                    )
 
-            # Use the helper function for API compatibility
-            response = await async_generate_content_with_tools(
-                gemini_client, model, prompt, request_model
+            # Use the new async API method
+            response = await async_generate_content_with_config(
+                gemini_client, model, prompt, generation_config=gen_config
             )
 
             workplan_content = response.text
@@ -1059,23 +1063,16 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             await add_github_issue_comment(repo_path, issue_number, error_message_comment)
             return
 
-        # Extract citations from Gemini response if available
-        citations_section = ""
-        if not is_openai_model and hasattr(response, "citations"):
-            citations = getattr(response, "citations", [])
-            if citations:
-                # Use the updated citations_to_markdown with content to add markers
-                citations_section = citations_to_markdown(citations, workplan_content)
-                # If content was modified with citation markers, update the workplan_content
-                if workplan_content in citations_section:
-                    workplan_content = citations_section
-                    citations_section = ""
+        # Process citations if search was enabled and metadata exists
+        if not is_openai_model and gen_config and hasattr(response, "grounding_metadata"):
+            grounding_metadata = response.grounding_metadata
+            workplan_content = citations_to_markdown(grounding_metadata, workplan_content)
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
 
-        # Add the title as header and append citations and metrics to the final body
-        full_body = f"# {title}\n\n{workplan_content}{citations_section}{metrics_section}"
+        # Add the title as header and append metrics to the final body
+        full_body = f"# {title}\n\n{workplan_content}{metrics_section}"
 
         # Update the GitHub issue with the generated workplan and metrics
         await update_github_issue(repo_path, issue_number, full_body)
@@ -1255,21 +1252,38 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             )
 
             # Get the use_search_grounding flag from context
-            use_search_grounding = ctx.request_context.lifespan_context.get(
-                "use_search_grounding", True
+            actual_use_search_grounding = ctx.request_context.lifespan_context.get(
+                "use_search_grounding", False
             )
 
-            # Import necessary function to create model
-            from yellhorn_mcp.search_grounding import create_model_for_request
+            gen_config = None
+            if actual_use_search_grounding:
+                await ctx.log(
+                    level="info", message=f"Attempting to enable search grounding for model {model}"
+                )
+                try:
+                    from google.genai.types import GenerateContentConfig
 
-            # Create a model specifically for this request based on search flag
-            # Always create a new model instance to avoid concurrency issues
-            request_model = create_model_for_request(gemini_client, model, use_search_grounding)
+                    search_tools = _get_gemini_search_tools(model)
+                    if search_tools:
+                        gen_config = GenerateContentConfig(tools=search_tools)
+                        await ctx.log(
+                            level="info", message=f"Search tools configured for model {model}"
+                        )
+                    else:
+                        await ctx.log(
+                            level="warning",
+                            message=f"Could not configure search tools for model {model}",
+                        )
+                except ImportError:
+                    await ctx.log(
+                        level="warning",
+                        message="GenerateContentConfig not available, skipping search grounding",
+                    )
 
-            # The Gemini client has built-in async APIs
-            # Use the helper function for API compatibility
-            response = await async_generate_content_with_tools(
-                gemini_client, model, prompt, request_model
+            # Use the new async API method
+            response = await async_generate_content_with_config(
+                gemini_client, model, prompt, generation_config=gen_config
             )
 
             # Extract judgement and usage metadata
@@ -1280,17 +1294,10 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             api_name = "OpenAI" if is_openai_model else "Gemini"
             raise YellhornMCPError(f"Received an empty response from {api_name} API.")
 
-        # Extract citations from Gemini response if available
-        citations_section = ""
-        if not is_openai_model and hasattr(response, "citations"):
-            citations = getattr(response, "citations", [])
-            if citations:
-                # Use the updated citations_to_markdown with content to add markers
-                citations_section = citations_to_markdown(citations, judgement_content)
-                # If content was modified with citation markers, update the judgement_content
-                if judgement_content in citations_section:
-                    judgement_content = citations_section
-                    citations_section = ""
+        # Process citations if search was enabled and metadata exists
+        if not is_openai_model and gen_config and hasattr(response, "grounding_metadata"):
+            grounding_metadata = response.grounding_metadata
+            judgement_content = citations_to_markdown(grounding_metadata, judgement_content)
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
@@ -1305,8 +1312,8 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
 """
 
-        # Combine into final body: metadata + judgement + citations + metrics
-        final_body = metadata_section + judgement_content + citations_section + metrics_section
+        # Combine into final body: metadata + judgement + metrics
+        final_body = metadata_section + judgement_content + metrics_section
 
         # Update the placeholder sub-issue with the final judgement
         await ctx.log(
@@ -1653,22 +1660,24 @@ Don't include explanations for your choices, just return the list in the specifi
                         )
 
                     # Get the use_search_grounding flag from context
-                    use_search_grounding = ctx.request_context.lifespan_context.get(
-                        "use_search_grounding", True
+                    actual_use_search_grounding = ctx.request_context.lifespan_context.get(
+                        "use_search_grounding", False
                     )
 
-                    # Import create_model_for_request function
-                    from yellhorn_mcp.search_grounding import create_model_for_request
+                    gen_config = None
+                    if actual_use_search_grounding:
+                        try:
+                            from google.genai.types import GenerateContentConfig
 
-                    # Create a model specifically for this request based on search flag
-                    # Always create a new model instance to avoid concurrency issues
-                    request_model = create_model_for_request(
-                        gemini_client, model, use_search_grounding
-                    )
+                            search_tools = _get_gemini_search_tools(model)
+                            if search_tools:
+                                gen_config = GenerateContentConfig(tools=search_tools)
+                        except ImportError:
+                            pass
 
-                    # Use the helper function for API compatibility
-                    response = await async_generate_content_with_tools(
-                        gemini_client, model, prompt, request_model
+                    # Use the new async API method
+                    response = await async_generate_content_with_config(
+                        gemini_client, model, prompt, generation_config=gen_config
                     )
                     chunk_result = response.text
 

@@ -2,285 +2,214 @@
 Tests for search grounding functionality.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from yellhorn_mcp.search_grounding import (
-    MockGenerativeModel,
-    MockGoogleSearchResults,
-    attach_search,
-    citations_to_markdown,
-    create_model_for_request,
-    create_model_with_search,
-    tools,
-)
+from yellhorn_mcp.search_grounding import _get_gemini_search_tools, citations_to_markdown
 
 
-def test_attach_search_adds_search_if_not_present():
-    """Test that attach_search adds search tools when not present."""
-    mock_model = MagicMock()
-    mock_model.tools = []
+class TestGetGeminiSearchTools:
+    """Tests for _get_gemini_search_tools function."""
+
+    @patch("yellhorn_mcp.search_grounding.genai_types")
+    def test_gemini_15_model_uses_google_search_retrieval(self, mock_types):
+        """Test that Gemini 1.5 models use GoogleSearchRetrieval."""
+        mock_tool = Mock()
+        mock_search_retrieval = Mock()
+        mock_types.Tool.return_value = mock_tool
+        mock_types.GoogleSearchRetrieval.return_value = mock_search_retrieval
 
-    # Create a mock for GoogleSearchResults
-    mock_search_results = MagicMock()
-    mock_search_results.__class__.__name__ = "GoogleSearchResults"
+        result = _get_gemini_search_tools("gemini-1.5-pro")
 
-    # Patch the tools module's GoogleSearchResults class
-    with patch.object(tools, "GoogleSearchResults", return_value=mock_search_results):
-        result = attach_search(mock_model)
+        assert result == [mock_tool]
+        mock_types.GoogleSearchRetrieval.assert_called_once()
+        mock_types.Tool.assert_called_once_with(google_search_retrieval=mock_search_retrieval)
 
-    # Verify the model has a tool added
-    assert len(result.tools) == 1
-    # Verify it's the same model instance
-    assert result is mock_model
+    @patch("yellhorn_mcp.search_grounding.genai_types")
+    def test_gemini_20_model_uses_google_search(self, mock_types):
+        """Test that Gemini 2.0+ models use GoogleSearch."""
+        mock_tool = Mock()
+        mock_search = Mock()
+        mock_types.Tool.return_value = mock_tool
+        mock_types.GoogleSearch.return_value = mock_search
 
+        result = _get_gemini_search_tools("gemini-2.0-flash")
 
-def test_attach_search_doesnt_add_duplicate_search():
-    """Test that attach_search doesn't add a duplicate search tool if one already exists."""
-    mock_model = MagicMock()
+        assert result == [mock_tool]
+        mock_types.GoogleSearch.assert_called_once()
+        mock_types.Tool.assert_called_once_with(google_search=mock_search)
 
-    # Create mock search tool that will be recognized by class name
-    mock_search_tool = MagicMock()
-    mock_search_tool.__class__.__name__ = "GoogleSearchResults"
-    mock_model.tools = [mock_search_tool]
+    @patch("yellhorn_mcp.search_grounding.genai_types")
+    def test_gemini_25_model_uses_google_search(self, mock_types):
+        """Test that Gemini 2.5+ models use GoogleSearch."""
+        mock_tool = Mock()
+        mock_search = Mock()
+        mock_types.Tool.return_value = mock_tool
+        mock_types.GoogleSearch.return_value = mock_search
 
-    result = attach_search(mock_model)
+        result = _get_gemini_search_tools("gemini-2.5-pro-preview-03-25")
 
-    # Verify the tools list still has only one item
-    assert len(result.tools) == 1
-    # Verify it's the same model instance
-    assert result is mock_model
+        assert result == [mock_tool]
+        mock_types.GoogleSearch.assert_called_once()
+        mock_types.Tool.assert_called_once_with(google_search=mock_search)
 
+    def test_non_gemini_model_returns_none(self):
+        """Test that non-Gemini models return None."""
+        result = _get_gemini_search_tools("gpt-4")
+        assert result is None
 
-def test_attach_search_initializes_tools_list_if_none():
-    """Test that attach_search initializes the tools list if it's None."""
-    mock_model = MagicMock()
-    mock_model.tools = None
+    @patch("yellhorn_mcp.search_grounding.genai_types")
+    def test_tool_creation_exception_returns_none(self, mock_types):
+        """Test that exceptions during tool creation return None."""
+        mock_types.GoogleSearch.side_effect = Exception("Tool creation failed")
 
-    # Create a mock for GoogleSearchResults
-    mock_search_results = MagicMock()
-    mock_search_results.__class__.__name__ = "GoogleSearchResults"
+        result = _get_gemini_search_tools("gemini-2.0-flash")
 
-    # Patch the tools module's GoogleSearchResults class
-    with patch.object(tools, "GoogleSearchResults", return_value=mock_search_results):
-        result = attach_search(mock_model)
+        assert result is None
 
-    # Verify the tools list was initialized and has one item
-    assert len(result.tools) == 1
-    # Verify it's the same model instance
-    assert result is mock_model
 
+class TestCitationsToMarkdown:
+    """Tests for citations_to_markdown function."""
 
-def test_citations_to_markdown_empty_list():
-    """Test that citations_to_markdown returns an empty string when given an empty list."""
-    result = citations_to_markdown([])
-    assert result == ""
+    def test_none_grounding_metadata_returns_original_text(self):
+        """Test that None grounding metadata returns original text unchanged."""
+        result = citations_to_markdown(None, "Original text")
+        assert result == "Original text"
 
+    def test_empty_grounding_metadata_returns_original_text(self):
+        """Test that empty grounding metadata returns original text unchanged."""
+        mock_metadata = Mock()
+        mock_metadata.citations = None
+        mock_metadata.grounding_chunks = None
 
-def test_citations_to_markdown_formats_citations():
-    """Test that citations_to_markdown correctly formats citations as Markdown."""
-    citations = [
-        {"url": "https://example.com/1", "title": "Example 1"},
-        {"url": "https://example.com/2", "title": "Example 2"},
-    ]
+        result = citations_to_markdown(mock_metadata, "Original text")
+        assert result == "Original text"
 
-    result = citations_to_markdown(citations)
+    def test_citations_field_processing(self):
+        """Test processing of modern citations field."""
+        mock_citation1 = Mock()
+        mock_citation1.uri = "https://example.com/1"
+        mock_citation1.title = "Example 1"
 
-    # Check the header is present
-    assert "## Citations" in result
-    # Check both citations are formatted correctly
-    assert "[^1]: Example 1 – https://example.com/1" in result
-    assert "[^2]: Example 2 – https://example.com/2" in result
+        mock_citation2 = Mock()
+        mock_citation2.uri = "https://example.com/2"
+        mock_citation2.title = "Example 2"
 
+        mock_metadata = Mock()
+        mock_metadata.citations = [mock_citation1, mock_citation2]
 
-def test_citations_to_markdown_handles_missing_title():
-    """Test that citations_to_markdown uses URL when title is missing."""
-    citations = [
-        {"url": "https://example.com/1"},  # No title
-    ]
+        result = citations_to_markdown(mock_metadata, "Original text")
 
-    result = citations_to_markdown(citations)
+        assert "Original text" in result
+        assert "\n---\n## Citations" in result
+        assert "[^1]: Example 1 – https://example.com/1" in result
+        assert "[^2]: Example 2 – https://example.com/2" in result
 
-    # Check citation uses URL as the snippet
-    assert "[^1]: https://example.com/1 – https://example.com/1" in result
+    def test_citations_field_with_missing_title(self):
+        """Test citations field with missing title uses URI."""
+        mock_citation = Mock()
+        mock_citation.uri = "https://example.com/1"
+        mock_citation.title = None
 
+        mock_metadata = Mock()
+        mock_metadata.citations = [mock_citation]
 
-def test_citations_to_markdown_handles_uri_instead_of_url():
-    """Test that citations_to_markdown supports citations with 'uri' instead of 'url'."""
-    citations = [
-        {"uri": "https://example.com/1", "title": "Example 1"},
-    ]
+        result = citations_to_markdown(mock_metadata, "Original text")
 
-    result = citations_to_markdown(citations)
+        assert "[^1]: https://example.com/1 – https://example.com/1" in result
 
-    # Check citation is formatted correctly with uri
-    assert "[^1]: Example 1 – https://example.com/1" in result
+    def test_citations_field_with_long_title(self):
+        """Test citations field with long title gets truncated."""
+        long_title = "A" * 100
 
+        mock_citation = Mock()
+        mock_citation.uri = "https://example.com/1"
+        mock_citation.title = long_title
 
-def test_citations_to_markdown_limits_title_length():
-    """Test that citations_to_markdown limits title length to 90 characters."""
-    long_title = "A" * 100
-    citations = [
-        {"url": "https://example.com/1", "title": long_title},
-    ]
+        mock_metadata = Mock()
+        mock_metadata.citations = [mock_citation]
 
-    result = citations_to_markdown(citations)
+        result = citations_to_markdown(mock_metadata, "Original text")
 
-    # Check title is truncated to 90 chars
-    expected_snippet = "A" * 90
-    assert f"[^1]: {expected_snippet} – https://example.com/1" in result
+        expected_title = "A" * 90
+        assert f"[^1]: {expected_title} – https://example.com/1" in result
 
+    def test_grounding_chunks_fallback_with_web(self):
+        """Test fallback to grounding_chunks with web field."""
+        mock_web = Mock()
+        mock_web.uri = "https://example.com/1"
+        mock_web.title = "Example 1"
 
-def test_attach_search_handles_missing_tools_attribute():
-    """Test that attach_search handles models without tools attribute gracefully."""
-    mock_model = MagicMock(spec=[])  # No tools attribute
+        mock_chunk = Mock()
+        mock_chunk.web = mock_web
+        mock_chunk.retrieved_context = None
 
-    # No need to patch hasattr anymore with our improved implementation
-    result = attach_search(mock_model)
+        mock_metadata = Mock()
+        mock_metadata.citations = None
+        mock_metadata.grounding_chunks = [mock_chunk]
 
-    # Should return the model unchanged without error
-    assert result is mock_model
+        result = citations_to_markdown(mock_metadata, "Original text")
 
+        assert "Original text" in result
+        assert "[^1]: Example 1 – https://example.com/1" in result
 
-def test_mock_classes_exist():
-    """Test that our mock classes are properly exported and usable."""
-    # Verify mock classes are available
-    assert MockGoogleSearchResults is not None
-    assert MockGenerativeModel is not None
-    assert tools is not None
+    def test_grounding_chunks_fallback_with_retrieved_context(self):
+        """Test fallback to grounding_chunks with retrieved_context field."""
+        mock_context = Mock()
+        mock_context.uri = "https://example.com/1"
+        mock_context.title = "Example 1"
 
-    # Verify we can instantiate the mocks without errors
-    search_results = MockGoogleSearchResults()
-    model = MockGenerativeModel()
+        mock_chunk = Mock()
+        mock_chunk.web = None
+        mock_chunk.retrieved_context = mock_context
 
-    # Verify expected attributes
-    assert model.tools is None
+        mock_metadata = Mock()
+        mock_metadata.citations = None
+        mock_metadata.grounding_chunks = [mock_chunk]
 
+        result = citations_to_markdown(mock_metadata, "Original text")
 
-def test_create_model_with_search():
-    """Test that create_model_with_search correctly creates a model with search attached."""
-    # Create mock client and model
-    mock_client = MagicMock()
-    mock_model = MagicMock()
-    mock_model.tools = None
+        assert "[^1]: Example 1 – https://example.com/1" in result
 
-    # Mock client.GenerativeModel to return our mock model
-    mock_client.GenerativeModel.return_value = mock_model
+    def test_grounding_chunks_skips_chunks_without_uri(self):
+        """Test that chunks without URI are skipped."""
+        mock_chunk = Mock()
+        mock_chunk.web = None
+        mock_chunk.retrieved_context = None
 
-    # Create a mock for GoogleSearchResults
-    mock_search_results = MagicMock()
-    mock_search_results.__class__.__name__ = "GoogleSearchResults"
+        mock_metadata = Mock()
+        mock_metadata.citations = None
+        mock_metadata.grounding_chunks = [mock_chunk]
 
-    # Patch the tools module's GoogleSearchResults class
-    with patch.object(tools, "GoogleSearchResults", return_value=mock_search_results):
-        result = create_model_with_search(mock_client, "test-model")
-
-    # Verify model was created with search tools in constructor
-    mock_client.GenerativeModel.assert_called_once_with(
-        model_name="test-model", tools=[mock_search_results]
-    )
-    # Result should be the mock model
-    assert result is mock_model
-
-
-def test_create_model_with_search_handles_errors():
-    """Test that create_model_with_search handles errors gracefully."""
-    # Create mock client that raises exception when GenerativeModel is called
-    mock_client = MagicMock()
-    mock_client.GenerativeModel.side_effect = Exception("Test error")
-
-    # Patch the imported GenerativeModel to also raise exception
-    with patch(
-        "yellhorn_mcp.search_grounding.GenerativeModel", side_effect=Exception("Another test error")
-    ):
-        result = create_model_with_search(mock_client, "test-model")
-
-    # Should return None on error
-    assert result is None
-
-
-def test_create_model_for_request_with_search_enabled():
-    """Test create_model_for_request with search enabled."""
-    # Create mock client and model
-    mock_client = MagicMock()
-    mock_model = MagicMock()
-    mock_model.tools = []
-
-    # Setup mocks
-    with patch(
-        "yellhorn_mcp.search_grounding.create_model_with_search", return_value=mock_model
-    ) as mock_create_with_search:
-        result = create_model_for_request(mock_client, "test-model", True)
-
-    # Verify correct function was called
-    mock_create_with_search.assert_called_once_with(mock_client, "test-model")
-    assert result is mock_model
-
-
-def test_create_model_for_request_with_search_disabled():
-    """Test create_model_for_request with search disabled."""
-    # Create mock client and model
-    mock_client = MagicMock()
-    mock_model = MagicMock()
-    mock_client.GenerativeModel.return_value = mock_model
-
-    # Test with search disabled
-    result = create_model_for_request(mock_client, "test-model", False)
-
-    # Verify model was created but search tool was not added
-    mock_client.GenerativeModel.assert_called_once_with(model_name="test-model")
-    assert result is mock_model
-
-
-def test_create_model_for_request_handles_errors():
-    """Test that create_model_for_request handles errors gracefully."""
-    # Create mock client that raises exception when GenerativeModel is called
-    mock_client = MagicMock()
-    mock_client.GenerativeModel.side_effect = Exception("Test error")
-
-    # Patch the imported GenerativeModel to also raise exception
-    with patch(
-        "yellhorn_mcp.search_grounding.GenerativeModel", side_effect=Exception("Another test error")
-    ):
-        result = create_model_for_request(mock_client, "test-model", False)
-
-    # Should return None on error
-    assert result is None
-
-
-def test_model_creation_with_search_grounding():
-    """Test the basic workflow of model creation with search grounding."""
-    # This test replaces the previous integration test that had dependency issues
-    mock_client = MagicMock()
-    mock_model = MagicMock()
-    mock_model.tools = None
-
-    # Setup for model creation
-    mock_client.GenerativeModel.return_value = mock_model
-    mock_search = MagicMock()
-    mock_search.__class__.__name__ = "GoogleSearchResults"
-
-    # Test create_model_with_search
-    with patch.object(tools, "GoogleSearchResults", return_value=mock_search):
-        model_with_search = create_model_with_search(mock_client, "test-model")
-
-    # Verify model was created with search tool in constructor
-    mock_client.GenerativeModel.assert_called_once_with(
-        model_name="test-model", tools=[mock_search]
-    )
-    assert model_with_search is mock_model
-
-    # Test create_model_for_request with search enabled
-    with patch(
-        "yellhorn_mcp.search_grounding.create_model_with_search", return_value=mock_model
-    ) as mock_create:
-        model = create_model_for_request(mock_client, "test-model", True)
-        mock_create.assert_called_once_with(mock_client, "test-model")
-        assert model is mock_model
-
-    # Test create_model_for_request with search disabled
-    mock_client.GenerativeModel.reset_mock()
-    model = create_model_for_request(mock_client, "test-model", False)
-    mock_client.GenerativeModel.assert_called_once_with(model_name="test-model")
-    assert model is mock_model
+        result = citations_to_markdown(mock_metadata, "Original text")
+
+        # Should only contain original text, no citations section
+        assert result == "Original text"
+
+    def test_grounding_chunks_with_missing_title_uses_uri(self):
+        """Test grounding chunks with missing title use URI."""
+        mock_web = Mock()
+        mock_web.uri = "https://example.com/1"
+        mock_web.title = None
+
+        mock_chunk = Mock()
+        mock_chunk.web = mock_web
+        mock_chunk.retrieved_context = None
+
+        mock_metadata = Mock()
+        mock_metadata.citations = None
+        mock_metadata.grounding_chunks = [mock_chunk]
+
+        result = citations_to_markdown(mock_metadata, "Original text")
+
+        assert "[^1]: https://example.com/1 – https://example.com/1" in result
+
+    def test_hasattr_error_handling(self):
+        """Test that hasattr exceptions are handled gracefully."""
+        mock_metadata = Mock()
+        # Configure hasattr to raise AttributeError for citations
+        with patch("builtins.hasattr", side_effect=AttributeError("Test error")):
+            result = citations_to_markdown(mock_metadata, "Original text")
+
+        assert result == "Original text"

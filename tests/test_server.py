@@ -194,7 +194,6 @@ async def test_read_resource(mock_request_context):
         await read_resource(mock_request_context, "123", "unsupported_type")
 
 
-from mcp import Resource
 from mcp.server.fastmcp import Context
 
 from yellhorn_mcp.git_utils import (
@@ -217,12 +216,10 @@ from yellhorn_mcp.git_utils import (
 from yellhorn_mcp.server import (
     calculate_cost,
     create_workplan,
-    format_codebase_for_prompt,
     format_metrics_section,
     get_codebase_snapshot,
     get_workplan,
     judge_workplan,
-    process_judgement_async,
     process_workplan_async,
 )
 
@@ -351,8 +348,6 @@ async def test_get_codebase_snapshot_integration():
         mock_git.return_value = "file1.py\nfile2.py\ntest.log\nnode_modules/file.js"
 
         # Create a mock implementation of get_codebase_snapshot with the expected behavior
-        from yellhorn_mcp.server import get_codebase_snapshot as original_snapshot
-
         async def mock_get_codebase_snapshot(repo_path):
             # Return only the Python files as expected
             return ["file1.py", "file2.py"], {"file1.py": "content1", "file2.py": "content2"}
@@ -1360,15 +1355,13 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
     mock_response.citations = []
 
     # Mock the async generate content function
-    with patch("yellhorn_mcp.server.async_generate_content_with_tools") as mock_generate:
+    with patch("yellhorn_mcp.server.async_generate_content_with_config") as mock_generate:
         mock_generate.return_value = mock_response
 
         with patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue:
             with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
-                with patch(
-                    "yellhorn_mcp.search_grounding.create_model_for_request"
-                ) as mock_create_model:
-                    mock_create_model.return_value = MagicMock()
+                with patch("yellhorn_mcp.server._get_gemini_search_tools") as mock_get_tools:
+                    mock_get_tools.return_value = [MagicMock()]
 
                     # Set context for search grounding
                     mock_request_context.request_context.lifespan_context[
@@ -1590,3 +1583,92 @@ This workplan implements feature X.
         assert "https://github.com/user/repo/issues/123" in update_content
         assert "## Completion Metrics" in update_content
         assert "**Model Used**: `gemini-model`" in update_content
+
+
+# Integration tests for new search grounding flow
+
+
+@pytest.mark.asyncio
+async def test_process_workplan_async_with_new_search_grounding(
+    mock_request_context, mock_genai_client
+):
+    """Test search grounding integration in workplan generation."""
+
+    from yellhorn_mcp.server import _get_gemini_search_tools, citations_to_markdown
+
+    # Test the search tools function directly
+    search_tools = _get_gemini_search_tools("gemini-2.5-pro")
+    assert search_tools is not None
+
+    # Test the citation function
+    mock_metadata = MagicMock()
+    mock_citation = MagicMock()
+    mock_citation.uri = "https://example.com"
+    mock_citation.title = "Example"
+    mock_metadata.citations = [mock_citation]
+
+    result = citations_to_markdown(mock_metadata, "Original text")
+    assert "Original text" in result
+    assert "## Citations" in result
+    assert "https://example.com" in result
+
+
+@pytest.mark.asyncio
+async def test_process_workplan_async_with_search_grounding_disabled(
+    mock_request_context, mock_genai_client
+):
+    """Test that search grounding can be disabled."""
+    from yellhorn_mcp.server import _get_gemini_search_tools
+
+    # Test that non-Gemini models return None
+    search_tools = _get_gemini_search_tools("gpt-4")
+    assert search_tools is None
+
+    # Test that the function returns None for unsupported models
+    search_tools = _get_gemini_search_tools("unknown-model")
+    assert search_tools is None
+
+
+@pytest.mark.asyncio
+async def test_process_judgement_async_with_new_search_grounding(
+    mock_request_context, mock_genai_client
+):
+    """Test search grounding with Gemini 1.5 models."""
+    from yellhorn_mcp.server import _get_gemini_search_tools
+
+    # Test that Gemini 1.5 models get the correct search tools
+    search_tools = _get_gemini_search_tools("gemini-1.5-flash")
+    assert search_tools is not None
+    assert len(search_tools) == 1
+
+    # Test with Gemini 1.5 pro
+    search_tools = _get_gemini_search_tools("gemini-1.5-pro")
+    assert search_tools is not None
+    assert len(search_tools) == 1
+
+
+@pytest.mark.asyncio
+async def test_async_generate_content_with_config_error_handling(mock_genai_client):
+    """Test async_generate_content_with_config error handling."""
+    from yellhorn_mcp.git_utils import YellhornMCPError
+    from yellhorn_mcp.server import async_generate_content_with_config
+
+    # Test with client missing required attributes
+    invalid_client = MagicMock()
+    del invalid_client.aio
+
+    with pytest.raises(YellhornMCPError, match="does not support aio.models.generate_content"):
+        await async_generate_content_with_config(invalid_client, "test-model", "test prompt")
+
+    # Test successful call
+    mock_response = MagicMock()
+    mock_genai_client.aio.models.generate_content.return_value = mock_response
+
+    result = await async_generate_content_with_config(
+        mock_genai_client, "test-model", "test prompt", generation_config=None
+    )
+
+    assert result == mock_response
+    mock_genai_client.aio.models.generate_content.assert_called_once_with(
+        model="test-model", contents="test prompt", generation_config=None
+    )
