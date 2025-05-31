@@ -1,0 +1,49 @@
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
+startCommand:
+  type: stdio
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => ({
+      command: "yellhorn-mcp",
+      args: ["--model", config.yellhornMcpModel],
+      env: {
+        GEMINI_API_KEY: config.geminiApiKey,
+        OPENAI_API_KEY: config.openaiApiKey,
+        REPO_PATH: config.repoPath,
+        YELLHORN_MCP_SEARCH: config.yellhornMcpSearch,
+        YELLHORN_MCP_MODEL: config.yellhornMcpModel
+      }
+    })
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - geminiApiKey
+      - openaiApiKey
+    properties:
+      geminiApiKey:
+        type: string
+        description: Your Gemini API key
+      openaiApiKey:
+        type: string
+        description: Your OpenAI API key
+      repoPath:
+        type: string
+        default: .
+        description: Path to your repository
+      yellhornMcpModel:
+        type: string
+        default: gemini-2.5-pro-preview-05-06
+        description: Model to use
+      yellhornMcpSearch:
+        type: string
+        default: on
+        description: Enable or disable Google Search Grounding (on/off)
+  exampleConfig:
+    geminiApiKey: YOUR_GEMINI_API_KEY
+    openaiApiKey: YOUR_OPENAI_API_KEY
+    repoPath: .
+    yellhornMcpModel: gpt-4o
+    yellhornMcpSearch: off
