@@ -1,6 +1,7 @@
 # Yellhorn MCP
 
 ![Yellhorn Logo](assets/yellhorn.png)
+[![smithery badge](https://smithery.ai/badge/@msnidal/yellhorn-mcp)](https://smithery.ai/server/@msnidal/yellhorn-mcp)
 
 A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro and OpenAI capabilities to Claude Code for software development tasks using your entire codebase in the prompt. This pattern is highly useful for defining work to be done by code assistants like Claude Code or other MCP compatible coding agents, and reviewing the results ensuring they meet the exactly specified original requirements.
 
@@ -15,6 +16,15 @@ A Model Context Protocol (MCP) server that exposes Gemini 2.5 Pro and OpenAI cap
 
 ## Installation
 
+### Installing via Smithery
+
+To install Yellhorn for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@msnidal/yellhorn-mcp):
+
+```bash
+npx -y @smithery/cli install @msnidal/yellhorn-mcp --client claude
+```
+
+### Manual Installation
 ```bash
 # Install from PyPI
 pip install yellhorn-mcp
