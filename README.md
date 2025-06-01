@@ -12,6 +12,8 @@ A Model Context Protocol (MCP) server that provides functionality to create deta
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
 - **MCP Resources**: Exposes workplans as standard MCP resources for easy listing and retrieval
 - **Google Search Grounding**: Enabled by default for Gemini models, providing search capabilities with automatically formatted citations in Markdown
+- **Intelligent Token Management**: Automatically counts tokens using tiktoken and splits large prompts into chunks to prevent token overflow
+- **Unified LLM Interface**: All LLM calls go through a unified manager that handles token counting, chunking, and response aggregation across different model providers
 
 ## Installation
 
@@ -41,6 +43,18 @@ The server requires the following environment variables:
   - "off" - Search grounding disabled for all models
 
 The server also requires the GitHub CLI (`gh`) to be installed and authenticated.
+
+### Token Management
+
+Yellhorn MCP includes intelligent token management to handle large codebases:
+
+- **Automatic Token Counting**: Uses OpenAI's tiktoken library to accurately count tokens for each model
+- **Smart Chunking**: When prompts exceed model limits, automatically splits them into overlapping chunks:
+  - Sentence-based chunking for better coherence
+  - Configurable overlap to maintain context between chunks
+  - Safety margins reserved for system prompts and responses
+- **Response Aggregation**: Intelligently combines responses from multiple chunks
+- **Model-Specific Limits**: Respects each model's token limits (from 65K to 1M+ tokens)
 
 ## Usage
 

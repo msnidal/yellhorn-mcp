@@ -39,12 +39,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added intelligent token counting using OpenAI's tiktoken library
+- Added automatic prompt chunking to prevent token overflow for all models
+- Added unified LLMManager class that handles all LLM calls with automatic chunking
+- Added TokenCounter class with model-specific token limits and encoding support
+- Added smart chunking strategies (sentence-based with configurable overlap)
+- Added response aggregation for chunked prompts
+- Added safety margins for response tokens and system prompts
+- Added support for all model token limits (OpenAI: 65K-128K, Gemini: 1M+)
+- Added test notebook for validating token counting and chunking functionality
 - Added Google Gemini Search Grounding as default feature for all Gemini models
 - Added `YELLHORN_MCP_SEARCH` environment variable (default: "on") to control search grounding
 - Added `--no-search-grounding` CLI flag to disable search grounding
 - Added `disable_search_grounding` parameter to all MCP tools
 - Added automatic conversion of Gemini citations to Markdown footnotes in responses
 - Added URL extraction from workplan descriptions and judgements to preserve links in References section
+
+### Changed
+
+- Refactored all LLM API calls to use unified LLMManager instead of direct client calls
+- Updated process_workplan_async to use LLMManager for automatic chunking
+- Updated process_judgement_async to use LLMManager for automatic chunking
+- Updated curate_context to use LLMManager for automatic chunking
+
+### Dependencies
+
+- Added tiktoken ~= 0.8.0 for accurate token counting
 
 ## [0.4.0] - 2025-04-30
 

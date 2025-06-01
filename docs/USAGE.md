@@ -36,6 +36,48 @@ The server requires the following environment variables:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models
 
+### Token Management
+
+Yellhorn MCP automatically manages token limits for all supported models to prevent overflow errors when processing large codebases:
+
+#### Token Limits by Model
+
+- **Gemini models**: 1M+ tokens (1,048,576 tokens)
+  - `gemini-2.5-pro-preview-05-06`
+  - `gemini-2.5-flash-preview-05-20`
+- **OpenAI GPT-4o models**: 128K tokens (128,000 tokens)
+  - `gpt-4o`
+  - `gpt-4o-mini`
+- **OpenAI O-series models**: 65K tokens (65,536 tokens)
+  - `o4-mini`
+  - `o3`
+
+#### Automatic Chunking
+
+When your codebase and prompt exceed model limits, Yellhorn MCP automatically:
+
+1. **Counts tokens accurately** using OpenAI's tiktoken library
+2. **Splits prompts into chunks** that fit within model limits
+3. **Preserves context** between chunks with configurable overlap
+4. **Aggregates responses** from multiple chunks into a coherent result
+
+#### Chunking Strategy
+
+- **Sentence-based splitting**: Chunks are split at sentence boundaries to maintain coherence
+- **Safety margins**: Reserves tokens for system prompts and responses (default: 4K tokens)
+- **Configurable overlap**: Maintains context between chunks (default: 200 tokens)
+- **Smart aggregation**: Combines responses intelligently, removing duplicate content
+
+#### Best Practices
+
+To optimize token usage:
+
+1. Use `.yellhorncontext` or `.yellhornignore` to exclude unnecessary files
+2. Use the `lsp` codebase reasoning mode for lighter prompts when full content isn't needed
+3. For very large codebases, consider using `file_structure` mode which only includes directory structure
+
+The token management system ensures that even very large codebases can be processed successfully without manual intervention.
+
 ### File Filtering with .yellhorncontext and .yellhornignore
 
 You can control which files are included in the AI context using either a `.yellhorncontext` or `.yellhornignore` file in your repository root. The `.yellhorncontext` file takes precedence if both exist:

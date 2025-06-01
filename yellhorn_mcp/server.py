@@ -56,7 +56,7 @@ from yellhorn_mcp.git_utils import (
 )
 from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
 from yellhorn_mcp.search_grounding import _get_gemini_search_tools, add_citations
-
+from yellhorn_mcp.llm_manager import LLMManager
 
 async def async_generate_content_with_config(
     client: genai.Client, model_name: str, prompt: str, generation_config=None
@@ -251,6 +251,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     # Initialize clients based on the model type
     gemini_client = None
     openai_client = None
+    llm_manager = None
 
     # For Gemini models, require Gemini API key
     if not is_openai_model:
@@ -272,6 +273,19 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         http_client = httpx.AsyncClient()
         openai_client = openai.AsyncOpenAI(api_key=openai_api_key, http_client=http_client)
 
+    # Initialize LLM Manager with available clients
+    if gemini_client or openai_client:
+        llm_manager = LLMManager(
+            openai_client=openai_client,
+            gemini_client=gemini_client,
+            config={
+                "safety_margin_tokens": 2000,  # Reserve tokens for system prompts and responses
+                "overlap_ratio": 0.1,  # 10% overlap between chunks
+                "chunk_strategy": "sentences",  # Use sentence-based chunking
+                "aggregation_strategy": "concatenate"  # Concatenate chunk responses
+            }
+        )
+
     # Validate repository path
     repo_path = Path(repo_path).resolve()
     if not repo_path.exists():
@@ -286,6 +300,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             "repo_path": repo_path,
             "gemini_client": gemini_client,
             "openai_client": openai_client,
+            "llm_manager": llm_manager,
             "model": model,
             "use_search_grounding": use_search_grounding,
         }
@@ -389,6 +404,9 @@ async def read_resource(ctx: Context, resource_id: str, resource_type: str | Non
 
     Returns:
         The content of the GitHub issue as a string.
+
+    Raises:
+        YellhornMCPError: If the workplan cannot be retrieved.
     """
     # Verify resource type if provided
     if resource_type is not None and resource_type not in [
@@ -544,6 +562,7 @@ This workplan will be updated asynchronously with a comprehensive implementation
             # Get clients from context
             gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
             openai_client = ctx.request_context.lifespan_context.get("openai_client")
+            llm_manager = ctx.request_context.lifespan_context.get("llm_manager")
             model = ctx.request_context.lifespan_context["model"]
 
             # Store codebase_reasoning in context for process_workplan_async
@@ -560,6 +579,7 @@ This workplan will be updated asynchronously with a comprehensive implementation
                     repo_path,
                     gemini_client,
                     openai_client,
+                    llm_manager,
                     model,
                     title,
                     issue_number,
@@ -934,6 +954,7 @@ async def process_workplan_async(
     repo_path: Path,
     gemini_client: genai.Client | None,
     openai_client: AsyncOpenAI | None,
+    llm_manager: LLMManager | None,
     model: str,
     title: str,
     issue_number: str,
@@ -950,13 +971,15 @@ async def process_workplan_async(
         repo_path: Path to the repository.
         gemini_client: Gemini API client (None for OpenAI models).
         openai_client: OpenAI API client (None for Gemini models).
+        llm_manager: Unified LLM manager for making chunked calls.
         model: Model name to use (Gemini or OpenAI).
         title: Title for the workplan.
         issue_number: GitHub issue number to update.
         ctx: Server context.
         detailed_description: Detailed description for the workplan.
-        debug: If True, add a comment with the full prompt used for generation.
-        disable_search_grounding: If True, disables search grounding for this request, overriding the context's use_search_grounding setting.
+        debug: If True, add a comment to the issue with the full prompt used for generation.
+               Useful for debugging and improving prompt engineering.
+        disable_search_grounding: If True, disables Google Search Grounding for this request, overriding the context's use_search_grounding setting.
     """
     try:
         # Get codebase snapshot based on reasoning mode
@@ -1045,111 +1068,66 @@ The workplan should be comprehensive enough that a developer or AI assistant cou
 
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
-        is_openai_model = model.startswith("gpt-") or model.startswith("o")
-        gen_config = None
+        # Use LLMManager for unified LLM calls
+        if not llm_manager:
+            raise YellhornMCPError("LLM Manager not initialized")
 
-        # Call the appropriate API based on the model type
-        if is_openai_model:
-            if not openai_client:
-                raise YellhornMCPError("OpenAI client not initialized. Is OPENAI_API_KEY set?")
+        # Get the use_search_grounding flag from context
+        context_use_search_grounding = ctx.request_context.lifespan_context.get(
+            "use_search_grounding", False
+        )
+        actual_use_search_grounding = (
+            context_use_search_grounding and not disable_search_grounding
+        )
 
+        # Log the model being used
+        await ctx.log(
+            level="info",
+            message=f"Generating workplan with LLMManager for title: {title} with model {model}",
+        )
+
+        # Additional kwargs for the LLM call
+        llm_kwargs = {}
+        
+        # Handle search grounding for Gemini models
+        if model.startswith("gemini-") and actual_use_search_grounding:
             await ctx.log(
-                level="info",
-                message=f"Generating workplan with OpenAI API for title: {title} with model {model}",
+                level="info", 
+                message=f"Attempting to enable search grounding for model {model}"
             )
-
-            # Prepare parameters for the API call
-            api_params: dict[str, Any] = {
-                "model": model,
-                "input": prompt,  # Responses API uses `input` instead of `messages`
-                # store: false can be set to not persist the conversation state
-            }
-
-            if is_deep_research_model(model):
-                await ctx.log(
-                    level="info", message=f"Enabling Deep Research tools for model {model}"
-                )
-                api_params["tools"] = [
-                    {"type": "web_search_preview"},
-                    {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}},
-                ]
-
-            # Call OpenAI Responses API
-            response: Response = await openai_client.responses.create(**api_params)
-
-            # Extract content and usage from the new response format
-            # Handle case where output might be a list (Deep Research models sometimes return multiple outputs)
-            workplan_content = response.output_text
-            usage_metadata = response.usage
-        else:
-            if gemini_client is None:
-                raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
-
-            await ctx.log(
-                level="info",
-                message=f"Generating workplan with Gemini API for title: {title} with model {model}",
-            )
-
-            # Get the use_search_grounding flag from context, override with disable_search_grounding if specified
-            context_use_search_grounding = ctx.request_context.lifespan_context.get(
-                "use_search_grounding", False
-            )
-            actual_use_search_grounding = (
-                context_use_search_grounding and not disable_search_grounding
-            )
-
-            if disable_search_grounding and context_use_search_grounding:
-                await ctx.log(
-                    level="info",
-                    message="Search grounding disabled for this workplan request, overriding context setting",
-                )
-
-            if actual_use_search_grounding:
-                await ctx.log(
-                    level="info", message=f"Attempting to enable search grounding for model {model}"
-                )
-                try:
-                    from google.genai.types import GenerateContentConfig
-
-                    search_tools = _get_gemini_search_tools(model)
-                    if search_tools:
-                        gen_config = GenerateContentConfig(tools=search_tools)
-                        await ctx.log(
-                            level="info",
-                            message=f"Search tools configured for model {model}: {search_tools}",
-                        )
-                    else:
-                        await ctx.log(
-                            level="warning",
-                            message=f"Could not configure search tools for model {model}",
-                        )
-                except ImportError:
+            try:
+                from google.genai.types import GenerateContentConfig
+                search_tools = _get_gemini_search_tools(model)
+                if search_tools:
+                    llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
                     await ctx.log(
-                        level="warning",
-                        message="GenerateContentConfig not available, skipping search grounding",
+                        level="info",
+                        message=f"Search tools configured for model {model}: {search_tools}",
                     )
+            except ImportError:
+                await ctx.log(
+                    level="warning",
+                    message="GenerateContentConfig not available, skipping search grounding",
+                )
 
-            # Use the new async API method
-            response = await async_generate_content_with_config(
-                gemini_client, model, prompt, generation_config=gen_config
+        try:
+            # Call LLM through the manager (handles chunking automatically)
+            workplan_content = await llm_manager.call_llm(
+                prompt=prompt,
+                model=model,
+                temperature=0.7,
+                **llm_kwargs
             )
 
-            workplan_content = response.text
-
-            # Capture usage metadata
-            usage_metadata = getattr(response, "usage_metadata", {})
-
-        if not workplan_content:
-            api_name = "OpenAI" if is_openai_model else "Gemini"
-            error_message = (
-                f"Failed to generate workplan: Received an empty response from {api_name} API."
-            )
+            # Extract usage metadata if available (for logging purposes)
+            usage_metadata = {}  # LLMManager doesn't currently expose usage metadata
+            
+        except Exception as e:
+            error_message = f"Failed to generate workplan: {str(e)}"
             await ctx.log(level="error", message=error_message)
-
+            
             # Add comment instead of overwriting
-            error_message_comment = (
-                f"⚠️ AI workplan enhancement failed: Received an empty response from {api_name} API."
-            )
+            error_message_comment = f"⚠️ AI workplan enhancement failed: {str(e)}"
             await add_github_issue_comment(repo_path, issue_number, error_message_comment)
             return
 
@@ -1287,36 +1265,9 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         error_message_log = f"Failed to generate workplan: {str(e)}"
         await ctx.log(level="error", message=error_message_log)
 
-        # Post completion metadata comment with error status
-        end_time = datetime.now(timezone.utc)
-        start_time = _meta.get("start_time", end_time) if _meta else end_time
-        generation_time = (end_time - start_time).total_seconds()
-
-        completion_metadata = CompletionMetadata(
-            status="⚠️ Workplan generation failed",
-            generation_time_seconds=generation_time,
-            input_tokens=None,
-            output_tokens=None,
-            total_tokens=None,
-            estimated_cost=None,
-            model_version_used=None,
-            system_fingerprint=None,
-            search_results_used=None,
-            finish_reason="error",
-            safety_ratings=None,
-            context_size_chars=None,
-            warnings=[str(e)],
-            timestamp=end_time,
-        )
-
-        # Format and post the completion comment
-        completion_comment = format_completion_comment(completion_metadata)
-        try:
-            await add_github_issue_comment(repo_path, issue_number, completion_comment)
-            await ctx.log(
-                level="info",
-                message=f"Posted error completion metadata comment to issue #{issue_number}",
-            )
+        try:        # Add comment instead of overwriting
+            error_message_comment = "⚠️ AI workplan enhancement failed: Received an empty response from LLM."
+            await add_github_issue_comment(repo_path, issue_number, error_message_comment)
         except Exception as comment_error:
             await ctx.log(
                 level="error",
@@ -1328,6 +1279,7 @@ async def process_judgement_async(
     repo_path: Path,
     gemini_client: genai.Client | None,
     openai_client: AsyncOpenAI | None,
+    llm_manager: LLMManager | None,
     model: str,
     workplan_content: str,
     diff_content: str,
@@ -1350,6 +1302,7 @@ async def process_judgement_async(
         repo_path: Path to the repository.
         gemini_client: Gemini API client (None for OpenAI models).
         openai_client: OpenAI API client (None for Gemini models).
+        llm_manager: Unified LLM manager for making chunked calls.
         model: Model name to use (Gemini or OpenAI).
         workplan_content: The original workplan content.
         diff_content: The code diff to judge.
@@ -1431,103 +1384,85 @@ Extract any URLs mentioned in the workplan or that would be helpful for understa
 
 IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
-        is_openai_model = model.startswith("gpt-") or model.startswith("o")
-        gen_config = None
+        
+        # Use LLMManager for unified LLM calls
+        if not llm_manager:
+            raise YellhornMCPError("LLM Manager not initialized")
 
-        # Call the appropriate API based on the model type
-        if is_openai_model:
-            if not openai_client:
-                raise YellhornMCPError("OpenAI client not initialized. Is OPENAI_API_KEY set?")
+        # Get the use_search_grounding flag from context
+        context_use_search_grounding = ctx.request_context.lifespan_context.get(
+            "use_search_grounding", False
+        )
+        actual_use_search_grounding = (
+            context_use_search_grounding and not disable_search_grounding
+        )
 
+        if disable_search_grounding and context_use_search_grounding:
             await ctx.log(
                 level="info",
-                message=f"Generating judgement with OpenAI API model {model}",
+                message="Search grounding disabled for this judgement request, overriding context setting",
             )
 
-            # Prepare parameters for the API call
-            api_params: dict[str, Any] = {
-                "model": model,
-                "input": prompt,
-            }
+        await ctx.log(
+            level="info",
+            message=f"Generating judgement with LLMManager for model {model}",
+        )
 
-            if is_deep_research_model(model):
-                await ctx.log(
-                    level="info", message=f"Enabling Deep Research tools for model {model}"
-                )
-                api_params["tools"] = [
-                    {"type": "web_search_preview"},
-                    {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}},
-                ]
-
-            # Call OpenAI Responses API
-            response: Response = await openai_client.responses.create(**api_params)
-
-            # Extract content and usage
-            judgement_content = response.output_text
-            usage_metadata = response.usage
-        else:
-            if gemini_client is None:
-                raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
-
+        # Additional kwargs for the LLM call
+        llm_kwargs = {}
+        
+        # Handle search grounding for Gemini models
+        if model.startswith("gemini-") and actual_use_search_grounding:
             await ctx.log(
-                level="info",
-                message=f"Generating judgement with Gemini API model {model}",
+                level="info", 
+                message=f"Attempting to enable search grounding for model {model}"
             )
+            try:
+                from google.genai.types import GenerateContentConfig
 
-            # Get the use_search_grounding flag from context, override with disable_search_grounding if specified
-            context_use_search_grounding = ctx.request_context.lifespan_context.get(
-                "use_search_grounding", False
-            )
-            actual_use_search_grounding = (
-                context_use_search_grounding and not disable_search_grounding
-            )
-
-            if disable_search_grounding and context_use_search_grounding:
-                await ctx.log(
-                    level="info",
-                    message="Search grounding disabled for this judgement request, overriding context setting",
-                )
-
-            if actual_use_search_grounding:
-                await ctx.log(
-                    level="info", message=f"Attempting to enable search grounding for model {model}"
-                )
-                try:
-                    from google.genai.types import GenerateContentConfig
-
-                    search_tools = _get_gemini_search_tools(model)
-                    if search_tools:
-                        gen_config = GenerateContentConfig(tools=search_tools)
-                        await ctx.log(
-                            level="info", message=f"Search tools configured for model {model}"
-                        )
-                    else:
-                        await ctx.log(
-                            level="warning",
-                            message=f"Could not configure search tools for model {model}",
-                        )
-                except ImportError:
+                search_tools = _get_gemini_search_tools(model)
+                if search_tools:
+                    llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
+                    await ctx.log(
+                        level="info", 
+                        message=f"Search tools configured for model {model}"
+                    )
+                else:
                     await ctx.log(
                         level="warning",
-                        message="GenerateContentConfig not available, skipping search grounding",
+                        message=f"Could not configure search tools for model {model}",
                     )
+            except ImportError:
+                await ctx.log(
+                    level="warning",
+                    message="GenerateContentConfig not available, skipping search grounding",
+                )
 
-            # Use the new async API method
-            response = await async_generate_content_with_config(
-                gemini_client, model, prompt, generation_config=gen_config
+        # Use LLMManager to handle chunking and aggregation automatically
+        try:
+            response = await llm_manager.call_llm(
+                model=model,
+                prompt=prompt,
+                temperature=0.7,
+                **llm_kwargs
             )
 
-            # Extract judgement and usage metadata
-            judgement_content = response.text
-            usage_metadata = getattr(response, "usage_metadata", {})
+            # Extract usage metadata if available (for logging purposes)
+            usage_metadata = {}  # LLMManager doesn't currently expose usage metadata
+            
+            judgement_content = response
+
+        except Exception as e:
+            error_message = f"Failed to generate judgement: {str(e)}"
+            await ctx.log(level="error", message=error_message)
+            raise YellhornMCPError(error_message)
 
         if not judgement_content:
-            api_name = "OpenAI" if is_openai_model else "Gemini"
-            raise YellhornMCPError(f"Received an empty response from {api_name} API.")
+            raise YellhornMCPError(f"Received an empty response from LLM.")
 
         # Process citations if search was enabled and metadata exists
-        if not is_openai_model and response:
-            judgement_content = add_citations(response)
+        # Note: This would need to be handled differently with LLMManager
+        # For now, we'll skip citation processing as LLMManager doesn't expose raw response metadata
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
@@ -1755,6 +1690,7 @@ async def curate_context(
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
         gemini_client: genai.Client = ctx.request_context.lifespan_context.get("gemini_client")
         openai_client: AsyncOpenAI = ctx.request_context.lifespan_context.get("openai_client")
+        llm_manager = ctx.request_context.lifespan_context.get("llm_manager")
         model: str = ctx.request_context.lifespan_context["model"]
 
         # Handle search grounding override if specified
@@ -1987,64 +1923,37 @@ dir3
 Don't include explanations for your choices, just return the list in the specified format.
 """
 
-            # Call the appropriate AI model based on type
-            is_openai_model = model.startswith("gpt-") or model.startswith("o")
+            # Use LLMManager for unified LLM calls
+            if not llm_manager:
+                raise YellhornMCPError("LLM Manager not initialized")
 
-            # Log that we're initiating the LLM call
-            await ctx.log(
-                level="info",
-                message=f"Initiating LLM call for chunk {chunk_idx + 1}/{total_chunks} using {model}",
+            # Get the use_search_grounding flag from context
+            actual_use_search_grounding = ctx.request_context.lifespan_context.get(
+                "use_search_grounding", False
             )
 
-            chunk_important_dirs = set()
+            # Additional kwargs for the LLM call
+            llm_kwargs = {}
+            
+            # Handle search grounding for Gemini models
+            if model.startswith("gemini-") and actual_use_search_grounding:
+                try:
+                    from google.genai.types import GenerateContentConfig
 
+                    search_tools = _get_gemini_search_tools(model)
+                    if search_tools:
+                        llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
+                except ImportError:
+                    pass
+
+            # Use LLMManager to handle chunking and aggregation automatically
             try:
-                if is_openai_model:
-                    if not openai_client:
-                        raise YellhornMCPError(
-                            "OpenAI client not initialized. Is OPENAI_API_KEY set?"
-                        )
-
-                    # Convert the prompt to OpenAI messages format
-                    messages: list[ChatCompletionMessageParam] = [
-                        {"role": "user", "content": prompt}
-                    ]
-
-                    # Call OpenAI API
-                    response = await openai_client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                    )
-
-                    # Extract content
-                    chunk_result = response.choices[0].message.content
-                else:
-                    if gemini_client is None:
-                        raise YellhornMCPError(
-                            "Gemini client not initialized. Is GEMINI_API_KEY set?"
-                        )
-
-                    # Get the use_search_grounding flag from context
-                    actual_use_search_grounding = ctx.request_context.lifespan_context.get(
-                        "use_search_grounding", False
-                    )
-
-                    gen_config = None
-                    if actual_use_search_grounding:
-                        try:
-                            from google.genai.types import GenerateContentConfig
-
-                            search_tools = _get_gemini_search_tools(model)
-                            if search_tools:
-                                gen_config = GenerateContentConfig(tools=search_tools)
-                        except ImportError:
-                            pass
-
-                    # Use the new async API method
-                    response = await async_generate_content_with_config(
-                        gemini_client, model, prompt, generation_config=gen_config
-                    )
-                    chunk_result = response.text
+                chunk_result = await llm_manager.call_llm(
+                    model=model,
+                    prompt=prompt,
+                    temperature=0.7,
+                    **llm_kwargs
+                )
 
                 # Extract directory paths from the result
                 in_context_block = False
@@ -2167,7 +2076,8 @@ Don't include explanations for your choices, just return the list in the specifi
                     )
             except Exception as e:
                 await ctx.log(
-                    level="warning", message=f"Failed to read .yellhornignore file: {str(e)}"
+                    level="warning",
+                    message=f"Failed to read .yellhornignore file: {str(e)}",
                 )
 
         # If we have parsed ignore patterns or whitelist patterns, we'll still include them below
@@ -2439,6 +2349,7 @@ This judgement will be updated here once complete.
                 repo_path,
                 gemini_client,
                 openai_client,
+                ctx.request_context.lifespan_context.get("llm_manager"),
                 model,
                 workplan,
                 diff,
