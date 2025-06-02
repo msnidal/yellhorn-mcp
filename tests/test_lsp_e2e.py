@@ -153,7 +153,9 @@ async def test_e2e_python_snapshot(tmp_git_repo):
 
         # Mock is_git_repository to always return True
         with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+            # Provide the file paths to get_lsp_snapshot
+            file_paths = ["pkg/rich_sample.py"]
+            file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # Assert paths were captured correctly
     assert any("pkg/rich_sample.py" in p for p in file_paths)
@@ -185,7 +187,9 @@ async def test_e2e_go_snapshot(tmp_git_repo):
 
         # Mock is_git_repository to always return True
         with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+            # Provide the file paths to get_lsp_snapshot
+            file_paths = ["pkg/rich_sample.go"]
+            file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # Assert paths were captured correctly
     assert any("pkg/rich_sample.go" in p for p in file_paths)
@@ -224,7 +228,8 @@ async def test_e2e_syntax_error_fallback(tmp_git_repo):
         # Mock is_git_repository to always return True
         with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
             # Extract LSP snapshot
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+            file_paths = ["pkg/broken.py"]
+            file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # The file path should be included in paths
     assert any("pkg/broken.py" in p for p in file_paths)
@@ -259,7 +264,8 @@ async def test_e2e_unreadable_file(tmp_git_repo):
         # Mock is_git_repository to always return True
         with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
             # Extract LSP snapshot
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+            file_paths = ["pkg/readable.py", "pkg/binary.bin"]
+            file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # The readable file should be processed
     assert any("pkg/readable.py" in p for p in file_paths)
@@ -285,7 +291,8 @@ async def test_e2e_prompt_formatting(tmp_git_repo):
         # Mock is_git_repository to always return True
         with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
             # Get LSP snapshot
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+            file_paths = ["pkg/sample.py"]
+            file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # Format for prompt
     prompt = await format_codebase_for_prompt(file_paths, file_contents)
@@ -316,7 +323,8 @@ async def test_e2e_update_snapshot_with_diff(tmp_git_repo):
         # Mock is_git_repository to always return True
         with patch("yellhorn_mcp.server.is_git_repository", return_value=True):
             # Get initial snapshot
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+            file_paths = ["pkg/sample.py"]
+            file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # Patch git diff to simulate a file change
     with patch("yellhorn_mcp.server.run_git_command") as mock_git_2:

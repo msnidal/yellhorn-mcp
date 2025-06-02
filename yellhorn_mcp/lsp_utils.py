@@ -449,7 +449,7 @@ def _fence(lang: str, text: str) -> str:
     return f"```{lang}\n{text}\n```"
 
 
-async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
+async def get_lsp_snapshot(repo_path: Path, file_paths: list[str]) -> tuple[list[str], dict[str, str]]:
     """
     Get an LSP-style snapshot of the codebase, extracting API information.
 
@@ -465,13 +465,6 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
         Tuple of (file list, file contents dictionary), where contents contain
         API signatures, class attributes, and docstrings as plain text (no code fences)
     """
-    from yellhorn_mcp.server import get_codebase_snapshot
-
-    # Reuse logic to get paths while respecting ignores
-    # The "_mode" parameter is internal and not documented, but used to
-    # only return file paths without reading contents
-    file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths")
-
     # Filter for supported files
     py_files = [p for p in file_paths if p.endswith(".py")]
     go_files = [p for p in file_paths if p.endswith(".go")]

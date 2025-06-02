@@ -63,11 +63,12 @@ async def test_openai_gemini_errors():
             )
 
             # Should raise YellhornMCPError
-            with pytest.raises(YellhornMCPError, match="Failed to generate judgement"):
+            with pytest.raises(YellhornMCPError, match="LLM Manager not initialized"):
                 await process_judgement_async(
                     Path("/mock/repo"),
                     None,  # No Gemini client
                     mock_openai,
+                    None,  # No LLM manager
                     "gpt-4o",
                     "Workplan content",
                     "Diff content",

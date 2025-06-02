@@ -58,6 +58,8 @@ from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
 from yellhorn_mcp.search_grounding import _get_gemini_search_tools, add_citations
 from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 
+from yellhorn_mcp.lsp_utils import get_lsp_snapshot, get_lsp_diff, update_snapshot_with_full_diff_files
+
 def is_openai_model(model: str) -> bool:
     """
     Check if a model is an OpenAI model.
@@ -200,19 +202,9 @@ def format_metrics_section(model: str, usage_metadata: Any) -> str:
         return na_metrics
 
     cost = calculate_cost(model, usage.prompt_tokens, usage.completion_tokens)
-        input_tokens = usage_metadata.prompt_tokens
-        output_tokens = usage_metadata.completion_tokens
-        total_tokens = usage_metadata.total_tokens
-    else:  # Gemini models
-        # Handle both dict and object forms of usage_metadata
-        if isinstance(usage_metadata, dict):
-            input_tokens = usage_metadata.get("prompt_token_count")
-            output_tokens = usage_metadata.get("candidates_token_count")
-            total_tokens = usage_metadata.get("total_token_count")
-        else:
-            input_tokens = getattr(usage_metadata, "prompt_token_count", None)
-            output_tokens = getattr(usage_metadata, "candidates_token_count", None)
-            total_tokens = getattr(usage_metadata, "total_token_count", None)
+    input_tokens = usage_metadata.prompt_tokens
+    output_tokens = usage_metadata.completion_tokens
+    total_tokens = usage_metadata.total_tokens
 
     if input_tokens is None or output_tokens is None or total_tokens is None:
         return na_metrics
@@ -244,28 +236,21 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     """
     # Get configuration from environment variables
     repo_path = os.getenv("REPO_PATH", ".")
-    model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro")
-    is_openai_model = is_openai_model(model)
+    model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-05-06")
+    is_openai = is_openai_model(model)
 
     # Handle search grounding configuration (default to enabled for Gemini models only)
     use_search_grounding = False
-    if not is_openai_model:  # Only enable search grounding for Gemini models
+    if not is_openai:  # Only enable search grounding for Gemini models
         use_search_grounding = os.getenv("YELLHORN_MCP_SEARCH", "on").lower() != "off"
 
-    # Initialize clients based on the model type
+    # Initialize AI clients based on model
     gemini_client = None
     openai_client = None
     llm_manager = None
 
-    # For Gemini models, require Gemini API key
-    if not is_openai_model:
-        gemini_api_key = os.getenv("GEMINI_API_KEY")
-        if not gemini_api_key:
-            raise ValueError("GEMINI_API_KEY is required for Gemini models")
-        # Configure Gemini API
-        gemini_client = genai.Client(api_key=gemini_api_key)
-    # For OpenAI models, require OpenAI API key
-    else:
+    if is_openai:
+        # Initialize OpenAI client
         openai_api_key = os.getenv("OPENAI_API_KEY")
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY is required for OpenAI models")
@@ -276,6 +261,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         # Configure OpenAI API with a custom httpx client to avoid proxy issues
         http_client = httpx.AsyncClient()
         openai_client = openai.AsyncOpenAI(api_key=openai_api_key, http_client=http_client)
+    else:
+        # For Gemini models, require Gemini API key
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
+            raise ValueError("GEMINI_API_KEY is required for Gemini models")
+        # Configure Gemini API
+        gemini_client = genai.Client(api_key=gemini_api_key)
 
     # Initialize LLM Manager with available clients
     if gemini_client or openai_client:
@@ -285,7 +277,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             config={
                 "safety_margin_tokens": 2000,  # Reserve tokens for system prompts and responses
                 "overlap_ratio": 0.1,  # 10% overlap between chunks
-                "chunk_strategy": "sentences",  # Use sentence-based chunking
+                "chunk_strategy": "paragraph",  # Use paragraph-based chunking
                 "aggregation_strategy": "concatenate"  # Concatenate chunk responses
             }
         )
@@ -641,7 +633,7 @@ async def get_workplan(ctx: Context, issue_number: str) -> str:
         raise YellhornMCPError(f"Failed to retrieve workplan: {str(e)}")
 
 async def get_codebase_snapshot(
-    repo_path: Path, _mode: str = "full", log_function=print
+    repo_path: Path, _mode: str = "full", use_yellhorn_context: bool = True, log_function=print
 ) -> tuple[list[str], dict[str, str]]:
     """
     Get a snapshot of the codebase, including file list and contents.
@@ -682,7 +674,7 @@ async def get_codebase_snapshot(
     whitelist_patterns = []
 
     # First try to read from .yellhorncontext if it exists
-    if context_exists:
+    if use_yellhorn_context and context_exists:
         try:
             log_function(f"Found .yellhorncontext file, using it for filtering")
             with open(yellhorncontext_path, "r", encoding="utf-8") as f:
@@ -927,8 +919,6 @@ async def get_git_diff(
 
             # Get API-focused diff for each changed file, if supported
             try:
-                from yellhorn_mcp.lsp_utils import get_lsp_diff
-
                 lsp_diff = await get_lsp_diff(
                     repo_path, base_ref, head_ref, changed_files.splitlines()
                 )
@@ -994,9 +984,11 @@ async def process_workplan_async(
 
         # Get codebase info based on reasoning mode
         if codebase_reasoning == "lsp":
-            from yellhorn_mcp.lsp_utils import get_lsp_snapshot
+            file_paths, _ = await get_codebase_snapshot(
+                repo_path, _mode="paths", log_function=context_log
+            )
 
-            file_paths, file_contents = await get_lsp_snapshot(repo_path)
+            file_paths, file_contents = await get_lsp_snapshot(repo_path, file_paths)
             # For lsp mode, format with tree and LSP file contents
             codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
@@ -1294,7 +1286,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         await ctx.log(level="error", message=error_message_log)
 
         try:        # Add comment instead of overwriting
-            error_message_comment = "⚠️ AI workplan enhancement failed: Received an empty response from LLM."
+            error_message_comment = f"⚠️ AI workplan enhancement failed: {str(e)}"
             await add_github_issue_comment(repo_path, issue_number, error_message_comment)
         except Exception as comment_error:
             await ctx.log(
@@ -1355,19 +1347,21 @@ async def process_judgement_async(
         None (function updates the existing sub-issue).
     """
     try:
+        # Define context_log function similar to process_workplan_async
+        async def context_log(message):
+            await ctx.log(level="info", message=message)
+            
         # Process LSP snapshot if requested
         if codebase_reasoning == "lsp":
             await ctx.log(
                 level="info", message="Using LSP mode for codebase reasoning in judgement"
             )
-            # Import LSP utils and get LSP snapshot
-            from yellhorn_mcp.lsp_utils import (
-                get_lsp_snapshot,
-                update_snapshot_with_full_diff_files,
-            )
 
+            file_paths, _ = await get_codebase_snapshot(
+                repo_path, _mode="paths", log_function=context_log
+            )
             # Get LSP snapshot of the codebase
-            file_paths, file_contents = await get_lsp_snapshot(repo_path)
+            file_paths, file_contents = await get_lsp_snapshot(repo_path, file_paths)
 
             # Update the snapshot with full contents of files in the diff
             file_paths, file_contents = await update_snapshot_with_full_diff_files(
@@ -1767,7 +1761,7 @@ async def curate_context(
         # Get file paths from codebase snapshot
         # The get_codebase_snapshot already respects .gitignore patterns by default
         # This will give us only tracked and untracked files that aren't ignored by git
-        file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths")
+        file_paths, _ = await get_codebase_snapshot(repo_path, use_yellhorn_context=False, _mode="paths")
 
         if not file_paths:
             raise YellhornMCPError("No files found in repository to analyze")
@@ -1813,10 +1807,7 @@ async def curate_context(
                                 ignore_patterns.append(line)
             except Exception as e:
                 # Log but continue if there's an error reading .yellhornignore
-                await ctx.log(
-                    level="warning",
-                    message=f"Error reading .yellhornignore file: {str(e)}, proceeding without filters",
-                )
+                await ctx.log(level="warning", message=f"Failed to read .yellhornignore file: {str(e)}")
 
             # If we have patterns, apply them
             if ignore_patterns or whitelist_patterns:
@@ -1881,10 +1872,8 @@ async def curate_context(
                 level="info",
                 message="Using LSP mode for codebase analysis",
             )
-            from yellhorn_mcp.lsp_utils import get_lsp_snapshot
-            
             # Get LSP snapshot of the codebase
-            lsp_file_paths, lsp_file_contents = await get_lsp_snapshot(repo_path)
+            lsp_file_paths, lsp_file_contents = await get_lsp_snapshot(repo_path, filtered_file_paths)
             
             # Filter LSP results based on our ignore patterns
             if has_ignore_file and (ignore_patterns or whitelist_patterns):
@@ -1926,6 +1915,12 @@ async def curate_context(
                 message="Using file structure mode for codebase analysis",
             )
             directory_context = build_file_structure_context(filtered_file_paths)
+        
+        # Log peek of directory_context
+        await ctx.log(
+            level="info",
+            message=f"Directory context:\n{directory_context[:500]}..." if len(directory_context) > 500 else f"Directory context:\n{directory_context}",
+        )
 
         # Construct the system message
         system_message = """You are an expert software developer tasked with analyzing a codebase structure to identify important directories for AI context.
@@ -1965,38 +1960,12 @@ Below is the {'detailed code structure' if codebase_reasoning_mode in ['full', '
 
 Based on the user's task above, identify the most important directories that should be included in the AI context."""
 
-        # Log the filled prompt and system message
-        await ctx.log(
-            level="info",
-            message=f"Filled system message for curate_context:\n{system_message[:500]}..." if len(system_message) > 500 else f"Filled system message for curate_context:\n{system_message}",
-        )
-        await ctx.log(
-            level="info",
-            message=f"Filled prompt for curate_context:\n{prompt[:500]}..." if len(prompt) > 500 else f"Filled prompt for curate_context:\n{prompt}",
-        )
-
         # Use LLMManager for unified LLM calls
         if not llm_manager:
             raise YellhornMCPError("LLM Manager not initialized")
 
-        # Get the use_search_grounding flag from context
-        actual_use_search_grounding = ctx.request_context.lifespan_context.get(
-            "use_search_grounding", False
-        )
-
         # Additional kwargs for the LLM call
         llm_kwargs = {}
-        
-        # Handle search grounding for Gemini models
-        if model.startswith("gemini-") and actual_use_search_grounding:
-            try:
-                from google.genai.types import GenerateContentConfig
-
-                search_tools = _get_gemini_search_tools(model)
-                if search_tools:
-                    llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
-            except ImportError:
-                pass
 
         await ctx.log(
             level="info",
@@ -2016,29 +1985,28 @@ Based on the user's task above, identify the most important directories that sho
                 **llm_kwargs
             )
 
-            # Extract directory paths from the result
-            in_context_block = False
-            for line in result.split("\n"):
-                line = line.strip()
+            # Extract directory paths from all context blocks using regex
+            import re
+            # Find all context blocks (```context followed by content and closing ```)
+            context_blocks = re.findall(r'```context\n([\s\S]*?)\n```', result, re.MULTILINE)
+            
+            # Process each block
+            for block in context_blocks:
+                for line in block.split('\n'):
+                    line = line.strip()
+                    # Skip empty lines and comments
+                    if line and not line.startswith('#'):
+                        # Validate that the directory exists in our sorted_dirs list
+                        if line in sorted_dirs or line == ".":
+                            all_important_dirs.add(line)
 
-                if line == "```context":
-                    in_context_block = True
-                    continue
-                elif line == "```" and in_context_block:
-                    in_context_block = False
-                    continue
-
-                if in_context_block and line and not line.startswith("#"):
-                    # Validate that the directory exists in our sorted_dirs list
-                    if line in sorted_dirs or line == ".":
-                        all_important_dirs.add(line)
-
-            # If we didn't find a context block, try to extract directories directly
-            if not all_important_dirs and not in_context_block:
+            # If we didn't find any directories in context blocks, try to extract them directly
+            if not all_important_dirs:
                 for line in result.split("\n"):
                     line = line.strip()
                     # Only add if it looks like a directory path (no spaces, existing in our list)
-                    if line and " " not in line and (line in sorted_dirs or line == "."):
+                    # and not part of a code block
+                    if line and " " not in line and (line in sorted_dirs or line == ".") and not line.startswith('```'):
                         all_important_dirs.add(line)
 
             # Log the directories found
@@ -2119,7 +2087,7 @@ Based on the user's task above, identify the most important directories that sho
         # Generate the final .yellhorncontext file content with comments
         final_content = "# Yellhorn Context File - AI context optimization\n"
         final_content += f"# Generated by yellhorn-mcp curate_context tool\n"
-        final_content += f"# Based on task: {user_task[:100]}\n\n"
+        final_content += f"# Based on task: {user_task[:80]}\n\n"
 
         # Copy patterns from .gitignore file if it exists
         gitignore_path = repo_path / ".gitignore"

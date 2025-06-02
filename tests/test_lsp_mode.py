@@ -3,7 +3,7 @@
 import ast
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
 
 import pytest
 
@@ -205,7 +205,8 @@ async def test_get_lsp_snapshot():
                 ]
 
                 with patch("pathlib.Path.is_file", return_value=True):
-                    file_paths, file_contents = await get_lsp_snapshot(Path("/mock/repo"))
+                    file_paths = ["file1.py", "file2.py", "file3.go", "other.txt"]
+                    file_paths, file_contents = await get_lsp_snapshot(Path("/mock/repo"), file_paths)
 
                     # Check paths
                     assert "file1.py" in file_paths
@@ -335,48 +336,63 @@ async def test_integration_process_workplan_lsp_mode():
     detailed_description = "Test description"
 
     # Patch necessary functions
-    with patch("yellhorn_mcp.lsp_utils.get_lsp_snapshot") as mock_lsp_snapshot:
-        mock_lsp_snapshot.return_value = (["file1.py"], {"file1.py": "```py\ndef function1()\n```"})
+    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_codebase_snapshot:
+        mock_codebase_snapshot.return_value = (["file1.py"], {})
+        
+        with patch("yellhorn_mcp.server.get_lsp_snapshot") as mock_lsp_snapshot:
+            mock_lsp_snapshot.return_value = (["file1.py"], {"file1.py": "```py\ndef function1()\n```"})
 
-        with patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format:
-            mock_format.return_value = "<formatted LSP snapshot>"
+            with patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format:
+                mock_format.return_value = "<formatted LSP snapshot>"
 
-            with patch("yellhorn_mcp.server.format_metrics_section") as mock_metrics:
-                mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
+                with patch("yellhorn_mcp.server.format_metrics_section") as mock_metrics:
+                    mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
-                with patch("yellhorn_mcp.server.update_github_issue") as mock_update:
-                    # Call the function with LSP mode
-                    await process_workplan_async(
-                        repo_path,
-                        gemini_client,
-                        None,  # No OpenAI client
-                        model,
-                        title,
-                        issue_number,
-                        ctx,
-                        detailed_description=detailed_description,
-                    )
+                    with patch("yellhorn_mcp.server.update_github_issue") as mock_update:
+                        # Mock LLM manager
+                        mock_llm_manager = MagicMock()
+                        mock_llm_manager.call_llm_with_citations = AsyncMock(
+                            return_value={
+                                "content": "Mock workplan content",
+                                "usage_metadata": response.usage_metadata,
+                                "grounding_metadata": None
+                            }
+                        )
+                        
+                        # Call the function with LSP mode
+                        try:
+                            await process_workplan_async(
+                                repo_path,
+                                gemini_client,
+                                None,  # No OpenAI client
+                                mock_llm_manager,  # Mock LLM manager
+                                model,
+                                title,
+                                issue_number,
+                                ctx,
+                                detailed_description=detailed_description,
+                            )
+                        except Exception as e:
+                            print(f"Exception occurred: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            raise
 
-                    # Verify LSP snapshot was used
-                    mock_lsp_snapshot.assert_called_once_with(repo_path)
+                        # Verify LSP snapshot was used
+                        mock_lsp_snapshot.assert_called_once_with(repo_path, ["file1.py"])
 
-                    # Verify formatted snapshot was passed to the prompt
-                    # The prompt might be in either the old or new API call
-                    if gemini_client.aio.models.generate_content.called:
-                        prompt = gemini_client.aio.models.generate_content.call_args[1]["contents"]
+                        # Verify formatted snapshot was passed to the prompt
+                        mock_llm_manager.call_llm_with_citations.assert_called_once()
+                        call_args = mock_llm_manager.call_llm_with_citations.call_args
+                        prompt = call_args[1]["prompt"]  # Named argument
                         assert "<formatted LSP snapshot>" in prompt
-                    elif gemini_client.aio.generate_content.called:
-                        prompt = gemini_client.aio.generate_content.call_args[1]["contents"]
-                        assert "<formatted LSP snapshot>" in prompt
-                    else:
-                        assert False, "Neither generate_content method was called"
 
-                    # Verify GitHub issue was updated
-                    mock_update.assert_called_once()
-                    issue_body = mock_update.call_args[0][2]
-                    assert "# Test Workplan" in issue_body
-                    assert "Mock workplan content" in issue_body
-                    assert "## Metrics" in issue_body
+                        # Verify GitHub issue was updated
+                        mock_update.assert_called_once()
+                        issue_body = mock_update.call_args[0][2]
+                        assert "# Test Workplan" in issue_body
+                        assert "Mock workplan content" in issue_body
+                        assert "## Metrics" in issue_body
 
 
 @pytest.mark.asyncio
@@ -418,40 +434,50 @@ async def test_integration_process_judgement_lsp_mode():
     ctx.log = AsyncMock()
 
     # Patch necessary functions
-    with patch("yellhorn_mcp.lsp_utils.get_lsp_snapshot") as mock_lsp_snapshot:
-        mock_lsp_snapshot.return_value = (["file1.py"], {"file1.py": "```py\ndef function1()\n```"})
+    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_codebase_snapshot:
+        mock_codebase_snapshot.return_value = (["file1.py"], {})
+        
+        with patch("yellhorn_mcp.server.get_lsp_snapshot") as mock_lsp_snapshot:
+            mock_lsp_snapshot.return_value = (["file1.py"], {"file1.py": "```py\ndef function1()\n```"})
 
-        with patch(
-            "yellhorn_mcp.lsp_utils.update_snapshot_with_full_diff_files"
-        ) as mock_update_diff:
-            mock_update_diff.return_value = (
-                ["file1.py"],
-                {"file1.py": "```py\ndef function1_full_content()\n```"},
-            )
+            with patch(
+                "yellhorn_mcp.server.update_snapshot_with_full_diff_files"
+            ) as mock_update_diff:
+                mock_update_diff.return_value = (
+                    ["file1.py"],
+                    {"file1.py": "```py\ndef function1_full_content()\n```"},
+                )
 
-            with patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format:
-                mock_format.return_value = "<formatted LSP+diff snapshot>"
+                with patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format:
+                    mock_format.return_value = "<formatted LSP+diff snapshot>"
 
-                with patch("yellhorn_mcp.server.format_metrics_section") as mock_metrics:
-                    mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
+                    with patch("yellhorn_mcp.server.format_metrics_section") as mock_metrics:
+                        mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
-                    with patch(
-                        "yellhorn_mcp.server.create_github_subissue"
-                    ) as mock_create_subissue:
-                        mock_create_subissue.return_value = (
-                            "https://github.com/mock/repo/issues/456"
-                        )
+                        with patch(
+                            "yellhorn_mcp.server.create_github_subissue"
+                        ) as mock_create_subissue:
+                            mock_create_subissue.return_value = (
+                                "https://github.com/mock/repo/issues/456"
+                            )
 
-                        with patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue:
-                            with patch(
-                                "yellhorn_mcp.server.add_github_issue_comment"
-                            ) as mock_add_comment:
+                            with patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue:
+
+                                # Mock LLM manager
+                                mock_llm_manager = MagicMock()
+                                mock_llm_manager.call_llm_with_usage = AsyncMock(
+                                    return_value={
+                                        "content": "Mock judgement content",
+                                        "usage_metadata": response.usage_metadata,
+                                    }
+                                )
 
                                 # Call the function with LSP mode
                                 result = await process_judgement_async(
                                     repo_path,
                                     gemini_client,
                                     None,  # No OpenAI client
+                                    mock_llm_manager,  # Mock LLM manager
                                     model,
                                     workplan,
                                     diff,
@@ -464,7 +490,7 @@ async def test_integration_process_judgement_lsp_mode():
                                 )
 
                                 # Verify LSP snapshot was used
-                                mock_lsp_snapshot.assert_called_once_with(repo_path)
+                                mock_lsp_snapshot.assert_called_once_with(repo_path, ["file1.py"])
 
                                 # Verify diff files were processed
                                 mock_update_diff.assert_called_once_with(

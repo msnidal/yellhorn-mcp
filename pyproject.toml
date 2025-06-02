@@ -21,8 +21,11 @@ dependencies = [
     "aiohttp~=3.12.13",
     "pydantic~=2.11.7",
     "openai~=1.93.0",
+    "google-genai~=1.16.1",
+    "google-api-core-2.24.2",
     "jedi~=0.19.2",
     "tiktoken~=0.8.0",
+    "tenacity-9.1.2"
 ]
 
 [project.optional-dependencies]

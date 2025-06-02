@@ -1,12 +1,82 @@
-"""Unified LLM Manager with automatic chunking support."""
+"""Unified LLM Manager with automatic chunking support and rate limit handling."""
 
 import asyncio
 import json
 import re
+import time
 from typing import Any, Dict, List, Optional, Union
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 from google import genai
+from google.api_core import exceptions as google_exceptions
+from tenacity import (
+    retry,
+    retry_if_exception,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+    before_sleep_log,
+    RetryCallState
+)
+import logging
 from .token_counter import TokenCounter
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+def log_retry_attempt(retry_state: RetryCallState) -> None:
+    """Log the retry attempt with exponential backoff details."""
+    if retry_state.outcome is None:
+        return
+        
+    attempt = retry_state.attempt_number
+    wait_time = retry_state.outcome_timestamp - retry_state.start_time
+    
+    logger.warning(
+        f"Retrying {retry_state.fn.__name__} after {wait_time:.1f} seconds "
+        f"(attempt {attempt}): {str(retry_state.outcome.exception())}"
+    )
+
+def is_retryable_error(exception: Exception) -> bool:
+    """Check if the exception is retryable."""
+    # Handle ClientError from google.generativeai which wraps the actual error
+    if hasattr(exception, 'message') and hasattr(exception, 'code'):
+        error_message = str(exception.message).lower()
+        error_code = getattr(exception, 'code', None)
+        
+        # Check for rate limiting or quota exceeded
+        if error_code == 429 or 'resource_exhausted' in error_message or 'quota' in error_message:
+            return True
+    
+    # Check for standard retryable exceptions
+    if any(isinstance(exception, exc_type) for exc_type in [
+        RateLimitError,
+        google_exceptions.ResourceExhausted,
+        google_exceptions.TooManyRequests,
+        ConnectionError,
+        asyncio.TimeoutError
+    ]):
+        return True
+    
+    # Check for error messages in string representation
+    error_message = str(exception).lower()
+    if any(term in error_message for term in ['resource_exhausted', 'quota', 'rate limit', 'too many requests']):
+        return True
+        
+    return False
+
+# Common retry decorator for API calls
+api_retry = retry(
+    retry=retry_if_exception(is_retryable_error),
+    wait=wait_exponential(
+        multiplier=1,
+        min=4,
+        max=60,
+        exp_base=2
+    ),
+    stop=stop_after_attempt(5),
+    before_sleep=log_retry_attempt,
+    reraise=True
+)
 
 
 class UsageMetadata:
@@ -81,11 +151,43 @@ class UsageMetadata:
     
     def __bool__(self) -> bool:
         """Check if we have valid usage data."""
-        return self.total_tokens > 0
-
+        try:
+            return self.total_tokens is not None and self.total_tokens > 0
+        except (TypeError, AttributeError):
+            return False
 
 class ChunkingStrategy:
-    """Strategies for splitting text into chunks."""
+    """Strategies for splitting text into chunks while respecting token limits and natural boundaries."""
+    
+    @staticmethod
+    def _find_split_point(text: str, max_length: int) -> int:
+        """
+        Find the best split point in text before max_length.
+        Prefers splitting at paragraph breaks, then at sentence boundaries, then at word boundaries.
+        """
+        # First try to split at paragraph breaks
+        para_break = text.rfind('\n', 0, max_length)
+        if para_break > 0:
+            return para_break + 2  # Include the newlines
+            
+        # Then try to split at sentence boundaries
+        sentence_break = max(
+            text.rfind('. ', 0, max_length),
+            text.rfind('! ', 0, max_length),
+            text.rfind('? ', 0, max_length),
+            text.rfind('\n', 0, max_length)  # Or at least at a newline
+        )
+        
+        if sentence_break > 0:
+            return sentence_break + 1  # Include the space or newline
+            
+        # Finally, split at the last space before max_length
+        space_break = text.rfind(' ', 0, max_length)
+        if space_break > 0:
+            return space_break
+            
+        # If no good break found, split at max_length
+        return max_length
     
     @staticmethod
     def split_by_sentences(
@@ -93,10 +195,11 @@ class ChunkingStrategy:
         max_tokens: int, 
         token_counter: TokenCounter,
         model: str,
-        overlap_ratio: float = 0.1
+        overlap_ratio: float = 0.1,
+        safety_margin_tokens: int = 50
     ) -> List[str]:
         """
-        Split text into chunks by sentence boundaries.
+        Split text into chunks that don't exceed max_tokens, trying to respect sentence boundaries.
         
         Args:
             text: Text to split
@@ -108,73 +211,73 @@ class ChunkingStrategy:
         Returns:
             List of text chunks
         """
-        # Split by sentence-ending punctuation
-        sentences = re.split(r'(?<=[.!?])\s+', text)
+        if not text.strip():
+            return []
         
+        target_tokens = max_tokens - safety_margin_tokens
         chunks = []
-        current_chunk = []
-        current_tokens = 0
+        remaining_text = text
         overlap_tokens = int(max_tokens * overlap_ratio)
         
-        for sentence in sentences:
-            sentence_tokens = token_counter.count_tokens(sentence, model)
+        while remaining_text:
+            # Estimate chunk size
+            estimated_chars = len(remaining_text)
+            estimated_tokens = token_counter.count_tokens(remaining_text[:estimated_chars], model)
             
-            # If single sentence exceeds max tokens, split it further
-            if sentence_tokens > max_tokens:
-                # Split by clauses or words
-                words = sentence.split()
-                word_chunk = []
-                word_tokens = 0
+            # Adjust chunk size based on token count
+            if estimated_tokens > target_tokens:
+                # Binary search for the right split point
+                low = 0
+                high = len(remaining_text)
+                best_split = len(remaining_text)
                 
-                for word in words:
-                    word_token_count = token_counter.count_tokens(word + " ", model)
-                    if word_tokens + word_token_count > max_tokens and word_chunk:
-                        chunks.append(" ".join(word_chunk))
-                        # Add overlap from the end of previous chunk
-                        overlap_words = []
-                        overlap_token_count = 0
-                        for w in reversed(word_chunk):
-                            w_tokens = token_counter.count_tokens(w + " ", model)
-                            if overlap_token_count + w_tokens <= overlap_tokens:
-                                overlap_words.insert(0, w)
-                                overlap_token_count += w_tokens
-                            else:
-                                break
-                        word_chunk = overlap_words + [word]
-                        word_tokens = overlap_token_count + word_token_count
+                while low <= high:
+                    mid = (low + high) // 2
+                    chunk = remaining_text[:mid]
+                    tokens = token_counter.count_tokens(chunk, model)
+                    
+                    if tokens <= target_tokens:
+                        best_split = mid
+                        low = mid + 1
                     else:
-                        word_chunk.append(word)
-                        word_tokens += word_token_count
+                        high = mid - 1
                 
-                if word_chunk:
-                    chunks.append(" ".join(word_chunk))
+                # Find the best split point near the token limit
+                if best_split < len(remaining_text):
+                    split_pos = ChunkingStrategy._find_split_point(
+                        remaining_text[:best_split], best_split
+                    )
+                    # Ensure we make progress
+                    if split_pos == 0 or split_pos == best_split:
+                        split_pos = best_split
+                else:
+                    split_pos = best_split
+            else:
+                split_pos = len(remaining_text)
             
-            # Normal sentence processing
-            elif current_tokens + sentence_tokens > max_tokens and current_chunk:
-                # Save current chunk
-                chunks.append(" ".join(current_chunk))
+            # Extract the chunk and remaining text
+            chunk = remaining_text[:split_pos].strip()
+            remaining_text = remaining_text[split_pos:].strip()
+            
+            if not chunk:
+                break
                 
-                # Calculate overlap sentences
-                overlap_sentences = []
-                overlap_token_count = 0
-                for sent in reversed(current_chunk):
-                    sent_tokens = token_counter.count_tokens(sent, model)
-                    if overlap_token_count + sent_tokens <= overlap_tokens:
-                        overlap_sentences.insert(0, sent)
-                        overlap_token_count += sent_tokens
-                    else:
+            chunks.append(chunk)
+            
+            # Add overlap if there's more text to process
+            if remaining_text and overlap_tokens > 0:
+                # Find the start of the next sentence for overlap
+                next_sentence_start = 0
+                for i, c in enumerate(remaining_text):
+                    if c in '.!?':
+                        next_sentence_start = i + 1
+                        if next_sentence_start < len(remaining_text) and remaining_text[next_sentence_start] == ' ':
+                            next_sentence_start += 1
                         break
                 
-                # Start new chunk with overlap
-                current_chunk = overlap_sentences + [sentence]
-                current_tokens = overlap_token_count + sentence_tokens
-            else:
-                current_chunk.append(sentence)
-                current_tokens += sentence_tokens
-        
-        # Add final chunk
-        if current_chunk:
-            chunks.append(" ".join(current_chunk))
+                if next_sentence_start > 0 and next_sentence_start < len(remaining_text):
+                    overlap_text = remaining_text[:next_sentence_start]
+                    remaining_text = overlap_text + remaining_text[next_sentence_start:]
         
         return chunks
     
@@ -184,48 +287,74 @@ class ChunkingStrategy:
         max_tokens: int,
         token_counter: TokenCounter,
         model: str,
-        overlap_ratio: float = 0.1
+        overlap_ratio: float = 0.1,
+        safety_margin_tokens: int = 50
     ) -> List[str]:
-        """Split text by paragraphs with overlap."""
-        paragraphs = text.split('\n\n')
+        """
+        Split text into chunks by paragraphs, respecting token limits.
         
+        Args:
+            text: Text to split
+            max_tokens: Maximum tokens per chunk
+            token_counter: TokenCounter instance
+            model: Model name for token counting
+            overlap_ratio: Ratio of overlap between chunks (0.0 to 0.5)
+            
+        Returns:
+            List of text chunks
+        """
+        if not text.strip():
+            return []
+            
+        target_tokens = max_tokens - safety_margin_tokens
+        # First split by paragraphs
+        paragraphs = [p for p in text.split('\n') if p.strip()]
         chunks = []
         current_chunk = []
         current_tokens = 0
-        overlap_tokens = int(max_tokens * overlap_ratio)
         
         for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+                
             para_tokens = token_counter.count_tokens(para, model)
             
-            if para_tokens > max_tokens:
-                # If paragraph is too large, use sentence splitting
-                para_chunks = ChunkingStrategy.split_by_sentences(
-                    para, max_tokens, token_counter, model, overlap_ratio
+            # If paragraph is too large, split it by sentences
+            if para_tokens > target_tokens:
+                # Flush current chunk if not empty
+                if current_chunk:
+                    chunks.append('\n'.join(current_chunk))
+                    current_chunk = []
+                    current_tokens = 0
+                
+                # Split the large paragraph by sentences
+                chunks.extend(
+                    ChunkingStrategy.split_by_sentences(
+                        para, max_tokens, token_counter, model, overlap_ratio, safety_margin_tokens
+                    )
                 )
-                for chunk in para_chunks:
-                    chunks.append(chunk)
-            elif current_tokens + para_tokens > max_tokens and current_chunk:
-                chunks.append("\n\n".join(current_chunk))
+            # If adding this paragraph would exceed the token limit
+            elif current_tokens + para_tokens > target_tokens and current_chunk:
+                chunks.append('\n'.join(current_chunk))
                 
-                # Add overlap
-                overlap_paras = []
-                overlap_token_count = 0
-                for p in reversed(current_chunk):
-                    p_tokens = token_counter.count_tokens(p, model)
-                    if overlap_token_count + p_tokens <= overlap_tokens:
-                        overlap_paras.insert(0, p)
-                        overlap_token_count += p_tokens
-                    else:
-                        break
-                
-                current_chunk = overlap_paras + [para]
-                current_tokens = overlap_token_count + para_tokens
+                # Add overlap from previous chunk if needed
+                if overlap_ratio > 0 and chunks:
+                    overlap_tokens = int(max_tokens * overlap_ratio)
+                    overlap_text = '\n'.join(current_chunk)
+                    overlap_text = overlap_text[-overlap_tokens * 4:]  # Rough estimate of chars per token
+                    current_chunk = [overlap_text, para]
+                    current_tokens = token_counter.count_tokens('\n'.join(current_chunk), model)
+                else:
+                    current_chunk = [para]
+                    current_tokens = para_tokens
             else:
                 current_chunk.append(para)
-                current_tokens += para_tokens
+                current_tokens += para_tokens + 2  # Account for newlines
         
+        # Add the last chunk if not empty
         if current_chunk:
-            chunks.append("\n\n".join(current_chunk))
+            chunks.append('\n'.join(current_chunk))
         
         return chunks
 
@@ -247,7 +376,7 @@ class LLMManager:
             gemini_client: Gemini client instance  
             config: Configuration dictionary
         """
-        self.token_counter = TokenCounter()
+        self.token_counter = TokenCounter(config)
         self.openai_client = openai_client
         self.gemini_client = gemini_client
         self.config = config or {}
@@ -325,6 +454,7 @@ class LLMManager:
         else:
             raise ValueError(f"Unknown model type: {model}")
     
+    @api_retry
     async def _call_openai(
         self,
         prompt: str,
@@ -334,7 +464,23 @@ class LLMManager:
         response_format: Optional[str],
         **kwargs
     ) -> Union[str, Dict[str, Any]]:
-        """Call OpenAI API."""
+        """Call OpenAI API with automatic retry on rate limits.
+        
+        Args:
+            prompt: The prompt to send
+            model: Model name
+            temperature: Temperature for generation
+            system_message: Optional system message
+            response_format: Optional response format (e.g., "json")
+            **kwargs: Additional parameters for the OpenAI API
+            
+        Returns:
+            Generated response (string or dict if JSON format)
+            
+        Raises:
+            RateLimitError: If rate limited and max retries exceeded
+            ValueError: If OpenAI client is not initialized
+        """
         if not self.openai_client:
             raise ValueError("OpenAI client not initialized")
         
@@ -353,21 +499,27 @@ class LLMManager:
         if response_format == "json":
             params["response_format"] = {"type": "json_object"}
         
-        response = await self.openai_client.chat.completions.create(**params)
-        content = response.choices[0].message.content
-        
-        # Store usage metadata
-        if hasattr(response, 'usage'):
-            self._last_usage_metadata = UsageMetadata(response.usage)
-        
-        if response_format == "json":
-            try:
-                return json.loads(content)
-            except json.JSONDecodeError:
-                return {"error": "Failed to parse JSON", "content": content}
-        
-        return content
+        try:
+            response = await self.openai_client.chat.completions.create(**params)
+            content = response.choices[0].message.content
+
+            # Store usage metadata
+            if hasattr(response, 'usage'):
+                self._last_usage_metadata = UsageMetadata(response.usage)
+
+            if response_format == "json":
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    return {"error": "Failed to parse JSON", "content": content}
+
+            return content
+
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {str(e)}")
+            raise
     
+    @api_retry
     async def _call_gemini(
         self,
         prompt: str,
@@ -377,7 +529,23 @@ class LLMManager:
         response_format: Optional[str],
         **kwargs
     ) -> Union[str, Dict[str, Any]]:
-        """Call Gemini API."""
+        """Call Gemini API with automatic retry on rate limits.
+        
+        Args:
+            prompt: The prompt to send
+            model: Model name
+            temperature: Temperature for generation
+            system_message: Optional system message
+            response_format: Optional response format (e.g., "json")
+            **kwargs: Additional parameters for the Gemini API
+            
+        Returns:
+            Generated response (string or dict if JSON format)
+            
+        Raises:
+            google.api_core.exceptions.ResourceExhausted: If rate limited and max retries exceeded
+            ValueError: If Gemini client is not configured
+        """
         if not self.gemini_client:
             raise ValueError("Gemini client not configured")
         
@@ -409,46 +577,50 @@ class LLMManager:
         else:
             config = config_dict
         
-        # Make the API call
-        response = await self.gemini_client.aio.models.generate_content(
-            model=f"models/{model}",
-            contents=full_prompt,
-            config=config
-        )
-        
-        # Extract text from response
-        if hasattr(response, 'text'):
-            content = response.text
-        else:
-            content = str(response)
-        
-        # Store usage metadata if available
-        if hasattr(response, 'usage_metadata'):
-            usage = response.usage_metadata
-            self._last_usage_metadata = UsageMetadata(usage)
-        
-        # Parse JSON if requested
-        if response_format == "json":
-            # Try to extract JSON from the response
-            import re
-            json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
-            json_matches = re.findall(json_pattern, content, re.DOTALL)
+        try:
+            # Make the API call
+            response = await self.gemini_client.aio.models.generate_content(
+                model=f"models/{model}",
+                contents=full_prompt,
+                config=config
+            )
             
-            if json_matches:
-                # Try to parse the largest JSON match
-                for json_match in sorted(json_matches, key=len, reverse=True):
+            # Extract text from response
+            if hasattr(response, 'text'):
+                content = response.text
+            else:
+                content = str(response)
+            
+            # Store usage metadata if available
+            if hasattr(response, 'usage_metadata'):
+                usage = response.usage_metadata
+                self._last_usage_metadata = UsageMetadata(usage)
+            
+            # Parse JSON if requested
+            if response_format == "json":
+                # Try to extract JSON from the response
+                import re
+                json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+                json_matches = re.findall(json_pattern, content, re.DOTALL)
+                
+                if json_matches:
                     try:
-                        return json.loads(json_match)
-                    except:
-                        pass
-                return {"error": "Failed to parse JSON", "content": content}
-        
-        # Store the response object for potential citation processing
-        if hasattr(response, 'grounding_metadata'):
-            # Store metadata in a thread-local or instance variable for retrieval
-            self._last_gemini_response = response
-        
-        return content
+                        return json.loads(json_matches[0])
+                    except json.JSONDecodeError:
+                        return {"error": "No valid JSON found in response", "content": content}
+                else:
+                    return {"error": "No JSON content found in response"}
+            
+            # Store the response object for potential citation processing
+            if hasattr(response, 'grounding_metadata'):
+                # Store metadata in a thread-local or instance variable for retrieval
+                self._last_gemini_response = response
+            
+            return content
+            
+        except Exception as e:
+            logger.error(f"Gemini API call failed: {str(e)}")
+            raise
     
     async def _chunked_call(
         self,
@@ -459,7 +631,19 @@ class LLMManager:
         response_format: Optional[str],
         **kwargs
     ) -> Union[str, Dict[str, Any]]:
-        """Make chunked LLM calls and aggregate results."""
+        """Make chunked LLM calls and aggregate results with rate limit handling.
+        
+        Args:
+            prompt: The prompt to send
+            model: Model name
+            temperature: Temperature for generation
+            system_message: Optional system message
+            response_format: Optional response format (e.g., "json")
+            **kwargs: Additional parameters for the LLM API
+            
+        Returns:
+            Aggregated response (string or dict if JSON format)
+        """
         # Calculate available tokens for content
         model_limit = self.token_counter.get_model_limit(model)
         system_tokens = self.token_counter.count_tokens(system_message or "", model)

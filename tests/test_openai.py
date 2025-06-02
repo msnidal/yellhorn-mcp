@@ -134,10 +134,23 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
         )
 
         # Test OpenAI client workflow
+        mock_llm_manager = MagicMock()
+        mock_llm_manager.call_llm_with_usage = AsyncMock(
+            return_value={
+                "content": "Generated workplan content",
+                "usage_metadata": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 200,
+                    "total_tokens": 300
+                }
+            }
+        )
+        
         await process_workplan_async(
             Path("/mock/repo"),
             None,  # No Gemini client
             mock_openai_client,
+            mock_llm_manager,  # Mock LLM manager
             "gpt-4o",
             "Feature Implementation Plan",
             "123",
@@ -145,16 +158,15 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
             detailed_description="Create a new feature to support X",
         )
 
-        # Check OpenAI API call
-        mock_openai_client.responses.create.assert_called_once()
-        args, kwargs = mock_openai_client.responses.create.call_args
-
+        # Check LLMManager was called correctly
+        mock_llm_manager.call_llm_with_usage.assert_called_once()
+        args, kwargs = mock_llm_manager.call_llm_with_usage.call_args
+        
         # Verify model is passed correctly
         assert kwargs.get("model") == "gpt-4o"
-
-        # Verify input parameter is used (instead of messages)
-        input_content = kwargs.get("input", "")
-        assert "Feature Implementation Plan" in input_content
+        
+        # Verify prompt content
+        assert "Feature Implementation Plan" in kwargs.get("prompt", "")
 
         # Verify metrics formatting
         mock_format_metrics.assert_called_once()
@@ -165,7 +177,7 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
         assert "# Feature Implementation Plan" in args[2]
-        assert "Mock OpenAI response text" in args[2]
+        assert "Generated workplan content" in args[2]
         assert "## Completion Metrics" in args[2]
 
 
@@ -196,6 +208,7 @@ async def test_openai_client_required():
             Path("/mock/repo"),
             None,  # No Gemini client
             None,  # No OpenAI client
+            None,  # No LLM manager
             "gpt-4o",  # OpenAI model name
             "Feature Implementation Plan",
             "123",
@@ -211,7 +224,7 @@ async def test_openai_client_required():
         args, kwargs = mock_comment.call_args
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
-        assert "OpenAI client not initialized" in args[2]
+        assert "LLM Manager not initialized" in args[2]
 
 
 @pytest.mark.asyncio
@@ -233,11 +246,25 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         workplan = "1. Implement X\n2. Test X"
         diff = "diff --git a/file.py b/file.py\n+def x(): pass"
 
+        # Create mock LLM manager
+        mock_llm_manager = MagicMock()
+        mock_llm_manager.call_llm_with_usage = AsyncMock(
+            return_value={
+                "content": "Generated judgement content",
+                "usage_metadata": {
+                    "prompt_tokens": 150,
+                    "completion_tokens": 250,
+                    "total_tokens": 400
+                }
+            }
+        )
+
         # Test without issue number (direct output)
         await process_judgement_async(
             Path("/mock/repo"),
             None,  # No Gemini client
             mock_openai_client,
+            mock_llm_manager,  # Mock LLM manager
             "gpt-4o",
             workplan,
             diff,
@@ -248,22 +275,21 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
             mock_request_context,
         )
 
-        # Check OpenAI API call
-        mock_openai_client.responses.create.assert_called_once()
-        args, kwargs = mock_openai_client.responses.create.call_args
-
+        # Check LLMManager was called correctly
+        mock_llm_manager.call_llm_with_usage.assert_called_once()
+        args, kwargs = mock_llm_manager.call_llm_with_usage.call_args
+        
         # Verify model is passed correctly
         assert kwargs.get("model") == "gpt-4o"
-
-        # Verify input parameter is used (instead of messages)
-        input_content = kwargs.get("input", "")
-        assert "<Original Workplan>" in input_content
+        
+        # Verify prompt content
+        assert "<Original Workplan>" in kwargs.get("prompt", "")
 
         # Verify the GitHub issue was updated with judgement and metrics
         mock_update_issue.assert_called_once()
         update_args = mock_update_issue.call_args[0]
         issue_body = update_args[2]  # Third argument is the issue body
-        assert "Mock OpenAI response text" in issue_body
+        assert "Generated judgement content" in issue_body
         assert "## Completion Metrics" in issue_body
 
 

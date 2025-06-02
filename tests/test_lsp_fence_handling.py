@@ -39,7 +39,8 @@ async def test_lsp_snapshot_returns_plain_text():
                 mock_extract_go.return_value = ["func Handler()", "struct Person"]
 
                 with patch("pathlib.Path.is_file", return_value=True):
-                    file_paths, file_contents = await get_lsp_snapshot(Path("/mock/repo"))
+                    file_paths = ["file1.py", "file2.go"]
+                    file_paths, file_contents = await get_lsp_snapshot(Path("/mock/repo"), file_paths)
 
                     # Verify content does NOT contain code fences
                     assert "file1.py" in file_contents

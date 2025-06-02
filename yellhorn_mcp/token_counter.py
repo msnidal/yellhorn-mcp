@@ -1,7 +1,7 @@
 """Token counting utility using tiktoken for accurate token estimation."""
 
 import tiktoken
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 
 
 class TokenCounter:
@@ -50,24 +50,46 @@ class TokenCounter:
         "gemini-2.5-flash-preview-05-20": "cl100k_base",
     }
     
-    def __init__(self):
-        """Initialize TokenCounter with encoding cache."""
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """
+        Initialize TokenCounter with encoding cache and optional configuration.
+        
+        Args:
+            config: Optional configuration dictionary that can contain:
+                - model_limits: Override default model token limits
+                - model_encodings: Override default model to encoding mapping
+                - default_encoding: Default encoding to use (default: "cl100k_base")
+                - default_token_limit: Default token limit for unknown models (default: 8192)
+        """
         self._encoding_cache: Dict[str, tiktoken.Encoding] = {}
+        self.config = config or {}
+        
+        # Initialize with config overrides if provided
+        if 'model_limits' in self.config and isinstance(self.config['model_limits'], dict):
+            # Update default limits with any overrides from config
+            self.MODEL_LIMITS = {**self.MODEL_LIMITS, **self.config['model_limits']}
+            
+        if 'model_encodings' in self.config and isinstance(self.config['model_encodings'], dict):
+            # Update default encodings with any overrides from config
+            self.MODEL_TO_ENCODING = {**self.MODEL_TO_ENCODING, **self.config['model_encodings']}
     
     def _get_encoding(self, model: str) -> tiktoken.Encoding:
         """Get the appropriate encoding for a model, with caching."""
-        encoding_name = self.MODEL_TO_ENCODING.get(model)
+        # Get encoding name from config overrides or default mapping
+        encoding_name = self.config.get('model_encodings', {}).get(model) or \
+                      self.MODEL_TO_ENCODING.get(model)
         
         if not encoding_name:
-            # Default to cl100k_base for unknown models
-            encoding_name = "cl100k_base"
+            # Use default from config or fallback to cl100k_base
+            encoding_name = self.config.get('default_encoding', 'cl100k_base')
         
         if encoding_name not in self._encoding_cache:
             try:
                 self._encoding_cache[encoding_name] = tiktoken.get_encoding(encoding_name)
             except Exception:
-                # Fallback to cl100k_base if encoding not found
-                self._encoding_cache[encoding_name] = tiktoken.get_encoding("cl100k_base")
+                # Fallback to default encoding if specified encoding not found
+                default_encoding = self.config.get('default_encoding', 'cl100k_base')
+                self._encoding_cache[encoding_name] = tiktoken.get_encoding(default_encoding)
         
         return self._encoding_cache[encoding_name]
     
@@ -96,9 +118,12 @@ class TokenCounter:
             model: The model name
             
         Returns:
-            Token limit for the model, defaults to 8192 for unknown models
+            Token limit for the model, using config overrides or defaults
         """
-        return self.MODEL_LIMITS.get(model, 8_192)
+        # First check config overrides, then default limits, then fallback to configured default
+        return self.config.get('model_limits', {}).get(model) or \
+               self.MODEL_LIMITS.get(model) or \
+               self.config.get('default_token_limit', 8_192)
     
     def estimate_response_tokens(self, prompt: str, model: str) -> int:
         """
