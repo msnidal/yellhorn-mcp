@@ -56,7 +56,19 @@ from yellhorn_mcp.git_utils import (
 )
 from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
 from yellhorn_mcp.search_grounding import _get_gemini_search_tools, add_citations
-from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+
+def is_openai_model(model: str) -> bool:
+    """
+    Check if a model is an OpenAI model.
+    
+    Args:
+        model: The model name to check
+        
+    Returns:
+        True if the model is an OpenAI model, False otherwise
+    """
+    return model.startswith("gpt-") or model.startswith("o")
 
 async def async_generate_content_with_config(
     client: genai.Client, model_name: str, prompt: str, generation_config=None
@@ -166,36 +178,28 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float |
     return input_cost + output_cost
 
 
-def is_deep_research_model(model_name: str) -> bool:
-    """Checks if the model is an OpenAI Deep Research model."""
-    return "deep-research" in model_name
-
-
 def format_metrics_section(model: str, usage_metadata: Any) -> str:
     """
     Formats the completion metrics into a Markdown section.
 
     Args:
-        model: The Gemini model name used for generation.
+        model: The model name used for generation.
         usage_metadata: Object containing token usage information.
-                        Could be a dict or a GenerateContentResponseUsageMetadata object.
+                        Can be a UsageMetadata object, dict, or raw API response.
 
     Returns:
         Formatted Markdown section with completion metrics.
     """
     na_metrics = "\n\n---\n## Completion Metrics\n*   **Model Used**: N/A\n*   **Input Tokens**: N/A\n*   **Output Tokens**: N/A\n*   **Total Tokens**: N/A\n*   **Estimated Cost**: N/A"
 
-    if usage_metadata is None:
+    # Convert to UsageMetadata object for consistent interface
+    usage = UsageMetadata(usage_metadata)
+    
+    # Check if we have valid usage data
+    if not usage:
         return na_metrics
 
-    # Handle different attribute names between Gemini and OpenAI usage metadata
-    if model.startswith("gpt-") or model.startswith("o"):  # OpenAI models
-        # Check if we have a proper CompletionUsage object
-        if not hasattr(usage_metadata, "prompt_tokens") or not hasattr(
-            usage_metadata, "completion_tokens"
-        ):
-            return na_metrics
-
+    cost = calculate_cost(model, usage.prompt_tokens, usage.completion_tokens)
         input_tokens = usage_metadata.prompt_tokens
         output_tokens = usage_metadata.completion_tokens
         total_tokens = usage_metadata.total_tokens
@@ -218,9 +222,9 @@ def format_metrics_section(model: str, usage_metadata: Any) -> str:
 
     return f"""\n\n---\n## Completion Metrics
 *   **Model Used**: `{model}`
-*   **Input Tokens**: {input_tokens}
-*   **Output Tokens**: {output_tokens}
-*   **Total Tokens**: {total_tokens}
+*   **Input Tokens**: {usage.prompt_tokens}
+*   **Output Tokens**: {usage.completion_tokens}
+*   **Total Tokens**: {usage.total_tokens}
 *   **Estimated Cost**: {cost_str}"""
 
 
@@ -241,7 +245,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     # Get configuration from environment variables
     repo_path = os.getenv("REPO_PATH", ".")
     model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro")
-    is_openai_model = model.startswith("gpt-") or model.startswith("o")
+    is_openai_model = is_openai_model(model)
 
     # Handle search grounding configuration (default to enabled for Gemini models only)
     use_search_grounding = False
@@ -635,7 +639,6 @@ async def get_workplan(ctx: Context, issue_number: str) -> str:
         return await get_github_issue_body(repo_path, issue_number)
     except Exception as e:
         raise YellhornMCPError(f"Failed to retrieve workplan: {str(e)}")
-
 
 async def get_codebase_snapshot(
     repo_path: Path, _mode: str = "full", log_function=print
@@ -1068,13 +1071,19 @@ The workplan should be comprehensive enough that a developer or AI assistant cou
 
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
+        # Log the filled prompt
+        await ctx.log(
+            level="info",
+            message=f"Filled prompt for workplan generation:\n{prompt[:500]}..." if len(prompt) > 500 else f"Filled prompt for workplan generation:\n{prompt}",
+        )
+
         # Use LLMManager for unified LLM calls
         if not llm_manager:
             raise YellhornMCPError("LLM Manager not initialized")
 
         # Get the use_search_grounding flag from context
         context_use_search_grounding = ctx.request_context.lifespan_context.get(
-            "use_search_grounding", False
+            "use_search_grounding", True
         )
         actual_use_search_grounding = (
             context_use_search_grounding and not disable_search_grounding
@@ -1092,7 +1101,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         # Handle search grounding for Gemini models
         if model.startswith("gemini-") and actual_use_search_grounding:
             await ctx.log(
-                level="info", 
+                level="info",
                 message=f"Attempting to enable search grounding for model {model}"
             )
             try:
@@ -1111,16 +1120,35 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 )
 
         try:
-            # Call LLM through the manager (handles chunking automatically)
-            workplan_content = await llm_manager.call_llm(
-                prompt=prompt,
-                model=model,
-                temperature=0.7,
-                **llm_kwargs
-            )
-
-            # Extract usage metadata if available (for logging purposes)
-            usage_metadata = {}  # LLMManager doesn't currently expose usage metadata
+            # Call LLM through the manager with citation support
+            if is_openai_model(model):
+                # OpenAI models don't support citations, use call with usage
+                response_data = await llm_manager.call_llm_with_usage(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    **llm_kwargs
+                )
+                workplan_content = response_data["content"]
+                usage_metadata = response_data["usage_metadata"]
+            else:
+                # Gemini models - use citation-aware call
+                response_data = await llm_manager.call_llm_with_citations(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    **llm_kwargs
+                )
+                
+                workplan_content = response_data["content"]
+                usage_metadata = response_data["usage_metadata"]
+                
+                # Process citations if available
+                if "grounding_metadata" in response_data and response_data["grounding_metadata"]:
+                    workplan_content = citations_to_markdown(
+                        response_data["grounding_metadata"],
+                        workplan_content
+                    )
             
         except Exception as e:
             error_message = f"Failed to generate workplan: {str(e)}"
@@ -1385,6 +1413,12 @@ Extract any URLs mentioned in the workplan or that would be helpful for understa
 IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
         
+        # Log the filled prompt
+        await ctx.log(
+            level="info",
+            message=f"Filled prompt for judgement generation:\n{prompt[:500]}..." if len(prompt) > 500 else f"Filled prompt for judgement generation:\n{prompt}",
+        )
+        
         # Use LLMManager for unified LLM calls
         if not llm_manager:
             raise YellhornMCPError("LLM Manager not initialized")
@@ -1440,17 +1474,17 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
         # Use LLMManager to handle chunking and aggregation automatically
         try:
-            response = await llm_manager.call_llm(
+            response = await llm_manager.call_llm_with_usage(
                 model=model,
                 prompt=prompt,
-                temperature=0.7,
+                temperature=0.0,
                 **llm_kwargs
             )
 
             # Extract usage metadata if available (for logging purposes)
-            usage_metadata = {}  # LLMManager doesn't currently expose usage metadata
+            usage_metadata = response["usage_metadata"]
             
-            judgement_content = response
+            judgement_content = response["content"]
 
         except Exception as e:
             error_message = f"Failed to generate judgement: {str(e)}"
@@ -1838,69 +1872,67 @@ async def curate_context(
             message=f"Extracted {len(sorted_dirs)} directories from {len(filtered_file_paths)} filtered files",
         )
 
-        # Set chunk size based on reasoning mode
-        if codebase_reasoning == "file_structure":
-            chunk_size = 3000  # Process more files per chunk for file structure mode
-        elif codebase_reasoning == "lsp":
-            chunk_size = 300  # Process more files per chunk for lsp mode
-        else:
-            chunk_size = 100  # Default chunk size for other modes
-
-        # Calculate number of chunks needed
-        total_chunks = (len(sorted_dirs) + chunk_size - 1) // chunk_size  # Ceiling division
-
-        # Create chunks of directories
-        dir_chunks = []
-        for i in range(0, len(sorted_dirs), chunk_size):
-            dir_chunks.append(sorted_dirs[i : i + chunk_size])
-
-        # Log start of parallel processing if we have multiple chunks
-        if total_chunks > 1:
+        # Build the codebase context based on reasoning mode
+        codebase_reasoning_mode = ctx.request_context.lifespan_context.get("codebase_reasoning", codebase_reasoning)
+        
+        if codebase_reasoning_mode == "lsp":
+            # Use LSP mode to get detailed code structure
             await ctx.log(
                 level="info",
-                message=f"Starting parallel processing of {total_chunks} chunks with max concurrency of 5",
+                message="Using LSP mode for codebase analysis",
             )
-        else:
-            await ctx.log(
-                level="info", message=f"Processing {len(sorted_dirs)} directories in a single chunk"
-            )
-
-        # Track important directories
-        all_important_dirs = set()
-
-        # Helper function to process a single chunk
-        async def process_chunk(chunk_idx, dir_chunk):
+            from yellhorn_mcp.lsp_utils import get_lsp_snapshot
+            
+            # Get LSP snapshot of the codebase
+            lsp_file_paths, lsp_file_contents = await get_lsp_snapshot(repo_path)
+            
+            # Filter LSP results based on our ignore patterns
+            if has_ignore_file and (ignore_patterns or whitelist_patterns):
+                filtered_lsp_paths = [f for f in lsp_file_paths if not is_ignored(f)]
+                filtered_lsp_contents = {k: v for k, v in lsp_file_contents.items() if k in filtered_lsp_paths}
+            else:
+                filtered_lsp_paths = lsp_file_paths
+                filtered_lsp_contents = lsp_file_contents
+            
+            # Format with LSP structure
+            directory_context = await format_codebase_for_prompt(filtered_lsp_paths, filtered_lsp_contents)
+            
+        elif codebase_reasoning_mode == "full":
+            # Use full mode with file contents
             await ctx.log(
                 level="info",
-                message=f"Processing chunk {chunk_idx + 1}/{total_chunks} with {len(dir_chunk)} directories",
+                message="Using full mode with file contents for codebase analysis",
             )
+            
+            # Get file contents for filtered files
+            file_contents = {}
+            for file_path in filtered_file_paths:
+                full_path = repo_path / file_path
+                if full_path.is_file():
+                    try:
+                        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                            file_contents[file_path] = f.read()
+                    except Exception:
+                        # Skip files that can't be read
+                        pass
+            
+            # Format with full file contents
+            directory_context = await format_codebase_for_prompt(filtered_file_paths, file_contents)
+            
+        else:
+            # Default to file structure mode
+            await ctx.log(
+                level="info",
+                message="Using file structure mode for codebase analysis",
+            )
+            directory_context = build_file_structure_context(filtered_file_paths)
 
-            # Filter file paths to only include those in the current chunk directories
-            chunk_file_paths = []
-            for fp in file_paths:
-                # Check if the file is in one of the directories in this chunk
-                parent_dir = Path(fp).parent.as_posix()
-                if parent_dir in dir_chunk or (parent_dir == "" and "." in dir_chunk):
-                    chunk_file_paths.append(fp)
-
-            # Use the build_file_structure_context function to create a directory tree
-            # but extract just the tree portion without the note
-            directory_tree = build_file_structure_context(chunk_file_paths)
-
-            # Construct the prompt for this chunk
-            prompt = f"""You are an expert software developer tasked with analyzing a codebase structure to identify important directories for AI context.
-
-<user_task>
-{user_task}
-</user_task>
+        # Construct the system message
+        system_message = """You are an expert software developer tasked with analyzing a codebase structure to identify important directories for AI context.
 
 Your goal is to identify the most important directories that should be included when an AI assistant analyzes this codebase for the user's task.
 
-Below is a list of directories from the codebase (chunk {chunk_idx + 1} of {total_chunks}):
-
-{directory_tree}
-
-Analyze these directories and identify the ones that:
+Analyze the directories and identify the ones that:
 1. Contain core application code relevant to the user's task
 2. Likely contain important business logic
 3. Would be essential for understanding the codebase architecture
@@ -1920,80 +1952,111 @@ dir2
 dir3
 ```
 
-Don't include explanations for your choices, just return the list in the specified format.
-"""
+Don't include explanations for your choices, just return the list in the specified format."""
 
-            # Use LLMManager for unified LLM calls
-            if not llm_manager:
-                raise YellhornMCPError("LLM Manager not initialized")
+        # Construct the prompt with user task and directory context
+        prompt = f"""<user_task>
+{user_task}
+</user_task>
 
-            # Get the use_search_grounding flag from context
-            actual_use_search_grounding = ctx.request_context.lifespan_context.get(
-                "use_search_grounding", False
+Below is the {'detailed code structure' if codebase_reasoning_mode in ['full', 'lsp'] else 'directory structure'} of the codebase:
+
+{directory_context}
+
+Based on the user's task above, identify the most important directories that should be included in the AI context."""
+
+        # Log the filled prompt and system message
+        await ctx.log(
+            level="info",
+            message=f"Filled system message for curate_context:\n{system_message[:500]}..." if len(system_message) > 500 else f"Filled system message for curate_context:\n{system_message}",
+        )
+        await ctx.log(
+            level="info",
+            message=f"Filled prompt for curate_context:\n{prompt[:500]}..." if len(prompt) > 500 else f"Filled prompt for curate_context:\n{prompt}",
+        )
+
+        # Use LLMManager for unified LLM calls
+        if not llm_manager:
+            raise YellhornMCPError("LLM Manager not initialized")
+
+        # Get the use_search_grounding flag from context
+        actual_use_search_grounding = ctx.request_context.lifespan_context.get(
+            "use_search_grounding", False
+        )
+
+        # Additional kwargs for the LLM call
+        llm_kwargs = {}
+        
+        # Handle search grounding for Gemini models
+        if model.startswith("gemini-") and actual_use_search_grounding:
+            try:
+                from google.genai.types import GenerateContentConfig
+
+                search_tools = _get_gemini_search_tools(model)
+                if search_tools:
+                    llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
+            except ImportError:
+                pass
+
+        await ctx.log(
+            level="info",
+            message=f"Analyzing directory structure with {model}",
+        )
+
+        # Track important directories
+        all_important_dirs = set()
+
+        # Use LLMManager to handle the LLM call
+        try:
+            result = await llm_manager.call_llm(
+                model=model,
+                prompt=prompt,
+                system_message=system_message,
+                temperature=0.0,
+                **llm_kwargs
             )
 
-            # Additional kwargs for the LLM call
-            llm_kwargs = {}
-            
-            # Handle search grounding for Gemini models
-            if model.startswith("gemini-") and actual_use_search_grounding:
-                try:
-                    from google.genai.types import GenerateContentConfig
+            # Extract directory paths from the result
+            in_context_block = False
+            for line in result.split("\n"):
+                line = line.strip()
 
-                    search_tools = _get_gemini_search_tools(model)
-                    if search_tools:
-                        llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
-                except ImportError:
-                    pass
+                if line == "```context":
+                    in_context_block = True
+                    continue
+                elif line == "```" and in_context_block:
+                    in_context_block = False
+                    continue
 
-            # Use LLMManager to handle chunking and aggregation automatically
-            try:
-                chunk_result = await llm_manager.call_llm(
-                    model=model,
-                    prompt=prompt,
-                    temperature=0.7,
-                    **llm_kwargs
-                )
+                if in_context_block and line and not line.startswith("#"):
+                    # Validate that the directory exists in our sorted_dirs list
+                    if line in sorted_dirs or line == ".":
+                        all_important_dirs.add(line)
 
-                # Extract directory paths from the result
-                in_context_block = False
-                for line in chunk_result.split("\n") if chunk_result else []:
+            # If we didn't find a context block, try to extract directories directly
+            if not all_important_dirs and not in_context_block:
+                for line in result.split("\n"):
                     line = line.strip()
+                    # Only add if it looks like a directory path (no spaces, existing in our list)
+                    if line and " " not in line and (line in sorted_dirs or line == "."):
+                        all_important_dirs.add(line)
 
-                    if line == "```context":
-                        in_context_block = True
-                        continue
-                    elif line == "```" and in_context_block:
-                        in_context_block = False
-                        continue
+            # Log the directories found
+            dirs_str = ", ".join(sorted(list(all_important_dirs))[:5])
+            if len(all_important_dirs) > 5:
+                dirs_str += f", ... ({len(all_important_dirs) - 5} more)"
 
-                    if in_context_block and line and not line.startswith("#"):
-                        chunk_important_dirs.add(line)
+            await ctx.log(
+                level="info",
+                message=f"Analysis complete, found {len(all_important_dirs)} important directories: {dirs_str}",
+            )
 
-                # If we didn't find a context block, try to extract directories directly
-                if not chunk_important_dirs and not in_context_block:
-                    for line in chunk_result.split("\n") if chunk_result else []:
-                        line = line.strip()
-                        # Only add if it looks like a directory path (no spaces, existing in our list)
-                        if line and " " not in line and line in dir_chunk:
-                            chunk_important_dirs.add(line)
-
-                # Log the directories found
-                dirs_str = ", ".join(sorted(list(chunk_important_dirs))[:5])
-                if len(chunk_important_dirs) > 5:
-                    dirs_str += f", ... ({len(chunk_important_dirs) - 5} more)"
-
-                await ctx.log(
-                    level="info",
-                    message=f"Chunk {chunk_idx + 1} processed, found {len(chunk_important_dirs)} important directories: {dirs_str}",
-                )
-
-            except Exception as chunk_error:
-                await ctx.log(
-                    level="error",
-                    message=f"Error processing chunk {chunk_idx + 1}: {str(chunk_error)} ({type(chunk_error).__name__})",
-                )
-                # Continue with next chunk despite errors
+        except Exception as chunk_error:
+            await ctx.log(
+                level="error",
+                message=f"Error processing chunk {chunk_idx + 1}: {str(chunk_error)} ({type(chunk_error).__name__})",
+            )
+            # Continue with next chunk despite errors
 
             # Return results from this chunk
             return chunk_important_dirs
@@ -2040,6 +2103,14 @@ Don't include explanations for your choices, just return the list in the specifi
             )
             all_important_dirs = set(sorted_dirs)
 
+        # If we didn't get any important directories, include all directories
+        if not all_important_dirs:
+            await ctx.log(
+                level="warning",
+                message="No important directories identified, including all directories",
+            )
+            all_important_dirs = set(sorted_dirs)
+
         await ctx.log(
             level="info",
             message=f"Processing complete, identified {len(all_important_dirs)} important directories",
@@ -2048,7 +2119,7 @@ Don't include explanations for your choices, just return the list in the specifi
         # Generate the final .yellhorncontext file content with comments
         final_content = "# Yellhorn Context File - AI context optimization\n"
         final_content += f"# Generated by yellhorn-mcp curate_context tool\n"
-        final_content += f"# Based on task: {user_task}\n\n"
+        final_content += f"# Based on task: {user_task[:100]}\n\n"
 
         # Copy patterns from .gitignore file if it exists
         gitignore_path = repo_path / ".gitignore"
@@ -2095,7 +2166,6 @@ Don't include explanations for your choices, just return the list in the specifi
                 final_content += (
                     "\n".join("!" + pattern for pattern in sorted(whitelist_patterns)) + "\n\n"
                 )
-
         # Sort directories for consistent output
         sorted_important_dirs = sorted(list(all_important_dirs))
 

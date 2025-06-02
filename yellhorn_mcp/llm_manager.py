@@ -9,6 +9,81 @@ from google import genai
 from .token_counter import TokenCounter
 
 
+class UsageMetadata:
+    """
+    Unified usage metadata class that handles both OpenAI and Gemini formats.
+    
+    This class provides a consistent interface for accessing token usage information
+    regardless of the source (OpenAI API, Gemini API, or dictionary).
+    """
+    
+    def __init__(self, data: Any = None):
+        """
+        Initialize UsageMetadata from various sources.
+        
+        Args:
+            data: Can be:
+                - OpenAI CompletionUsage object
+                - Gemini GenerateContentResponseUsageMetadata object
+                - Dictionary with token counts
+                - None (defaults to 0 for all values)
+        """
+        self.prompt_tokens: int = 0
+        self.completion_tokens: int = 0
+        self.total_tokens: int = 0
+        self.model: Optional[str] = None
+        
+        if data is None:
+            return
+            
+        if isinstance(data, dict):
+            # Handle dictionary format (our internal format)
+            self.prompt_tokens = data.get("prompt_tokens", 0)
+            self.completion_tokens = data.get("completion_tokens", 0)
+            self.total_tokens = data.get("total_tokens", 0)
+            self.model = data.get("model")
+        elif hasattr(data, "prompt_tokens"):
+            # OpenAI CompletionUsage format
+            self.prompt_tokens = getattr(data, "prompt_tokens", 0)
+            self.completion_tokens = getattr(data, "completion_tokens", 0)
+            self.total_tokens = getattr(data, "total_tokens", 0)
+        elif hasattr(data, "prompt_token_count"):
+            # Gemini GenerateContentResponseUsageMetadata format
+            self.prompt_tokens = getattr(data, "prompt_token_count", 0)
+            self.completion_tokens = getattr(data, "candidates_token_count", 0)
+            self.total_tokens = getattr(data, "total_token_count", 0)
+    
+    @property
+    def prompt_token_count(self) -> int:
+        """Gemini-style property for compatibility."""
+        return self.prompt_tokens
+    
+    @property
+    def candidates_token_count(self) -> int:
+        """Gemini-style property for compatibility."""
+        return self.completion_tokens
+    
+    @property
+    def total_token_count(self) -> int:
+        """Gemini-style property for compatibility."""
+        return self.total_tokens
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary format."""
+        result = {
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+        }
+        if self.model:
+            result["model"] = self.model
+        return result
+    
+    def __bool__(self) -> bool:
+        """Check if we have valid usage data."""
+        return self.total_tokens > 0
+
+
 class ChunkingStrategy:
     """Strategies for splitting text into chunks."""
     
@@ -182,7 +257,10 @@ class LLMManager:
         self.overlap_ratio = self.config.get("overlap_ratio", 0.1)
         self.aggregation_strategy = self.config.get("aggregation_strategy", "concatenate")
         self.chunk_strategy = self.config.get("chunk_strategy", "sentences")
-    
+        
+        # Track usage metadata from last call
+        self._last_usage_metadata = None
+
     def _is_openai_model(self, model: str) -> bool:
         """Check if model is an OpenAI model."""
         openai_prefixes = ["gpt-", "o3", "o4-"]
@@ -278,6 +356,10 @@ class LLMManager:
         response = await self.openai_client.chat.completions.create(**params)
         content = response.choices[0].message.content
         
+        # Store usage metadata
+        if hasattr(response, 'usage'):
+            self._last_usage_metadata = UsageMetadata(response.usage)
+        
         if response_format == "json":
             try:
                 return json.loads(content)
@@ -297,41 +379,74 @@ class LLMManager:
     ) -> Union[str, Dict[str, Any]]:
         """Call Gemini API."""
         if not self.gemini_client:
-            raise ValueError("Gemini client not initialized")
+            raise ValueError("Gemini client not configured")
         
-        # Combine system message with prompt for Gemini
+        # Combine system message with prompt if provided
         full_prompt = prompt
         if system_message:
             full_prompt = f"{system_message}\n\n{prompt}"
         
-        if response_format == "json":
-            full_prompt += "\n\nPlease respond with valid JSON only."
+        # Import GenerateContentConfig with fallback
+        try:
+            from google.genai.types import GenerateContentConfig
+            config_class = GenerateContentConfig
+        except ImportError:
+            # Fallback to dict config
+            config_class = dict
         
-        config = genai.GenerationConfig(
-            temperature=temperature,
-            **kwargs
-        )
+        # Build config
+        config_dict = {
+            "temperature": temperature,
+            "response_mime_type": "application/json" if response_format == "json" else "text/plain",
+        }
         
-        response = await self.gemini_client.models.generate_content_async(
-            model=model,
+        # Add any additional kwargs
+        config_dict.update(kwargs)
+        
+        # Create config instance
+        if config_class == GenerateContentConfig:
+            config = config_class(**config_dict)
+        else:
+            config = config_dict
+        
+        # Make the API call
+        response = await self.gemini_client.aio.models.generate_content(
+            model=f"models/{model}",
             contents=full_prompt,
             config=config
         )
         
-        content = response.text
+        # Extract text from response
+        if hasattr(response, 'text'):
+            content = response.text
+        else:
+            content = str(response)
         
+        # Store usage metadata if available
+        if hasattr(response, 'usage_metadata'):
+            usage = response.usage_metadata
+            self._last_usage_metadata = UsageMetadata(usage)
+        
+        # Parse JSON if requested
         if response_format == "json":
-            try:
-                return json.loads(content)
-            except json.JSONDecodeError:
-                # Try to extract JSON from the response
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                if json_match:
+            # Try to extract JSON from the response
+            import re
+            json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+            json_matches = re.findall(json_pattern, content, re.DOTALL)
+            
+            if json_matches:
+                # Try to parse the largest JSON match
+                for json_match in sorted(json_matches, key=len, reverse=True):
                     try:
-                        return json.loads(json_match.group())
+                        return json.loads(json_match)
                     except:
                         pass
                 return {"error": "Failed to parse JSON", "content": content}
+        
+        # Store the response object for potential citation processing
+        if hasattr(response, 'grounding_metadata'):
+            # Store metadata in a thread-local or instance variable for retrieval
+            self._last_gemini_response = response
         
         return content
     
@@ -355,6 +470,8 @@ class LLMManager:
         
         # Process chunks
         responses = []
+        total_usage = UsageMetadata()
+        
         for i, chunk in enumerate(chunks):
             # Add context for multi-chunk processing
             chunk_prompt = chunk
@@ -367,6 +484,15 @@ class LLMManager:
                 chunk_prompt, model, temperature, system_message, response_format, **kwargs
             )
             responses.append(response)
+            
+            # Aggregate usage metadata
+            if self._last_usage_metadata:
+                total_usage.prompt_tokens += self._last_usage_metadata.prompt_tokens
+                total_usage.completion_tokens += self._last_usage_metadata.completion_tokens
+                total_usage.total_tokens += self._last_usage_metadata.total_tokens
+        
+        # Store aggregated usage
+        self._last_usage_metadata = total_usage
         
         # Aggregate responses
         return self._aggregate_responses(responses, response_format)
@@ -423,3 +549,107 @@ class LLMManager:
         # Default: concatenate
         text_responses = [str(r) for r in responses]
         return "\n\n---\n\n".join(text_responses)
+
+    async def call_llm_with_citations(
+        self,
+        prompt: str,
+        model: str,
+        temperature: float = 0.7,
+        system_message: Optional[str] = None,
+        response_format: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Call LLM and return both response and citation metadata if available.
+        
+        This is specifically useful for Gemini models with search grounding enabled.
+        
+        Args:
+            prompt: The prompt to send
+            model: Model name
+            temperature: Temperature for generation
+            system_message: Optional system message
+            response_format: Optional response format (e.g., "json")
+            **kwargs: Additional arguments passed to the LLM
+            
+        Returns:
+            Dictionary with 'content', 'usage_metadata', and optionally 'grounding_metadata'
+        """
+        # Reset last response
+        self._last_gemini_response = None
+        self._last_usage_metadata = None
+        
+        # Make the regular call
+        content = await self.call_llm(
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+            system_message=system_message,
+            response_format=response_format,
+            **kwargs
+        )
+        
+        # Build result with content and usage
+        result = {
+            "content": content,
+            "usage_metadata": self._last_usage_metadata if self._last_usage_metadata else UsageMetadata()
+        }
+        
+        # Check if we have grounding metadata from Gemini
+        if self._is_gemini_model(model) and hasattr(self, '_last_gemini_response'):
+            response = getattr(self, '_last_gemini_response', None)
+            if response and hasattr(response, 'grounding_metadata'):
+                result["grounding_metadata"] = response.grounding_metadata
+                
+        return result
+    
+    async def call_llm_with_usage(
+        self,
+        prompt: str,
+        model: str,
+        temperature: float = 0.7,
+        system_message: Optional[str] = None,
+        response_format: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Call LLM and return both response content and usage metadata.
+        
+        Args:
+            prompt: The prompt to send
+            model: Model name
+            temperature: Temperature for generation
+            system_message: Optional system message
+            response_format: Optional response format (e.g., "json")
+            **kwargs: Additional arguments passed to the LLM
+            
+        Returns:
+            Dictionary with 'content' and 'usage_metadata' (as UsageMetadata object)
+        """
+        # Reset usage metadata
+        self._last_usage_metadata = None
+        
+        # Make the regular call
+        content = await self.call_llm(
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+            system_message=system_message,
+            response_format=response_format,
+            **kwargs
+        )
+        
+        # Return content and usage
+        return {
+            "content": content,
+            "usage_metadata": self._last_usage_metadata if self._last_usage_metadata else UsageMetadata()
+        }
+    
+    def get_last_usage_metadata(self) -> Optional[UsageMetadata]:
+        """
+        Get the usage metadata from the last LLM call.
+        
+        Returns:
+            UsageMetadata object or None if not available
+        """
+        return self._last_usage_metadata
