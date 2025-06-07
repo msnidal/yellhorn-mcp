@@ -14,6 +14,7 @@ class TokenCounter:
         "gpt-4o-mini": 128_000,
         "o4-mini": 65_000,
         "o3": 65_000,
+        "gpt-4.1": 1_000_000,  # Added support for GPT-4.1
         "gpt-4": 8_192,
         "gpt-4-32k": 32_768,
         "gpt-3.5-turbo": 16_385,
@@ -36,6 +37,7 @@ class TokenCounter:
         "o3": "o200k_base",
         
         # GPT-4 models use cl100k_base
+        "gpt-4.1": "cl100k_base",  # Added support for GPT-4.1
         "gpt-4": "cl100k_base",
         "gpt-4-32k": "cl100k_base",
         "gpt-3.5-turbo": "cl100k_base",

@@ -150,6 +150,10 @@ MODEL_PRICING = {
         "input": {"default": 1.10},  # Same as o4-mini
         "output": {"default": 4.40},  # Same as o4-mini
     },
+    "gpt-4.1": {
+        "input": {"default": 10.0},  # $10 per 1M input tokens
+        "output": {"default": 30.0},  # $30 per 1M output tokens
+    }
 }
 
 
@@ -1091,25 +1095,25 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         llm_kwargs = {}
         
         # Handle search grounding for Gemini models
-        if model.startswith("gemini-") and actual_use_search_grounding:
-            await ctx.log(
-                level="info",
-                message=f"Attempting to enable search grounding for model {model}"
-            )
-            try:
-                from google.genai.types import GenerateContentConfig
-                search_tools = _get_gemini_search_tools(model)
-                if search_tools:
-                    llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
-                    await ctx.log(
-                        level="info",
-                        message=f"Search tools configured for model {model}: {search_tools}",
-                    )
-            except ImportError:
-                await ctx.log(
-                    level="warning",
-                    message="GenerateContentConfig not available, skipping search grounding",
-                )
+        # if model.startswith("gemini-") and actual_use_search_grounding:
+        #     await ctx.log(
+        #         level="info",
+        #         message=f"Attempting to enable search grounding for model {model}"
+        #     )
+            # try:
+                # from google.genai.types import GenerateContentConfig
+                # search_tools = _get_gemini_search_tools(model)
+                # if search_tools:
+                    # llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
+                    # await ctx.log(
+                    #     level="info",
+                    #     message=f"Search tools configured for model {model}: {search_tools}",
+                    # )
+            # except ImportError:
+            #     await ctx.log(
+            #         level="warning",
+            #         message="GenerateContentConfig not available, skipping search grounding",
+            #     )
 
         try:
             # Call LLM through the manager with citation support

@@ -492,7 +492,7 @@ class LLMManager:
         params = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
+            "temperature": 1.0 if model.startswith("o") else temperature,
             **kwargs
         }
         
