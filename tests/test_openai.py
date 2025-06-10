@@ -39,6 +39,7 @@ def mock_openai_client():
     message = MagicMock()
     message.content = "Mock OpenAI response text"
     choice.message = message
+    choice.finish_reason = "stop"  # Add finish_reason as string
     response.choices = [choice]
 
     # Mock usage data
@@ -46,6 +47,10 @@ def mock_openai_client():
     response.usage.prompt_tokens = 1000
     response.usage.completion_tokens = 500
     response.usage.total_tokens = 1500
+    
+    # Mock model and system_fingerprint as strings
+    response.model = "gpt-4o-1234"
+    response.system_fingerprint = "fp_abc123"
 
     # Setup the chat.completions.create async method
     chat_completions.create = AsyncMock(return_value=response)
@@ -210,6 +215,7 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
         patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
         patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
