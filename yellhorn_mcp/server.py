@@ -22,6 +22,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -32,6 +33,12 @@ from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import FileUrl
 
+from yellhorn_mcp import __version__
+from yellhorn_mcp.comment_utils import (
+    extract_urls,
+    format_completion_comment,
+    format_submission_comment,
+)
 from yellhorn_mcp.git_utils import (
     YellhornMCPError,
     add_github_issue_comment,
@@ -47,6 +54,7 @@ from yellhorn_mcp.git_utils import (
     run_github_command,
     update_github_issue,
 )
+from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
 from yellhorn_mcp.search_grounding import _get_gemini_search_tools, citations_to_markdown
 
 
@@ -178,9 +186,15 @@ def format_metrics_section(model: str, usage_metadata: Any) -> str:
         output_tokens = usage_metadata.completion_tokens
         total_tokens = usage_metadata.total_tokens
     else:  # Gemini models
-        input_tokens = usage_metadata.prompt_token_count
-        output_tokens = usage_metadata.candidates_token_count
-        total_tokens = usage_metadata.total_token_count
+        # Handle both dict and object forms of usage_metadata
+        if isinstance(usage_metadata, dict):
+            input_tokens = usage_metadata.get("prompt_token_count")
+            output_tokens = usage_metadata.get("candidates_token_count")
+            total_tokens = usage_metadata.get("total_token_count")
+        else:
+            input_tokens = getattr(usage_metadata, "prompt_token_count", None)
+            output_tokens = getattr(usage_metadata, "candidates_token_count", None)
+            total_tokens = getattr(usage_metadata, "total_token_count", None)
 
     if input_tokens is None or output_tokens is None or total_tokens is None:
         return na_metrics
@@ -484,6 +498,32 @@ This workplan will be updated asynchronously with a comprehensive implementation
         issue_url = url_match.group(1)
         issue_number = issue_url.split("/")[-1]
 
+        # Add submission comment if we're going to process with AI
+        if codebase_reasoning != "none":
+            # Extract URLs from the detailed description
+            submitted_urls = extract_urls(detailed_description)
+
+            # Create submission metadata
+            submission_metadata = SubmissionMetadata(
+                status="Generating workplan...",
+                model_name=ctx.request_context.lifespan_context["model"],
+                search_grounding_enabled=ctx.request_context.lifespan_context.get(
+                    "use_search_grounding", False
+                ),
+                yellhorn_version=__version__,
+                submitted_urls=submitted_urls if submitted_urls else None,
+                codebase_reasoning_mode=codebase_reasoning,
+                timestamp=datetime.now(timezone.utc),
+            )
+
+            # Format and post the submission comment
+            submission_comment = format_submission_comment(submission_metadata)
+            await add_github_issue_comment(repo_path, issue_number, submission_comment)
+
+            await ctx.log(
+                level="info", message=f"Posted submission metadata comment to issue #{issue_number}"
+            )
+
         # Start async task to process workplan with AI if codebase_reasoning != "none"
         if codebase_reasoning != "none":
             # Get clients from context
@@ -497,6 +537,9 @@ This workplan will be updated asynchronously with a comprehensive implementation
             # Launch background task to process the workplan with AI
             import asyncio
 
+            # Prepare metadata for async processing
+            start_time = datetime.now(timezone.utc)
+
             asyncio.create_task(
                 process_workplan_async(
                     repo_path,
@@ -509,7 +552,11 @@ This workplan will be updated asynchronously with a comprehensive implementation
                     detailed_description,
                     debug=debug,
                     disable_search_grounding=disable_search_grounding,
-                    _meta={"original_search_grounding": original_search_grounding},
+                    _meta={
+                        "original_search_grounding": original_search_grounding,
+                        "start_time": start_time,
+                        "submitted_urls": submitted_urls if "submitted_urls" in locals() else None,
+                    },
                 )
             )
 
@@ -1098,6 +1145,101 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             message=f"Successfully updated GitHub issue #{issue_number} with generated workplan and metrics",
         )
 
+        # Post completion metadata comment
+        end_time = datetime.now(timezone.utc)
+        start_time = _meta.get("start_time", end_time) if _meta else end_time
+        generation_time = (end_time - start_time).total_seconds()
+
+        # Extract token counts and cost
+        input_tokens = None
+        output_tokens = None
+        total_tokens = None
+        estimated_cost = None
+        model_version_used = None
+        system_fingerprint = None
+        search_results_used = None
+        finish_reason = None
+        safety_ratings = None
+        context_size_chars = len(prompt)
+
+        if is_openai_model and usage_metadata:
+            # OpenAI usage format
+            input_tokens = getattr(usage_metadata, "prompt_tokens", None)
+            output_tokens = getattr(usage_metadata, "completion_tokens", None)
+            total_tokens = getattr(usage_metadata, "total_tokens", None)
+            # Extract model version from response if available
+            if hasattr(response, "model"):
+                model_version_used = response.model
+            if hasattr(response, "system_fingerprint"):
+                system_fingerprint = response.system_fingerprint
+            if hasattr(response.choices[0], "finish_reason"):
+                finish_reason = response.choices[0].finish_reason
+        elif not is_openai_model and usage_metadata:
+            # Gemini usage format
+            input_tokens = usage_metadata.get("prompt_token_count")
+            output_tokens = usage_metadata.get("candidates_token_count")
+            total_tokens = usage_metadata.get("total_token_count")
+            # Check for search results in grounding metadata
+            if hasattr(response, "grounding_metadata") and response.grounding_metadata:
+                if hasattr(response.grounding_metadata, "search_entry_point"):
+                    search_results_used = len(
+                        getattr(response.grounding_metadata.search_entry_point, "sources", [])
+                    )
+            # Extract safety ratings if available
+            if hasattr(response, "candidates") and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, "safety_ratings") and candidate.safety_ratings:
+                    safety_ratings = [
+                        {
+                            "category": (
+                                rating.category.name
+                                if hasattr(rating.category, "name")
+                                else str(rating.category)
+                            ),
+                            "probability": (
+                                rating.probability.name
+                                if hasattr(rating.probability, "name")
+                                else str(rating.probability)
+                            ),
+                        }
+                        for rating in candidate.safety_ratings
+                    ]
+                if hasattr(candidate, "finish_reason"):
+                    finish_reason = (
+                        candidate.finish_reason.name
+                        if hasattr(candidate.finish_reason, "name")
+                        else str(candidate.finish_reason)
+                    )
+
+        # Calculate cost if we have token counts
+        if input_tokens and output_tokens:
+            estimated_cost = calculate_cost(model, input_tokens, output_tokens)
+
+        # Create completion metadata
+        completion_metadata = CompletionMetadata(
+            status="✅ Workplan generated successfully",
+            generation_time_seconds=generation_time,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            estimated_cost=estimated_cost,
+            model_version_used=model_version_used,
+            system_fingerprint=system_fingerprint,
+            search_results_used=search_results_used,
+            finish_reason=finish_reason,
+            safety_ratings=safety_ratings,
+            context_size_chars=context_size_chars,
+            warnings=None,
+            timestamp=end_time,
+        )
+
+        # Format and post the completion comment
+        completion_comment = format_completion_comment(completion_metadata)
+        await add_github_issue_comment(repo_path, issue_number, completion_comment)
+        await ctx.log(
+            level="info", message=f"Posted completion metadata comment to issue #{issue_number}"
+        )
+
         # If debug mode is enabled, add a comment with the full prompt
         if debug:
             debug_comment = f"""
@@ -1119,14 +1261,40 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         error_message_log = f"Failed to generate workplan: {str(e)}"
         await ctx.log(level="error", message=error_message_log)
 
-        # Add a comment to the GitHub issue instead of overwriting the body
-        error_message_comment = f"⚠️ AI workplan enhancement failed:\n\n```\n{str(e)}\n```\n\nThe original description provided remains in the issue body."
+        # Post completion metadata comment with error status
+        end_time = datetime.now(timezone.utc)
+        start_time = _meta.get("start_time", end_time) if _meta else end_time
+        generation_time = (end_time - start_time).total_seconds()
+
+        completion_metadata = CompletionMetadata(
+            status="⚠️ Workplan generation failed",
+            generation_time_seconds=generation_time,
+            input_tokens=None,
+            output_tokens=None,
+            total_tokens=None,
+            estimated_cost=None,
+            model_version_used=None,
+            system_fingerprint=None,
+            search_results_used=None,
+            finish_reason="error",
+            safety_ratings=None,
+            context_size_chars=None,
+            warnings=[str(e)],
+            timestamp=end_time,
+        )
+
+        # Format and post the completion comment
+        completion_comment = format_completion_comment(completion_metadata)
         try:
-            await add_github_issue_comment(repo_path, issue_number, error_message_comment)
+            await add_github_issue_comment(repo_path, issue_number, completion_comment)
+            await ctx.log(
+                level="info",
+                message=f"Posted error completion metadata comment to issue #{issue_number}",
+            )
         except Exception as comment_error:
             await ctx.log(
                 level="error",
-                message=f"Additionally failed to add error comment to issue #{issue_number}: {str(comment_error)}",
+                message=f"Failed to add error comment to issue #{issue_number}: {str(comment_error)}",
             )
 
 
@@ -1355,6 +1523,102 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             message=f"Successfully updated sub-issue #{subissue_to_update} with judgement and metrics",
         )
 
+        # Post completion metadata comment
+        end_time = datetime.now(timezone.utc)
+        start_time = _meta.get("start_time", end_time) if _meta else end_time
+        generation_time = (end_time - start_time).total_seconds()
+
+        # Extract token counts and cost
+        input_tokens = None
+        output_tokens = None
+        total_tokens = None
+        estimated_cost = None
+        model_version_used = None
+        system_fingerprint = None
+        search_results_used = None
+        finish_reason = None
+        safety_ratings = None
+        context_size_chars = len(prompt)
+
+        if is_openai_model and usage_metadata:
+            # OpenAI usage format
+            input_tokens = getattr(usage_metadata, "prompt_tokens", None)
+            output_tokens = getattr(usage_metadata, "completion_tokens", None)
+            total_tokens = getattr(usage_metadata, "total_tokens", None)
+            # Extract model version from response if available
+            if hasattr(response, "model"):
+                model_version_used = response.model
+            if hasattr(response, "system_fingerprint"):
+                system_fingerprint = response.system_fingerprint
+            if hasattr(response.choices[0], "finish_reason"):
+                finish_reason = response.choices[0].finish_reason
+        elif not is_openai_model and usage_metadata:
+            # Gemini usage format
+            input_tokens = usage_metadata.get("prompt_token_count")
+            output_tokens = usage_metadata.get("candidates_token_count")
+            total_tokens = usage_metadata.get("total_token_count")
+            # Check for search results in grounding metadata
+            if hasattr(response, "grounding_metadata") and response.grounding_metadata:
+                if hasattr(response.grounding_metadata, "search_entry_point"):
+                    search_results_used = len(
+                        getattr(response.grounding_metadata.search_entry_point, "sources", [])
+                    )
+            # Extract safety ratings if available
+            if hasattr(response, "candidates") and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, "safety_ratings") and candidate.safety_ratings:
+                    safety_ratings = [
+                        {
+                            "category": (
+                                rating.category.name
+                                if hasattr(rating.category, "name")
+                                else str(rating.category)
+                            ),
+                            "probability": (
+                                rating.probability.name
+                                if hasattr(rating.probability, "name")
+                                else str(rating.probability)
+                            ),
+                        }
+                        for rating in candidate.safety_ratings
+                    ]
+                if hasattr(candidate, "finish_reason"):
+                    finish_reason = (
+                        candidate.finish_reason.name
+                        if hasattr(candidate.finish_reason, "name")
+                        else str(candidate.finish_reason)
+                    )
+
+        # Calculate cost if we have token counts
+        if input_tokens and output_tokens:
+            estimated_cost = calculate_cost(model, input_tokens, output_tokens)
+
+        # Create completion metadata
+        completion_metadata = CompletionMetadata(
+            status="✅ Judgement generated successfully",
+            generation_time_seconds=generation_time,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            estimated_cost=estimated_cost,
+            model_version_used=model_version_used,
+            system_fingerprint=system_fingerprint,
+            search_results_used=search_results_used,
+            finish_reason=finish_reason,
+            safety_ratings=safety_ratings,
+            context_size_chars=context_size_chars,
+            warnings=None,
+            timestamp=end_time,
+        )
+
+        # Format and post the completion comment
+        completion_comment = format_completion_comment(completion_metadata)
+        await add_github_issue_comment(repo_path, subissue_to_update, completion_comment)
+        await ctx.log(
+            level="info",
+            message=f"Posted completion metadata comment to sub-issue #{subissue_to_update}",
+        )
+
         # If debug mode is enabled, add a comment with the full prompt
         if debug:
             debug_comment = f"""
@@ -1375,6 +1639,43 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
     except Exception as e:
         error_message = f"Failed to generate judgement: {str(e)}"
         await ctx.log(level="error", message=error_message)
+
+        # Post completion metadata comment with error status
+        end_time = datetime.now(timezone.utc)
+        start_time = _meta.get("start_time", end_time) if _meta else end_time
+        generation_time = (end_time - start_time).total_seconds()
+
+        completion_metadata = CompletionMetadata(
+            status="⚠️ Judgement generation failed",
+            generation_time_seconds=generation_time,
+            input_tokens=None,
+            output_tokens=None,
+            total_tokens=None,
+            estimated_cost=None,
+            model_version_used=None,
+            system_fingerprint=None,
+            search_results_used=None,
+            finish_reason="error",
+            safety_ratings=None,
+            context_size_chars=None,
+            warnings=[str(e)],
+            timestamp=end_time,
+        )
+
+        # Format and post the completion comment
+        completion_comment = format_completion_comment(completion_metadata)
+        try:
+            await add_github_issue_comment(repo_path, subissue_to_update, completion_comment)
+            await ctx.log(
+                level="info",
+                message=f"Posted error completion metadata comment to sub-issue #{subissue_to_update}",
+            )
+        except Exception as comment_error:
+            await ctx.log(
+                level="error",
+                message=f"Failed to add error comment to sub-issue #{subissue_to_update}: {str(comment_error)}",
+            )
+
         raise YellhornMCPError(error_message)
 
 
@@ -2062,11 +2363,40 @@ This judgement will be updated here once complete.
         # Extract subissue number from URL
         subissue_number = subissue_url.split("/")[-1]
 
+        # Add submission comment to the sub-issue
+        # Extract URLs from the original workplan
+        submitted_urls = extract_urls(workplan)
+
+        # Create submission metadata
+        submission_metadata = SubmissionMetadata(
+            status="Generating judgement...",
+            model_name=model,
+            search_grounding_enabled=ctx.request_context.lifespan_context.get(
+                "use_search_grounding", False
+            ),
+            yellhorn_version=__version__,
+            submitted_urls=submitted_urls if submitted_urls else None,
+            codebase_reasoning_mode=codebase_reasoning,
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        # Format and post the submission comment to the sub-issue
+        submission_comment = format_submission_comment(submission_metadata)
+        await add_github_issue_comment(repo_path, subissue_number, submission_comment)
+
+        await ctx.log(
+            level="info",
+            message=f"Posted submission metadata comment to sub-issue #{subissue_number}",
+        )
+
         # Launch background task to process the judgement with AI
         await ctx.log(
             level="info",
             message=f"Starting asynchronous judgement generation for sub-issue #{subissue_number}",
         )
+
+        # Prepare metadata for async processing
+        start_time = datetime.now(timezone.utc)
 
         asyncio.create_task(
             process_judgement_async(
@@ -2086,7 +2416,11 @@ This judgement will be updated here once complete.
                 debug=debug,
                 codebase_reasoning=codebase_reasoning,
                 disable_search_grounding=disable_search_grounding,
-                _meta={"original_search_grounding": original_search_grounding},
+                _meta={
+                    "original_search_grounding": original_search_grounding,
+                    "start_time": start_time,
+                    "submitted_urls": submitted_urls if "submitted_urls" in locals() else None,
+                },
             )
         )
 

@@ -523,13 +523,14 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
         with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
             mock_gh.return_value = "https://github.com/user/repo/issues/123"
 
-            with patch("asyncio.create_task") as mock_create_task:
-                # Test with required title and detailed description (default codebase_reasoning="full")
-                response = await create_workplan(
-                    title="Feature Implementation Plan",
-                    detailed_description="Create a new feature to support X",
-                    ctx=mock_request_context,
-                )
+            with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+                with patch("asyncio.create_task") as mock_create_task:
+                    # Test with required title and detailed description (default codebase_reasoning="full")
+                    response = await create_workplan(
+                        title="Feature Implementation Plan",
+                        detailed_description="Create a new feature to support X",
+                        ctx=mock_request_context,
+                    )
 
                 # Parse response as JSON and check contents
                 import json
@@ -561,6 +562,24 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
                 # Verify the placeholder message for AI processing is included
                 assert "Generating detailed workplan" in body_content
 
+                # Verify that add_github_issue_comment was called with the submission metadata
+                mock_add_comment.assert_called_once()
+                comment_args = mock_add_comment.call_args
+                assert comment_args[0][0] == Path("/mock/repo")  # repo_path
+                assert comment_args[0][1] == "123"  # issue_number
+                submission_comment = comment_args[0][2]  # comment content
+
+                # Verify the submission comment contains expected metadata
+                assert "## 🚀 Generating workplan..." in submission_comment
+                assert "**Model**: `gemini-2.5-pro-preview-05-06`" in submission_comment
+                assert "**Search Grounding**: " in submission_comment
+                assert "**Codebase Reasoning**: `full`" in submission_comment
+                assert "**Yellhorn Version**: " in submission_comment
+                assert (
+                    "_This issue will be updated once generation is complete._"
+                    in submission_comment
+                )
+
                 # Check that the process_workplan_async task is created with the correct parameters
                 args, kwargs = mock_create_task.call_args
                 coroutine = args[0]
@@ -571,6 +590,7 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
                 # Reset mocks for next test
                 mock_ensure_label.reset_mock()
                 mock_gh.reset_mock()
+                mock_add_comment.reset_mock()
                 mock_create_task.reset_mock()
 
                 # Test with codebase_reasoning="none"
@@ -590,6 +610,9 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
                 mock_gh.assert_called_once()
                 # Verify that no async task was created for AI processing
                 mock_create_task.assert_not_called()
+
+                # Verify that add_github_issue_comment was NOT called (codebase_reasoning="none")
+                mock_add_comment.assert_not_called()
 
                 # Check the body content again
                 body_index = mock_gh.call_args[0][1].index("--body") + 1
@@ -816,12 +839,13 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
         patch("yellhorn_mcp.server.update_github_issue") as mock_update,
         patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
     ):
 
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
         mock_format_metrics.return_value = (
-            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-2.5-pro-preview-05-06`"
         )
 
         # Set usage metadata on the response
@@ -832,12 +856,19 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
             "total_token_count": 1500,
         }
 
+        # Mock candidates to avoid finish_reason error
+        mock_candidate = MagicMock()
+        mock_candidate.finish_reason = MagicMock()
+        mock_candidate.finish_reason.name = "STOP"
+        mock_candidate.safety_ratings = []
+        mock_response.candidates = [mock_candidate]
+
         # Test with required parameters
         await process_workplan_async(
             Path("/mock/repo"),
             mock_genai_client,
             None,  # No OpenAI client
-            "gemini-model",
+            "gemini-2.5-pro-preview-05-06",
             "Feature Implementation Plan",
             "123",
             mock_request_context,
@@ -879,7 +910,9 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         )
 
         # Check that format_metrics_section was called with the correct parameters
-        mock_format_metrics.assert_called_once_with("gemini-model", mock_response.usage_metadata)
+        mock_format_metrics.assert_called_once_with(
+            "gemini-2.5-pro-preview-05-06", mock_response.usage_metadata
+        )
 
         # Check that the issue was updated with the workplan including the title and metrics
         mock_update.assert_called_once()
@@ -892,7 +925,24 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         assert "# Feature Implementation Plan" in update_content
         assert "Mock response text" in update_content
         assert "## Completion Metrics" in update_content
-        assert "**Model Used**: `gemini-model`" in update_content
+        assert "**Model Used**: `gemini-2.5-pro-preview-05-06`" in update_content
+
+        # Verify that add_github_issue_comment was called with the completion metadata
+        mock_add_comment.assert_called_once()
+        comment_args = mock_add_comment.call_args
+        assert comment_args[0][0] == Path("/mock/repo")  # repo_path
+        assert comment_args[0][1] == "123"  # issue_number
+        completion_comment = comment_args[0][2]  # comment content
+
+        # Verify the completion comment contains expected metadata
+        assert "## ✅ Workplan generated successfully" in completion_comment
+        assert "### Generation Details" in completion_comment
+        assert "**Time**: " in completion_comment
+        assert "### Token Usage" in completion_comment
+        assert "**Input Tokens**: 1,000" in completion_comment
+        assert "**Output Tokens**: 500" in completion_comment
+        assert "**Total Tokens**: 1,500" in completion_comment
+        assert "**Estimated Cost**: " in completion_comment
 
 
 @pytest.mark.asyncio
@@ -927,7 +977,7 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
             Path("/mock/repo"),
             mock_genai_client,
             None,  # No OpenAI client
-            "gemini-model",
+            "gemini-2.5-pro-preview-05-06",
             "Feature Implementation Plan",
             "123",
             mock_request_context,
@@ -978,20 +1028,27 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
             Path("/mock/repo"),
             mock_genai_client,
             None,  # No OpenAI client
-            "gemini-model",
+            "gemini-2.5-pro-preview-05-06",
             "Feature Implementation Plan",
             "123",
             mock_request_context,
             detailed_description="Create a new feature to support X",
         )
 
-        # Check that add_github_issue_comment was called instead of update_github_issue
+        # Check that add_github_issue_comment was called with error completion metadata
         mock_add_comment.assert_called_once()
         args, kwargs = mock_add_comment.call_args
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
-        assert "⚠️ AI workplan enhancement failed" in args[2]
-        assert "API error occurred" in args[2]
+        completion_comment = args[2]
+
+        # Verify the error completion comment contains expected metadata
+        assert "## ⚠️ Workplan generation failed" in completion_comment
+        assert "### Generation Details" in completion_comment
+        assert "**Time**: " in completion_comment
+        assert "**Finish Reason**: `error`" in completion_comment
+        assert "### ⚠️ Warnings" in completion_comment
+        assert "API error occurred" in completion_comment
 
         # Verify update_github_issue was not called
         mock_update.assert_not_called()
@@ -1060,84 +1117,119 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
                 mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
                 with patch("yellhorn_mcp.server.create_github_subissue") as mock_create_subissue:
-                    mock_create_subissue.return_value = "https://github.com/user/repo/issues/789"
+                    with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+                        with patch("asyncio.create_task") as mock_create_task:
+                            mock_create_subissue.return_value = (
+                                "https://github.com/user/repo/issues/789"
+                            )
 
-                    with patch("asyncio.create_task") as mock_create_task:
-                        # Test with default refs
-                        result = await judge_workplan(
-                            ctx=mock_request_context,
-                            issue_number="123",
-                        )
+                            # Test with default refs
+                            result = await judge_workplan(
+                                ctx=mock_request_context,
+                                issue_number="123",
+                            )
 
-                    # Parse the JSON result
-                    result_data = json.loads(result)
-                    assert (
-                        result_data["message"]
-                        == "Judgement task initiated. Results will be posted to the sub-issue."
-                    )
-                    assert result_data["subissue_url"] == "https://github.com/user/repo/issues/789"
-                    assert result_data["subissue_number"] == "789"
+                            # Parse the JSON result
+                            result_data = json.loads(result)
+                            assert (
+                                result_data["message"]
+                                == "Judgement task initiated. Results will be posted to the sub-issue."
+                            )
+                            assert (
+                                result_data["subissue_url"]
+                                == "https://github.com/user/repo/issues/789"
+                            )
+                            assert result_data["subissue_number"] == "789"
 
-                    # Verify the function calls
-                    repo_path = mock_request_context.request_context.lifespan_context["repo_path"]
-                    mock_get_issue.assert_called_once_with(repo_path, "123")
-                    mock_get_diff.assert_called_once_with(repo_path, "main", "HEAD", "full")
+                            # Verify the function calls
+                            repo_path = mock_request_context.request_context.lifespan_context[
+                                "repo_path"
+                            ]
+                            mock_get_issue.assert_called_once_with(repo_path, "123")
+                            mock_get_diff.assert_called_once_with(repo_path, "main", "HEAD", "full")
 
-                    # Verify create_github_subissue was called with correct parameters
-                    mock_create_subissue.assert_called_once()
-                    call_args = mock_create_subissue.call_args
-                    assert call_args[0][0] == repo_path  # repo_path
-                    assert call_args[0][1] == "123"  # parent_issue
-                    # Title should contain the refs and hashes
-                    assert "main (abc1234)..HEAD (def5678)" in call_args[0][2]
-                    assert "Workplan #123" in call_args[0][2]
-                    # Body should contain placeholder text
-                    assert "🔄 Generating judgement with AI analysis" in call_args[0][3]
-                    assert call_args[0][4] == ["yellhorn-judgement-subissue"]  # labels
+                            # Verify create_github_subissue was called with correct parameters
+                            mock_create_subissue.assert_called_once()
+                            call_args = mock_create_subissue.call_args
+                            assert call_args[0][0] == repo_path  # repo_path
+                            assert call_args[0][1] == "123"  # parent_issue
+                            # Title should contain the refs and hashes
+                            assert "main (abc1234)..HEAD (def5678)" in call_args[0][2]
+                            assert "Workplan #123" in call_args[0][2]
+                            # Body should contain placeholder text
+                            assert "🔄 Generating judgement with AI analysis" in call_args[0][3]
+                            assert call_args[0][4] == ["yellhorn-judgement-subissue"]  # labels
 
-                    mock_create_task.assert_called_once()
+                            # Verify that add_github_issue_comment was called with the submission metadata
+                            mock_add_comment.assert_called_once()
+                            comment_args = mock_add_comment.call_args
+                            assert comment_args[0][0] == repo_path  # repo_path
+                            assert comment_args[0][1] == "789"  # subissue_number
+                            submission_comment = comment_args[0][2]  # comment content
 
-                    # Check process_judgement_async coroutine with new signature
-                    coroutine = mock_create_task.call_args[0][0]
-                    assert coroutine.__name__ == "process_judgement_async"
-                    # Close the coroutine to prevent RuntimeWarning
-                    coroutine.close()
+                            # Verify the submission comment contains expected metadata
+                            assert "## 🚀 Generating judgement..." in submission_comment
+                            assert "**Model**: `gemini-2.5-pro-preview-05-06`" in submission_comment
+                            assert "**Codebase Reasoning**: `full`" in submission_comment
+                            assert "**Yellhorn Version**: " in submission_comment
+                            assert (
+                                "_This issue will be updated once generation is complete._"
+                                in submission_comment
+                            )
 
-                    # Reset mocks for next test
-                    mock_get_issue.reset_mock()
-                    mock_get_diff.reset_mock()
-                    mock_create_subissue.reset_mock()
-                    mock_create_task.reset_mock()
-                    mock_run_git.reset_mock()
+                            mock_create_task.assert_called_once()
 
-                    # New mock values for custom refs
-                    mock_run_git.side_effect = [
-                        "v1.0-hash",
-                        "feature-hash",
-                    ]  # base_commit_hash, head_commit_hash
-                    mock_create_subissue.return_value = "https://github.com/user/repo/issues/890"
+                            # Check process_judgement_async coroutine with new signature
+                            coroutine = mock_create_task.call_args[0][0]
+                            assert coroutine.__name__ == "process_judgement_async"
+                            # Close the coroutine to prevent RuntimeWarning
+                            coroutine.close()
 
-                    # Test with custom refs
-                    result = await judge_workplan(
-                        ctx=mock_request_context,
-                        issue_number="123",
-                        base_ref="v1.0",
-                        head_ref="feature-branch",
-                    )
+                            # Reset mocks for next test
+                            mock_get_issue.reset_mock()
+                            mock_get_diff.reset_mock()
+                            mock_create_subissue.reset_mock()
+                            mock_add_comment.reset_mock()
+                            mock_create_task.reset_mock()
+                            mock_run_git.reset_mock()
 
-                    # Parse the JSON result for custom refs
-                    result_data = json.loads(result)
-                    assert result_data["subissue_url"] == "https://github.com/user/repo/issues/890"
-                    assert result_data["subissue_number"] == "890"
+                            # New mock values for custom refs
+                            mock_run_git.side_effect = [
+                                "v1.0-hash",
+                                "feature-hash",
+                            ]  # base_commit_hash, head_commit_hash
+                            mock_create_subissue.return_value = (
+                                "https://github.com/user/repo/issues/890"
+                            )
 
-                    repo_path = mock_request_context.request_context.lifespan_context["repo_path"]
-                    mock_get_diff.assert_called_once_with(
-                        repo_path, "v1.0", "feature-branch", "full"
-                    )
+                            # Test with custom refs
+                            result = await judge_workplan(
+                                ctx=mock_request_context,
+                                issue_number="123",
+                                base_ref="v1.0",
+                                head_ref="feature-branch",
+                            )
 
-                    # Verify the title contains custom refs
-                    call_args = mock_create_subissue.call_args
-                    assert "v1.0 (v1.0-hash)..feature-branch (feature-hash)" in call_args[0][2]
+                            # Parse the JSON result for custom refs
+                            result_data = json.loads(result)
+                            assert (
+                                result_data["subissue_url"]
+                                == "https://github.com/user/repo/issues/890"
+                            )
+                            assert result_data["subissue_number"] == "890"
+
+                            repo_path = mock_request_context.request_context.lifespan_context[
+                                "repo_path"
+                            ]
+                            mock_get_diff.assert_called_once_with(
+                                repo_path, "v1.0", "feature-branch", "full"
+                            )
+
+                            # Verify the title contains custom refs
+                            call_args = mock_create_subissue.call_args
+                            assert (
+                                "v1.0 (v1.0-hash)..feature-branch (feature-hash)" in call_args[0][2]
+                            )
 
     # Test error handling
     with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
@@ -1182,76 +1274,80 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
                 with patch("yellhorn_mcp.server.create_github_subissue") as mock_create_subissue:
                     mock_create_subissue.return_value = "https://github.com/user/repo/issues/999"
 
-                    with patch("asyncio.create_task") as mock_create_task:
-                        # Test with a different issue number and custom refs
-                        base_ref = "v1.0"
-                        head_ref = "feature-branch"
-                        result = await judge_workplan(
-                            ctx=mock_request_context,
-                            issue_number="456",
-                            base_ref=base_ref,
-                            head_ref=head_ref,
-                        )
+                    with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+                        with patch("asyncio.create_task") as mock_create_task:
+                            # Test with a different issue number and custom refs
+                            base_ref = "v1.0"
+                            head_ref = "feature-branch"
+                            result = await judge_workplan(
+                                ctx=mock_request_context,
+                                issue_number="456",
+                                base_ref=base_ref,
+                                head_ref=head_ref,
+                            )
 
-                        # Parse the JSON result
-                        result_data = json.loads(result)
-                        assert (
-                            result_data["subissue_url"] == "https://github.com/user/repo/issues/999"
-                        )
-                        assert result_data["subissue_number"] == "999"
+                            # Parse the JSON result
+                            result_data = json.loads(result)
+                            assert (
+                                result_data["subissue_url"]
+                                == "https://github.com/user/repo/issues/999"
+                            )
+                            assert result_data["subissue_number"] == "999"
 
-                        # Close the first coroutine to prevent RuntimeWarning
-                        coroutine = mock_create_task.call_args[0][0]
-                        coroutine.close()
+                            # Close the first coroutine to prevent RuntimeWarning
+                            coroutine = mock_create_task.call_args[0][0]
+                            coroutine.close()
 
-                        # Reset mocks for next test
-                        mock_get_issue.reset_mock()
-                        mock_get_diff.reset_mock()
-                        mock_create_subissue.reset_mock()
-                        mock_create_task.reset_mock()
-                        mock_run_git.reset_mock()
+                            # Reset mocks for next test
+                            mock_get_issue.reset_mock()
+                            mock_get_diff.reset_mock()
+                            mock_create_subissue.reset_mock()
+                            mock_add_comment.reset_mock()
+                            mock_create_task.reset_mock()
+                            mock_run_git.reset_mock()
 
-                        # New mock values for file_structure mode test
-                        mock_run_git.side_effect = [
-                            "base-hash",
-                            "head-hash",
-                        ]
-                        mock_create_subissue.return_value = (
-                            "https://github.com/user/repo/issues/888"
-                        )
+                            # New mock values for file_structure mode test
+                            mock_run_git.side_effect = [
+                                "base-hash",
+                                "head-hash",
+                            ]
+                            mock_create_subissue.return_value = (
+                                "https://github.com/user/repo/issues/888"
+                            )
 
-                        # Test with file_structure codebase_reasoning mode
-                        result = await judge_workplan(
-                            ctx=mock_request_context,
-                            issue_number="789",
-                            codebase_reasoning="file_structure",
-                        )
+                            # Test with file_structure codebase_reasoning mode
+                            result = await judge_workplan(
+                                ctx=mock_request_context,
+                                issue_number="789",
+                                codebase_reasoning="file_structure",
+                            )
 
-                        # Parse the JSON result for file_structure mode
-                        result_data = json.loads(result)
-                        assert (
-                            result_data["subissue_url"] == "https://github.com/user/repo/issues/888"
-                        )
-                        assert result_data["subissue_number"] == "888"
+                            # Parse the JSON result for file_structure mode
+                            result_data = json.loads(result)
+                            assert (
+                                result_data["subissue_url"]
+                                == "https://github.com/user/repo/issues/888"
+                            )
+                            assert result_data["subissue_number"] == "888"
 
-                        # Close the second coroutine to prevent RuntimeWarning
-                        coroutine = mock_create_task.call_args[0][0]
-                        coroutine.close()
+                            # Close the second coroutine to prevent RuntimeWarning
+                            coroutine = mock_create_task.call_args[0][0]
+                            coroutine.close()
 
-                        # Verify file_structure mode was passed to get_git_diff
-                        mock_get_diff.assert_called_once_with(
-                            mock_request_context.request_context.lifespan_context["repo_path"],
-                            "main",
-                            "HEAD",
-                            "file_structure",
-                        )
+                            # Verify file_structure mode was passed to get_git_diff
+                            mock_get_diff.assert_called_once_with(
+                                mock_request_context.request_context.lifespan_context["repo_path"],
+                                "main",
+                                "HEAD",
+                                "file_structure",
+                            )
 
-                        # Verify sub-issue creation with file_structure mode
-                        mock_create_subissue.assert_called_once()
-                        call_args = mock_create_subissue.call_args
-                        # Body should contain the codebase reasoning mode
-                        assert "file_structure" in call_args[0][3]
-                        assert "main (base-hash)..HEAD (head-hash)" in call_args[0][2]
+                            # Verify sub-issue creation with file_structure mode
+                            mock_create_subissue.assert_called_once()
+                            call_args = mock_create_subissue.call_args
+                            # Body should contain the codebase reasoning mode
+                            assert "file_structure" in call_args[0][3]
+                            assert "main (base-hash)..HEAD (head-hash)" in call_args[0][2]
 
 
 @pytest.mark.asyncio
@@ -1273,13 +1369,14 @@ async def test_judge_workplan_disable_search_grounding(mock_request_context, moc
                 with patch("yellhorn_mcp.server.create_github_subissue") as mock_create_subissue:
                     mock_create_subissue.return_value = "https://github.com/user/repo/issues/789"
 
-                    with patch("asyncio.create_task") as mock_create_task:
-                        # Test with disable_search_grounding=True
-                        result = await judge_workplan(
-                            ctx=mock_request_context,
-                            issue_number="123",
-                            disable_search_grounding=True,
-                        )
+                    with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+                        with patch("asyncio.create_task") as mock_create_task:
+                            # Test with disable_search_grounding=True
+                            result = await judge_workplan(
+                                ctx=mock_request_context,
+                                issue_number="123",
+                                disable_search_grounding=True,
+                            )
 
                     # Verify search grounding was disabled during the call
                     # (The setting should be restored by now)
@@ -1348,11 +1445,19 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
     # Mock the Gemini client response
     mock_response = MagicMock()
     mock_response.text = "## Judgement Summary\nImplementation looks good."
-    mock_response.usage_metadata = MagicMock()
-    mock_response.usage_metadata.prompt_token_count = 1000
-    mock_response.usage_metadata.candidates_token_count = 500
-    mock_response.usage_metadata.total_token_count = 1500
+    mock_response.usage_metadata = {
+        "prompt_token_count": 1000,
+        "candidates_token_count": 500,
+        "total_token_count": 1500,
+    }
     mock_response.citations = []
+
+    # Mock candidates to avoid finish_reason error
+    mock_candidate = MagicMock()
+    mock_candidate.finish_reason = MagicMock()
+    mock_candidate.finish_reason.name = "STOP"
+    mock_candidate.safety_ratings = []
+    mock_response.candidates = [mock_candidate]
 
     # Mock the async generate content function
     with patch("yellhorn_mcp.server.async_generate_content_with_config") as mock_generate:
@@ -1404,8 +1509,22 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                     assert "Implementation looks good." in body
                     assert "## Completion Metrics" in body
 
-                    # Verify no comment was added (debug=False)
-                    mock_add_comment.assert_not_called()
+                    # Verify completion metadata comment was added
+                    mock_add_comment.assert_called_once()
+                    comment_args = mock_add_comment.call_args
+                    assert comment_args[0][0] == Path("/test/repo")  # repo_path
+                    assert comment_args[0][1] == "789"  # subissue_to_update
+                    completion_comment = comment_args[0][2]  # comment content
+
+                    # Verify the completion comment contains expected metadata
+                    assert "## ✅ Judgement generated successfully" in completion_comment
+                    assert "### Generation Details" in completion_comment
+                    assert "**Time**: " in completion_comment
+                    assert "### Token Usage" in completion_comment
+                    assert "**Input Tokens**: 1,000" in completion_comment
+                    assert "**Output Tokens**: 500" in completion_comment
+                    assert "**Total Tokens**: 1,500" in completion_comment
+                    assert "**Estimated Cost**: " in completion_comment
 
                     # Test with debug=True
                     mock_update_issue.reset_mock()
@@ -1429,11 +1548,18 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                         codebase_reasoning="full",
                     )
 
-                    # Verify debug comment was added
-                    mock_add_comment.assert_called_once()
-                    comment_args = mock_add_comment.call_args
-                    assert comment_args[0][1] == "789"  # subissue_to_update
-                    assert "Debug Information" in comment_args[0][2]
+                    # Verify both completion metadata and debug comments were added
+                    assert mock_add_comment.call_count == 2
+
+                    # First call should be completion metadata
+                    first_call_args = mock_add_comment.call_args_list[0]
+                    assert first_call_args[0][1] == "789"  # subissue_to_update
+                    assert "## ✅ Judgement generated successfully" in first_call_args[0][2]
+
+                    # Second call should be debug comment
+                    second_call_args = mock_add_comment.call_args_list[1]
+                    assert second_call_args[0][1] == "789"  # subissue_to_update
+                    assert "Debug Information" in second_call_args[0][2]
 
 
 # This test is no longer needed because issue_number is now required
@@ -1530,7 +1656,7 @@ async def test_process_workplan_async_with_citations(mock_request_context, mock_
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
         mock_format_metrics.return_value = (
-            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-2.5-pro-preview-05-06`"
         )
 
         # Mock a Gemini response with citations
@@ -1556,7 +1682,7 @@ This workplan implements feature X.
             Path("/mock/repo"),
             mock_genai_client,
             None,  # No OpenAI client
-            "gemini-model",
+            "gemini-2.5-pro-preview-05-06",
             "Feature Implementation Plan",
             "123",
             mock_request_context,
@@ -1582,7 +1708,7 @@ This workplan implements feature X.
         assert "https://docs.python.org/3/library/json.html" in update_content
         assert "https://github.com/user/repo/issues/123" in update_content
         assert "## Completion Metrics" in update_content
-        assert "**Model Used**: `gemini-model`" in update_content
+        assert "**Model Used**: `gemini-2.5-pro-preview-05-06`" in update_content
 
 
 # Integration tests for new search grounding flow
@@ -1717,7 +1843,7 @@ async def test_process_workplan_async_search_grounding_enabled(
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
         mock_format_metrics.return_value = (
-            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-model`"
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-2.5-pro-preview-05-06`"
         )
 
         # Mock search tools
@@ -1781,15 +1907,24 @@ async def test_process_judgement_async_search_grounding_enabled(
     # Mock the response with grounding metadata
     mock_response = MagicMock()
     mock_response.text = "## Judgement Summary\nImplementation looks good."
-    mock_response.usage_metadata = MagicMock()
-    mock_response.usage_metadata.prompt_token_count = 1000
-    mock_response.usage_metadata.candidates_token_count = 500
-    mock_response.usage_metadata.total_token_count = 1500
+    mock_response.usage_metadata = {
+        "prompt_token_count": 1000,
+        "candidates_token_count": 500,
+        "total_token_count": 1500,
+    }
     mock_response.grounding_metadata = MagicMock()
+
+    # Mock candidates to avoid finish_reason error
+    mock_candidate = MagicMock()
+    mock_candidate.finish_reason = MagicMock()
+    mock_candidate.finish_reason.name = "STOP"
+    mock_candidate.safety_ratings = []
+    mock_response.candidates = [mock_candidate]
 
     with (
         patch("yellhorn_mcp.server.async_generate_content_with_config") as mock_generate,
         patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
         patch("yellhorn_mcp.server._get_gemini_search_tools") as mock_get_tools,
         patch("yellhorn_mcp.server.citations_to_markdown") as mock_citations,
     ):
