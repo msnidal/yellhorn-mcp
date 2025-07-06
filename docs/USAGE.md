@@ -30,7 +30,8 @@ The server requires the following environment variables:
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro-preview-05-06"). Available options:
   - Gemini models: "gemini-2.5-pro-preview-05-06", "gemini-2.5-flash-preview-05-20"
-  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"
+  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "o3-deep-research", "o4-mini-deep-research"
+  - Note: Deep Research models use `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
 - `YELLHORN_MCP_SEARCH` (optional): Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models

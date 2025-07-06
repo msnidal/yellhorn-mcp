@@ -127,6 +127,15 @@ MODEL_PRICING = {
         "input": {"default": 10.0},  # $10 per 1M input tokens
         "output": {"default": 40.0},  # $40 per 1M output tokens
     },
+    # Deep Research Models
+    "o3-deep-research": {
+        "input": {"default": 10.00},
+        "output": {"default": 40.00},
+    },
+    "o4-mini-deep-research": {
+        "input": {"default": 1.10},  # Same as o4-mini
+        "output": {"default": 4.40},  # Same as o4-mini
+    },
 }
 
 
@@ -155,6 +164,11 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float |
     output_cost = (output_tokens / 1_000_000) * pricing["output"][output_tier]
 
     return input_cost + output_cost
+
+
+def is_deep_research_model(model_name: str) -> bool:
+    """Checks if the model is an OpenAI Deep Research model."""
+    return "deep-research" in model_name
 
 
 def format_metrics_section(model: str, usage_metadata: Any) -> str:
@@ -1042,18 +1056,25 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 message=f"Generating workplan with OpenAI API for title: {title} with model {model}",
             )
 
-            # Convert the prompt to OpenAI messages format
-            messages = [{"role": "user", "content": prompt}]
+            # Prepare parameters for the API call
+            api_params = {
+                "model": model,
+                "input": prompt,  # Responses API uses `input` instead of `messages`
+                # store: false can be set to not persist the conversation state
+            }
 
-            # Call OpenAI API
-            response = await openai_client.chat.completions.create(
-                model=model,
-                messages=messages,
-            )
+            if is_deep_research_model(model):
+                await ctx.log(
+                    level="info", message=f"Enabling Deep Research tools for model {model}"
+                )
+                api_params["tools"] = [{"type": "web_search_preview"}, {"type": "code_interpreter"}]
 
-            # Extract content and usage
-            workplan_content = response.choices[0].message.content
-            usage_metadata = response.usage  # OpenAI usage object
+            # Call OpenAI Responses API
+            response = await openai_client.responses.create(**api_params)
+
+            # Extract content and usage from the new response format
+            workplan_content = response.output.text  # Output is in response.output.text
+            usage_metadata = response.usage
         else:
             if gemini_client is None:
                 raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
@@ -1170,10 +1191,8 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             # Extract model version from response if available
             if hasattr(response, "model"):
                 model_version_used = response.model
-            if hasattr(response, "system_fingerprint"):
-                system_fingerprint = response.system_fingerprint
-            if hasattr(response.choices[0], "finish_reason"):
-                finish_reason = response.choices[0].finish_reason
+            # Note: system_fingerprint and finish_reason are not available in Responses API
+            # These fields are specific to the Chat Completions API
         elif not is_openai_model and usage_metadata:
             # Gemini usage format - handle both dict and object forms
             if isinstance(usage_metadata, dict):
@@ -1422,18 +1441,24 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 message=f"Generating judgement with OpenAI API model {model}",
             )
 
-            # Convert the prompt to OpenAI messages format
-            messages = [{"role": "user", "content": prompt}]
+            # Prepare parameters for the API call
+            api_params = {
+                "model": model,
+                "input": prompt,
+            }
 
-            # Call OpenAI API
-            response = await openai_client.chat.completions.create(
-                model=model,
-                messages=messages,
-            )
+            if is_deep_research_model(model):
+                await ctx.log(
+                    level="info", message=f"Enabling Deep Research tools for model {model}"
+                )
+                api_params["tools"] = [{"type": "web_search_preview"}, {"type": "code_interpreter"}]
+
+            # Call OpenAI Responses API
+            response = await openai_client.responses.create(**api_params)
 
             # Extract content and usage
-            judgement_content = response.choices[0].message.content
-            usage_metadata = response.usage  # OpenAI usage object
+            judgement_content = response.output.text
+            usage_metadata = response.usage
         else:
             if gemini_client is None:
                 raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
@@ -1553,10 +1578,8 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             # Extract model version from response if available
             if hasattr(response, "model"):
                 model_version_used = response.model
-            if hasattr(response, "system_fingerprint"):
-                system_fingerprint = response.system_fingerprint
-            if hasattr(response.choices[0], "finish_reason"):
-                finish_reason = response.choices[0].finish_reason
+            # Note: system_fingerprint and finish_reason are not available in Responses API
+            # These fields are specific to the Chat Completions API
         elif not is_openai_model and usage_metadata:
             # Gemini usage format - handle both dict and object forms
             if isinstance(usage_metadata, dict):
