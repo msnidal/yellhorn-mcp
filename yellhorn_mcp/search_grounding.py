@@ -5,12 +5,10 @@ This module provides helpers for configuring Google Search tools for Gemini mode
 and formatting grounding metadata into Markdown citations.
 """
 
-from typing import Any
-
 from google.genai import types as genai_types
 
 
-def _get_gemini_search_tools(model_name: str) -> list[genai_types.Tool] | None:
+def _get_gemini_search_tools(model_name: str) -> genai_types.ToolListUnion | None:
     """
     Determines and returns the appropriate Google Search tool configuration
     based on the Gemini model name/version.
@@ -36,69 +34,56 @@ def _get_gemini_search_tools(model_name: str) -> list[genai_types.Tool] | None:
         return None
 
 
-def citations_to_markdown(
-    grounding_metadata: genai_types.GroundingMetadata | None, response_text: str
-) -> str:
+def add_citations(response: genai_types.GenerateContentResponse) -> str:
     """
-    Converts Gemini API grounding_metadata to Markdown footnotes and integrates them.
-
+    Inserts citation links into the response text based on grounding metadata.
     Args:
-        grounding_metadata: Grounding metadata from Gemini API response.
-        response_text: The main response text from the API.
-
+        response: The response object from the Gemini API.
     Returns:
-        Response text with formatted Markdown citations appended.
+        The response text with citations inserted.
     """
-    if not grounding_metadata:
-        return response_text
+    text = response.text
+    supports = (
+        response.candidates[0].grounding_metadata.grounding_supports
+        if response.candidates
+        and response.candidates[0].grounding_metadata
+        and response.candidates[0].grounding_metadata.grounding_supports
+        else []
+    )
+    chunks = (
+        response.candidates[0].grounding_metadata.grounding_chunks
+        if response.candidates
+        and response.candidates[0].grounding_metadata
+        and response.candidates[0].grounding_metadata.grounding_chunks
+        else []
+    )
 
-    try:
-        citations_md_parts = []
-        has_citations = False
+    if not text:
+        return ""
 
-        # Modern citations field (preferred)
-        if hasattr(grounding_metadata, "citations") and grounding_metadata.citations:
-            has_citations = True
-            citations_md_parts.append("\n---\n## Citations")
-            for i, citation_source in enumerate(grounding_metadata.citations, start=1):
-                uri = citation_source.uri
-                title = citation_source.title or uri
-                title_truncated = title[:90] if len(title) > 90 else title
-                citations_md_parts.append(f"[^{i}]: {title_truncated} – {uri}")
+    # Sort supports by end_index in descending order to avoid shifting issues when inserting.
+    sorted_supports: list[genai_types.GroundingSupport] = sorted(
+        supports,
+        key=lambda s: s.segment.end_index if s.segment and s.segment.end_index is not None else 0,
+        reverse=True,
+    )
 
-        # Fallback for older grounding_chunks if citations field is empty
-        elif (
-            hasattr(grounding_metadata, "grounding_chunks") and grounding_metadata.grounding_chunks
-        ):
-            valid_citations = []
-            for chunk in grounding_metadata.grounding_chunks:
-                # GroundingChunk structure might be nested, e.g., chunk.web.uri
-                uri = None
-                title = None
+    for support in sorted_supports:
+        end_index = (
+            support.segment.end_index
+            if support.segment and support.segment.end_index is not None
+            else 0
+        )
+        if support.grounding_chunk_indices:
+            # Create citation string like [1](link1)[2](link2)
+            citation_links = []
+            for i in support.grounding_chunk_indices:
+                if i < len(chunks):
+                    chunk = chunks[i]
+                    uri = chunk.web.uri if chunk.web and chunk.web.uri else None
+                    citation_links.append(f"[{i + 1}]({uri})")
 
-                # Try different potential paths for URI and title
-                if hasattr(chunk, "web") and chunk.web:
-                    uri = getattr(chunk.web, "uri", None)
-                    title = getattr(chunk.web, "title", None)
-                elif hasattr(chunk, "retrieved_context") and chunk.retrieved_context:
-                    uri = getattr(chunk.retrieved_context, "uri", None)
-                    title = getattr(chunk.retrieved_context, "title", None)
+            citation_string = ", ".join(citation_links)
+            text = text[:end_index] + citation_string + text[end_index:]
 
-                if uri:
-                    title = title or uri
-                    title_truncated = title[:90] if len(title) > 90 else title
-                    valid_citations.append(
-                        f"[^{len(valid_citations) + 1}]: {title_truncated} – {uri}"
-                    )
-
-            if valid_citations:
-                has_citations = True
-                citations_md_parts.append("\n---\n## Citations")
-                citations_md_parts.extend(valid_citations)
-
-        if has_citations:
-            return response_text + "\n" + "\n".join(citations_md_parts)
-        return response_text
-    except Exception:
-        # If any error occurs during citation processing, return original text
-        return response_text
+    return text

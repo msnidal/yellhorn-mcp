@@ -27,10 +27,13 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from google import genai
+from google.genai import types as genai_types
 
 # OpenAI is imported conditionally inside app_lifespan when needed
 from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
+from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 from pydantic import FileUrl
 
 from yellhorn_mcp import __version__
@@ -44,23 +47,19 @@ from yellhorn_mcp.git_utils import (
     add_github_issue_comment,
     create_github_subissue,
     ensure_label_exists,
-    get_default_branch,
-    get_git_diff,
     get_github_issue_body,
-    get_github_pr_diff,
     is_git_repository,
-    post_github_pr_review,
     run_git_command,
     run_github_command,
     update_github_issue,
 )
 from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
-from yellhorn_mcp.search_grounding import _get_gemini_search_tools, citations_to_markdown
+from yellhorn_mcp.search_grounding import _get_gemini_search_tools, add_citations
 
 
 async def async_generate_content_with_config(
-    client, model_name: str, prompt: str, generation_config=None
-):
+    client: genai.Client, model_name: str, prompt: str, generation_config=None
+) -> genai_types.GenerateContentResponse:
     """
     Helper function to call aio.models.generate_content with generation_config.
 
@@ -513,6 +512,7 @@ This workplan will be updated asynchronously with a comprehensive implementation
         issue_number = issue_url.split("/")[-1]
 
         # Add submission comment if we're going to process with AI
+        submitted_urls: list[str] | None = None
         if codebase_reasoning != "none":
             # Extract URLs from the detailed description
             submitted_urls = extract_urls(detailed_description)
@@ -569,7 +569,7 @@ This workplan will be updated asynchronously with a comprehensive implementation
                     _meta={
                         "original_search_grounding": original_search_grounding,
                         "start_time": start_time,
-                        "submitted_urls": submitted_urls if "submitted_urls" in locals() else None,
+                        "submitted_urls": submitted_urls,
                     },
                 )
             )
@@ -932,7 +932,7 @@ async def get_git_diff(
 async def process_workplan_async(
     repo_path: Path,
     gemini_client: genai.Client | None,
-    openai_client: Any | None,
+    openai_client: AsyncOpenAI | None,
     model: str,
     title: str,
     issue_number: str,
@@ -1045,6 +1045,7 @@ The workplan should be comprehensive enough that a developer or AI assistant cou
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
         is_openai_model = model.startswith("gpt-") or model.startswith("o")
+        gen_config = None
 
         # Call the appropriate API based on the model type
         if is_openai_model:
@@ -1057,7 +1058,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             )
 
             # Prepare parameters for the API call
-            api_params = {
+            api_params: dict[str, Any] = {
                 "model": model,
                 "input": prompt,  # Responses API uses `input` instead of `messages`
                 # store: false can be set to not persist the conversation state
@@ -1098,7 +1099,6 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                     message="Search grounding disabled for this workplan request, overriding context setting",
                 )
 
-            gen_config = None
             if actual_use_search_grounding:
                 await ctx.log(
                     level="info", message=f"Attempting to enable search grounding for model {model}"
@@ -1149,9 +1149,8 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             return
 
         # Process citations if search was enabled and metadata exists
-        if not is_openai_model and gen_config and hasattr(response, "grounding_metadata"):
-            grounding_metadata = response.grounding_metadata
-            workplan_content = citations_to_markdown(grounding_metadata, workplan_content)
+        if not is_openai_model and response:
+            workplan_content = add_citations(response)
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
@@ -1188,9 +1187,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             input_tokens = getattr(usage_metadata, "prompt_tokens", None)
             output_tokens = getattr(usage_metadata, "completion_tokens", None)
             total_tokens = getattr(usage_metadata, "total_tokens", None)
-            # Extract model version from response if available
-            if hasattr(response, "model"):
-                model_version_used = response.model
+            model_version_used = getattr(response, "model_version", None)
             # Note: system_fingerprint and finish_reason are not available in Responses API
             # These fields are specific to the Chat Completions API
         elif not is_openai_model and usage_metadata:
@@ -1325,7 +1322,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
 async def process_judgement_async(
     repo_path: Path,
     gemini_client: genai.Client | None,
-    openai_client: Any | None,
+    openai_client: AsyncOpenAI | None,
     model: str,
     workplan_content: str,
     diff_content: str,
@@ -1430,6 +1427,7 @@ Extract any URLs mentioned in the workplan or that would be helpful for understa
 IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
         is_openai_model = model.startswith("gpt-") or model.startswith("o")
+        gen_config = None
 
         # Call the appropriate API based on the model type
         if is_openai_model:
@@ -1442,7 +1440,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             )
 
             # Prepare parameters for the API call
-            api_params = {
+            api_params: dict[str, Any] = {
                 "model": model,
                 "input": prompt,
             }
@@ -1482,7 +1480,6 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                     message="Search grounding disabled for this judgement request, overriding context setting",
                 )
 
-            gen_config = None
             if actual_use_search_grounding:
                 await ctx.log(
                     level="info", message=f"Attempting to enable search grounding for model {model}"
@@ -1521,9 +1518,8 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             raise YellhornMCPError(f"Received an empty response from {api_name} API.")
 
         # Process citations if search was enabled and metadata exists
-        if not is_openai_model and gen_config and hasattr(response, "grounding_metadata"):
-            grounding_metadata = response.grounding_metadata
-            judgement_content = citations_to_markdown(grounding_metadata, judgement_content)
+        if not is_openai_model and response:
+            judgement_content = add_citations(response)
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
@@ -1575,11 +1571,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             input_tokens = getattr(usage_metadata, "prompt_tokens", None)
             output_tokens = getattr(usage_metadata, "completion_tokens", None)
             total_tokens = getattr(usage_metadata, "total_tokens", None)
-            # Extract model version from response if available
-            if hasattr(response, "model"):
-                model_version_used = response.model
-            # Note: system_fingerprint and finish_reason are not available in Responses API
-            # These fields are specific to the Chat Completions API
+            model_version_used = getattr(response, "model_version", None)
         elif not is_openai_model and usage_metadata:
             # Gemini usage format - handle both dict and object forms
             if isinstance(usage_metadata, dict):
@@ -1753,8 +1745,8 @@ async def curate_context(
     try:
         # Get repository path from context
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-        gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
-        openai_client = ctx.request_context.lifespan_context.get("openai_client")
+        gemini_client: genai.Client = ctx.request_context.lifespan_context.get("gemini_client")
+        openai_client: AsyncOpenAI = ctx.request_context.lifespan_context.get("openai_client")
         model: str = ctx.request_context.lifespan_context["model"]
 
         # Handle search grounding override if specified
@@ -1824,10 +1816,11 @@ async def curate_context(
 
         # If we have a .yellhornignore file, apply its filters
         filtered_file_paths = file_paths
+        ignore_patterns = []
+        whitelist_patterns = []
+
         if has_ignore_file:
             # Read ignore patterns from .yellhornignore
-            ignore_patterns = []
-            whitelist_patterns = []
 
             try:
                 with open(yellhornignore_path, "r", encoding="utf-8") as f:
@@ -2005,7 +1998,9 @@ Don't include explanations for your choices, just return the list in the specifi
                         )
 
                     # Convert the prompt to OpenAI messages format
-                    messages = [{"role": "user", "content": prompt}]
+                    messages: list[ChatCompletionMessageParam] = [
+                        {"role": "user", "content": prompt}
+                    ]
 
                     # Call OpenAI API
                     response = await openai_client.chat.completions.create(
@@ -2045,7 +2040,7 @@ Don't include explanations for your choices, just return the list in the specifi
 
                 # Extract directory paths from the result
                 in_context_block = False
-                for line in chunk_result.split("\n"):
+                for line in chunk_result.split("\n") if chunk_result else []:
                     line = line.strip()
 
                     if line == "```context":
@@ -2060,7 +2055,7 @@ Don't include explanations for your choices, just return the list in the specifi
 
                 # If we didn't find a context block, try to extract directories directly
                 if not chunk_important_dirs and not in_context_block:
-                    for line in chunk_result.split("\n"):
+                    for line in chunk_result.split("\n") if chunk_result else []:
                         line = line.strip()
                         # Only add if it looks like a directory path (no spaces, existing in our list)
                         if line and " " not in line and line in dir_chunk:
@@ -2089,7 +2084,7 @@ Don't include explanations for your choices, just return the list in the specifi
         # Use semaphore to limit concurrency to 5 parallel calls
         semaphore = asyncio.Semaphore(5)
 
-        async def bounded_process_chunk(chunk_idx, dir_chunk):
+        async def bounded_process_chunk(chunk_idx: int, dir_chunk: list[str]) -> set[str]:
             async with semaphore:
                 return await process_chunk(chunk_idx, dir_chunk)
 
@@ -2099,7 +2094,7 @@ Don't include explanations for your choices, just return the list in the specifi
             all_important_dirs.update(important_dirs)
         else:
             # Create tasks for all chunks
-            tasks = []
+            tasks: list[asyncio.Task[set[str]]] = []
             for chunk_idx, dir_chunk in enumerate(dir_chunks):
                 task = asyncio.create_task(bounded_process_chunk(chunk_idx, dir_chunk))
                 tasks.append(task)
@@ -2112,7 +2107,7 @@ Don't include explanations for your choices, just return the list in the specifi
 
             # Process results
             for result in completed_tasks:
-                if isinstance(result, Exception):
+                if isinstance(result, BaseException):
                     # Log the exception but continue
                     await ctx.log(level="error", message=f"Parallel task failed: {str(result)}")
                     continue
@@ -2452,7 +2447,7 @@ This judgement will be updated here once complete.
                 _meta={
                     "original_search_grounding": original_search_grounding,
                     "start_time": start_time,
-                    "submitted_urls": submitted_urls if "submitted_urls" in locals() else None,
+                    "submitted_urls": submitted_urls,
                 },
             )
         )
