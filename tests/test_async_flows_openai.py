@@ -62,10 +62,12 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
             detailed_description="Test description",
         )
 
-        # Verify error was propagated to add_github_issue_comment
+        # Verify error was propagated to add_github_issue_comment with completion metadata
         mock_add_comment.assert_called_once()
         args = mock_add_comment.call_args[0]
-        assert "⚠️ AI workplan enhancement failed" in args[2]
+        # Now we expect a completion metadata comment with error status
+        assert "## ⚠️ Workplan generation failed" in args[2]
+        assert "### ⚠️ Warnings" in args[2]
 
     # Test with OpenAI API error
     with (
@@ -92,17 +94,21 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
             detailed_description="Test description",
         )
 
-        # Verify error was logged
-        mock_ctx.log.assert_called_with(
-            level="error", message="Failed to generate workplan: OpenAI API error"
+        # Verify error was logged (check in all calls, not just the last one)
+        error_call_found = any(
+            call.kwargs.get("level") == "error"
+            and "Failed to generate workplan: OpenAI API error" in call.kwargs.get("message", "")
+            for call in mock_ctx.log.call_args_list
         )
+        assert error_call_found, "Error log not found in log calls"
 
-        # Verify comment was added with error message
+        # Verify comment was added with error message using completion metadata format
         mock_add_comment.assert_called_once()
         args = mock_add_comment.call_args[0]
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
-        assert "⚠️ AI workplan enhancement failed" in args[2]
+        assert "## ⚠️ Workplan generation failed" in args[2]
+        assert "### ⚠️ Warnings" in args[2]
         assert "OpenAI API error" in args[2]
 
 
@@ -179,7 +185,7 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
                 "Diff content",
                 "main",
                 "HEAD",
-                None,  # subissue_to_update
+                "456",  # subissue_to_update
                 "123",  # parent_workplan_issue_number
                 mock_ctx,
             )
@@ -188,6 +194,7 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
     with (
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -207,15 +214,18 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
                 "Diff content",
                 "main",
                 "HEAD",
-                None,  # subissue_to_update
+                "456",  # subissue_to_update
                 "123",  # parent_workplan_issue_number
                 mock_ctx,
             )
 
-        # Verify error was logged
-        mock_ctx.log.assert_called_with(
-            level="error", message="Failed to generate judgement: OpenAI API error"
+        # Verify error was logged (check in all calls, not just the last one)
+        error_call_found = any(
+            call.kwargs.get("level") == "error"
+            and "Failed to generate judgement: OpenAI API error" in call.kwargs.get("message", "")
+            for call in mock_ctx.log.call_args_list
         )
+        assert error_call_found, "Error log not found in log calls"
 
 
 @pytest.mark.asyncio

@@ -394,6 +394,11 @@ async def test_integration_process_judgement_lsp_mode():
         "candidates_token_count": 500,
         "total_token_count": 1500,
     }
+    # Mock the candidates structure for Gemini models to avoid validation errors
+    response.candidates = [MagicMock()]
+    response.candidates[0].safety_ratings = []
+    response.candidates[0].finish_reason = MagicMock()
+    response.candidates[0].finish_reason.name = "STOP"
 
     # Set up both old and new API patterns for backward compatibility with tests
     gemini_client.aio.models.generate_content = AsyncMock(return_value=response)
@@ -438,37 +443,40 @@ async def test_integration_process_judgement_lsp_mode():
                         )
 
                         with patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue:
+                            with patch(
+                                "yellhorn_mcp.server.add_github_issue_comment"
+                            ) as mock_add_comment:
 
-                            # Call the function with LSP mode
-                            result = await process_judgement_async(
-                                repo_path,
-                                gemini_client,
-                                None,  # No OpenAI client
-                                model,
-                                workplan,
-                                diff,
-                                base_ref,
-                                head_ref,
-                                "subissue-123",  # subissue_to_update
-                                issue_number,  # parent_workplan_issue_number
-                                ctx,
-                                codebase_reasoning="lsp",
-                            )
+                                # Call the function with LSP mode
+                                result = await process_judgement_async(
+                                    repo_path,
+                                    gemini_client,
+                                    None,  # No OpenAI client
+                                    model,
+                                    workplan,
+                                    diff,
+                                    base_ref,
+                                    head_ref,
+                                    "subissue-123",  # subissue_to_update
+                                    issue_number,  # parent_workplan_issue_number
+                                    ctx,
+                                    codebase_reasoning="lsp",
+                                )
 
-                            # Verify LSP snapshot was used
-                            mock_lsp_snapshot.assert_called_once_with(repo_path)
+                                # Verify LSP snapshot was used
+                                mock_lsp_snapshot.assert_called_once_with(repo_path)
 
-                            # Verify diff files were processed
-                            mock_update_diff.assert_called_once_with(
-                                repo_path,
-                                base_ref,
-                                head_ref,
-                                ["file1.py"],
-                                {"file1.py": "```py\ndef function1()\n```"},
-                            )
+                                # Verify diff files were processed
+                                mock_update_diff.assert_called_once_with(
+                                    repo_path,
+                                    base_ref,
+                                    head_ref,
+                                    ["file1.py"],
+                                    {"file1.py": "```py\ndef function1()\n```"},
+                                )
 
-                            # Verify GitHub issue was updated
-                            mock_update_issue.assert_called_once()
+                                # Verify GitHub issue was updated
+                                mock_update_issue.assert_called_once()
 
 
 @pytest.mark.asyncio
