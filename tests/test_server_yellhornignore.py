@@ -301,7 +301,7 @@ async def test_curate_context():
     mock_ctx.log = AsyncMock()
     mock_ctx.request_context.lifespan_context = {
         "repo_path": Path("/fake/repo/path"),
-        "model": "gemini-2.5-pro-preview-05-06",
+        "model": "gemini-2.5-pro",
         "gemini_client": MagicMock(),
     }
 

@@ -232,7 +232,7 @@ def mock_request_context():
         "repo_path": Path("/mock/repo"),
         "gemini_client": MagicMock(spec=genai.Client),
         "openai_client": None,
-        "model": "gemini-2.5-pro-preview-05-06",
+        "model": "gemini-2.5-pro",
     }
     return mock_ctx
 
@@ -442,22 +442,22 @@ def test_is_git_repository():
 def test_calculate_cost():
     """Test the calculate_cost function with different token counts and models."""
     # Test with standard model and default tier (below 200k tokens)
-    cost = calculate_cost("gemini-2.5-pro-preview-05-06", 100_000, 50_000)
+    cost = calculate_cost("gemini-2.5-pro", 100_000, 50_000)
     # Expected: (100,000 / 1M) * 1.25 + (50,000 / 1M) * 10.00 = 0.125 + 0.5 = 0.625
     assert cost == 0.625
 
     # Test with standard model and higher tier (above 200k tokens)
-    cost = calculate_cost("gemini-2.5-pro-preview-05-06", 250_000, 300_000)
+    cost = calculate_cost("gemini-2.5-pro", 250_000, 300_000)
     # Expected: (250,000 / 1M) * 2.50 + (300,000 / 1M) * 15.00 = 0.625 + 4.5 = 5.125
     assert cost == 5.125
 
     # Test with standard model and mixed tiers
-    cost = calculate_cost("gemini-2.5-pro-preview-05-06", 150_000, 250_000)
+    cost = calculate_cost("gemini-2.5-pro", 150_000, 250_000)
     # Expected: (150,000 / 1M) * 1.25 + (250,000 / 1M) * 15.00 = 0.1875 + 3.75 = 3.9375
     assert cost == 3.9375
 
     # Test with flash model (same pricing across tiers)
-    cost = calculate_cost("gemini-2.5-flash-preview-05-20", 150_000, 50_000)
+    cost = calculate_cost("gemini-2.5-flash", 150_000, 50_000)
     # Expected: (150,000 / 1M) * 0.15 + (50,000 / 1M) * 3.50 = 0.0225 + 0.175 = 0.1975
     assert cost == 0.1975
 
@@ -474,7 +474,7 @@ def test_format_metrics_section():
     metadata.candidates_token_count = 500
     metadata.total_token_count = 1500
 
-    model = "gemini-2.5-pro-preview-05-06"
+    model = "gemini-2.5-pro"
 
     with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
         mock_calculate_cost.return_value = 0.0175
@@ -571,7 +571,7 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
 
                 # Verify the submission comment contains expected metadata
                 assert "## 🚀 Generating workplan..." in submission_comment
-                assert "**Model**: `gemini-2.5-pro-preview-05-06`" in submission_comment
+                assert "**Model**: `gemini-2.5-pro`" in submission_comment
                 assert "**Search Grounding**: " in submission_comment
                 assert "**Codebase Reasoning**: `full`" in submission_comment
                 assert "**Yellhorn Version**: " in submission_comment
@@ -845,7 +845,7 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
         mock_format_metrics.return_value = (
-            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-2.5-pro-preview-05-06`"
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-2.5-pro`"
         )
 
         # Set usage metadata on the response
@@ -868,7 +868,7 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
             Path("/mock/repo"),
             mock_genai_client,
             None,  # No OpenAI client
-            "gemini-2.5-pro-preview-05-06",
+            "gemini-2.5-pro",
             "Feature Implementation Plan",
             "123",
             mock_request_context,
@@ -910,9 +910,7 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         )
 
         # Check that format_metrics_section was called with the correct parameters
-        mock_format_metrics.assert_called_once_with(
-            "gemini-2.5-pro-preview-05-06", mock_response.usage_metadata
-        )
+        mock_format_metrics.assert_called_once_with("gemini-2.5-pro", mock_response.usage_metadata)
 
         # Check that the issue was updated with the workplan including the title and metrics
         mock_update.assert_called_once()
@@ -925,7 +923,7 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         assert "# Feature Implementation Plan" in update_content
         assert "Mock response text" in update_content
         assert "## Completion Metrics" in update_content
-        assert "**Model Used**: `gemini-2.5-pro-preview-05-06`" in update_content
+        assert "**Model Used**: `gemini-2.5-pro`" in update_content
 
         # Verify that add_github_issue_comment was called with the completion metadata
         mock_add_comment.assert_called_once()
@@ -977,7 +975,7 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
             Path("/mock/repo"),
             mock_genai_client,
             None,  # No OpenAI client
-            "gemini-2.5-pro-preview-05-06",
+            "gemini-2.5-pro",
             "Feature Implementation Plan",
             "123",
             mock_request_context,
@@ -1028,7 +1026,7 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
             Path("/mock/repo"),
             mock_genai_client,
             None,  # No OpenAI client
-            "gemini-2.5-pro-preview-05-06",
+            "gemini-2.5-pro",
             "Feature Implementation Plan",
             "123",
             mock_request_context,
@@ -1169,7 +1167,7 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
 
                             # Verify the submission comment contains expected metadata
                             assert "## 🚀 Generating judgement..." in submission_comment
-                            assert "**Model**: `gemini-2.5-pro-preview-05-06`" in submission_comment
+                            assert "**Model**: `gemini-2.5-pro`" in submission_comment
                             assert "**Codebase Reasoning**: `full`" in submission_comment
                             assert "**Yellhorn Version**: " in submission_comment
                             assert (
@@ -1478,7 +1476,7 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                         repo_path=Path("/test/repo"),
                         gemini_client=mock_genai_client,
                         openai_client=None,
-                        model="gemini-2.5-pro-preview-05-06",
+                        model="gemini-2.5-pro",
                         workplan_content="# Workplan\n1. Do something",
                         diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
                         base_ref="main",
@@ -1504,7 +1502,7 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                     assert "**Base Ref**: `main` (Commit: `abc1234`)" in body
                     assert "**Head Ref**: `HEAD` (Commit: `def5678`)" in body
                     assert "**Codebase Reasoning Mode**: `full`" in body
-                    assert "**AI Model**: `gemini-2.5-pro-preview-05-06`" in body
+                    assert "**AI Model**: `gemini-2.5-pro`" in body
                     assert "## Judgement Summary" in body
                     assert "Implementation looks good." in body
                     assert "## Completion Metrics" in body
@@ -1534,7 +1532,7 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                         repo_path=Path("/test/repo"),
                         gemini_client=mock_genai_client,
                         openai_client=None,
-                        model="gemini-2.5-pro-preview-05-06",
+                        model="gemini-2.5-pro",
                         workplan_content="# Workplan\n1. Do something",
                         diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
                         base_ref="main",
@@ -1656,7 +1654,7 @@ async def test_process_workplan_async_with_citations(mock_request_context, mock_
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
         mock_format_metrics.return_value = (
-            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-2.5-pro-preview-05-06`"
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-2.5-pro`"
         )
 
         # Mock a Gemini response with citations
@@ -1682,7 +1680,7 @@ This workplan implements feature X.
             Path("/mock/repo"),
             mock_genai_client,
             None,  # No OpenAI client
-            "gemini-2.5-pro-preview-05-06",
+            "gemini-2.5-pro",
             "Feature Implementation Plan",
             "123",
             mock_request_context,
@@ -1708,7 +1706,7 @@ This workplan implements feature X.
         assert "https://docs.python.org/3/library/json.html" in update_content
         assert "https://github.com/user/repo/issues/123" in update_content
         assert "## Completion Metrics" in update_content
-        assert "**Model Used**: `gemini-2.5-pro-preview-05-06`" in update_content
+        assert "**Model Used**: `gemini-2.5-pro`" in update_content
 
 
 # Integration tests for new search grounding flow
@@ -1831,7 +1829,7 @@ async def test_process_workplan_async_search_grounding_enabled(
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
         mock_format_metrics.return_value = (
-            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-2.5-pro-preview-05-06`"
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-2.5-pro`"
         )
 
         # Mock search tools
@@ -1856,7 +1854,7 @@ async def test_process_workplan_async_search_grounding_enabled(
             Path("/mock/repo"),
             mock_genai_client,
             None,  # No OpenAI client
-            "gemini-2.5-pro-preview-05-06",
+            "gemini-2.5-pro",
             "Feature Implementation Plan",
             "123",
             mock_request_context,
@@ -1864,13 +1862,13 @@ async def test_process_workplan_async_search_grounding_enabled(
         )
 
         # Verify that _get_gemini_search_tools was called
-        mock_get_tools.assert_called_once_with("gemini-2.5-pro-preview-05-06")
+        mock_get_tools.assert_called_once_with("gemini-2.5-pro")
 
         # Verify that async_generate_content_with_config was called with generation_config
         mock_generate.assert_called_once()
         call_args = mock_generate.call_args
         assert call_args[0][0] == mock_genai_client  # client
-        assert call_args[0][1] == "gemini-2.5-pro-preview-05-06"  # model
+        assert call_args[0][1] == "gemini-2.5-pro"  # model
         assert call_args[1]["generation_config"] is not None  # generation_config should be passed
 
         # Verify citations processing was called
@@ -1932,7 +1930,7 @@ async def test_process_judgement_async_search_grounding_enabled(
             repo_path=Path("/test/repo"),
             gemini_client=mock_genai_client,
             openai_client=None,
-            model="gemini-2.5-pro-preview-05-06",
+            model="gemini-2.5-pro",
             workplan_content="# Workplan\n1. Do something",
             diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
             base_ref="main",
@@ -1947,13 +1945,13 @@ async def test_process_judgement_async_search_grounding_enabled(
         )
 
         # Verify that _get_gemini_search_tools was called
-        mock_get_tools.assert_called_once_with("gemini-2.5-pro-preview-05-06")
+        mock_get_tools.assert_called_once_with("gemini-2.5-pro")
 
         # Verify that async_generate_content_with_config was called with generation_config
         mock_generate.assert_called_once()
         call_args = mock_generate.call_args
         assert call_args[0][0] == mock_genai_client  # client
-        assert call_args[0][1] == "gemini-2.5-pro-preview-05-06"  # model
+        assert call_args[0][1] == "gemini-2.5-pro"  # model
         assert call_args[1]["generation_config"] is not None  # generation_config should be passed
 
         # Verify citations processing was called

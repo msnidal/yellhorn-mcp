@@ -19,7 +19,7 @@ class TestFormatSubmissionComment:
         """Test formatting a basic submission comment."""
         metadata = SubmissionMetadata(
             status="Generating workplan...",
-            model_name="gemini-2.5-pro-preview-05-06",
+            model_name="gemini-2.5-pro",
             search_grounding_enabled=True,
             yellhorn_version="0.5.0",
             submitted_urls=None,
@@ -30,7 +30,7 @@ class TestFormatSubmissionComment:
         result = format_submission_comment(metadata)
 
         assert "## 🚀 Generating workplan..." in result
-        assert "**Model**: `gemini-2.5-pro-preview-05-06`" in result
+        assert "**Model**: `gemini-2.5-pro`" in result
         assert "**Search Grounding**: ✅ Enabled" in result
         assert "**Codebase Reasoning**: `full`" in result
         assert "**Yellhorn Version**: `0.5.0`" in result
@@ -71,7 +71,7 @@ class TestFormatCompletionComment:
             output_tokens=2000,
             total_tokens=12000,
             estimated_cost=0.1234,
-            model_version_used="gemini-2.5-pro-preview-05-06",
+            model_version_used="gemini-2.5-pro",
             system_fingerprint=None,
             search_results_used=5,
             finish_reason="stop",
@@ -89,7 +89,7 @@ class TestFormatCompletionComment:
         assert "### Generation Details" in result
         assert "**Time**: 42.5 seconds" in result
         assert "**Completed**: 2025-01-06 12:00:42 UTC" in result
-        assert "**Model Version**: `gemini-2.5-pro-preview-05-06`" in result
+        assert "**Model Version**: `gemini-2.5-pro`" in result
         assert "### Token Usage" in result
         assert "**Input Tokens**: 10,000" in result
         assert "**Output Tokens**: 2,000" in result

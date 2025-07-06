@@ -48,7 +48,7 @@ class TestGetGeminiSearchTools:
         mock_types.Tool.return_value = mock_tool
         mock_types.GoogleSearch.return_value = mock_search
 
-        result = _get_gemini_search_tools("gemini-2.5-pro-preview-05-06")
+        result = _get_gemini_search_tools("gemini-2.5-pro")
 
         assert result == [mock_tool]
         mock_types.GoogleSearch.assert_called_once()

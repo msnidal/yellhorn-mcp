@@ -197,7 +197,7 @@ async def run_client(command: str, args: argparse.Namespace) -> None:
             "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
             "REPO_PATH": os.environ.get("REPO_PATH", os.getcwd()),
             "YELLHORN_MCP_MODEL": os.environ.get(
-                "YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-05-06"
+                "YELLHORN_MCP_MODEL", "gemini-2.5-pro"
             ),
         },
     )
@@ -397,7 +397,7 @@ def main():
         sys.exit(1)
 
     # Check model type from environment and validate appropriate API key
-    model = os.environ.get("YELLHORN_MCP_MODEL", "gemini-2.5-pro-preview-05-06")
+    model = os.environ.get("YELLHORN_MCP_MODEL", "gemini-2.5-pro")
     is_openai_model = model.startswith("gpt-")
 
     # Ensure appropriate API keys are set for commands that require them

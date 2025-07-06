@@ -16,19 +16,19 @@ def test_calculate_cost_unknown_model():
 def test_calculate_cost_above_200k_threshold():
     """Test calculate_cost with token counts above 200k threshold."""
     # Test with both input and output above 200k threshold
-    cost = calculate_cost("gemini-2.5-pro-preview-05-06", 250_000, 250_000)
+    cost = calculate_cost("gemini-2.5-pro", 250_000, 250_000)
     # Expected: (250_000 / 1M) * 2.50 + (250_000 / 1M) * 15.00
     # = 0.625 + 3.75 = 4.375
     assert cost == 4.375
 
     # Test with only input above 200k threshold
-    cost = calculate_cost("gemini-2.5-pro-preview-05-06", 250_000, 150_000)
+    cost = calculate_cost("gemini-2.5-pro", 250_000, 150_000)
     # Expected: (250_000 / 1M) * 2.50 + (150_000 / 1M) * 10.00
     # = 0.625 + 1.5 = 2.125
     assert cost == 2.125
 
     # Test with only output above 200k threshold
-    cost = calculate_cost("gemini-2.5-pro-preview-05-06", 150_000, 250_000)
+    cost = calculate_cost("gemini-2.5-pro", 150_000, 250_000)
     # Expected: (150_000 / 1M) * 1.25 + (250_000 / 1M) * 15.00
     # = 0.1875 + 3.75 = 3.9375
     assert cost == 3.9375

@@ -139,7 +139,7 @@ async def test_lifespan_api_key_validation():
             if key == "REPO_PATH":
                 return "/mock/repo"
             elif key == "YELLHORN_MCP_MODEL":
-                return "gemini-2.5-pro-preview-05-06"
+                return "gemini-2.5-pro"
             elif key == "GEMINI_API_KEY":
                 return None  # Missing API key
             return default

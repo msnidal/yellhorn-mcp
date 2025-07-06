@@ -25,7 +25,7 @@ def test_main_success(
         "GEMINI_API_KEY": "mock-gemini-api-key",
         "OPENAI_API_KEY": "mock-openai-api-key",
         "REPO_PATH": "/mock/repo",
-        "YELLHORN_MCP_MODEL": "gemini-2.5-pro-preview-05-06",
+        "YELLHORN_MCP_MODEL": "gemini-2.5-pro",
         "YELLHORN_MCP_REASONING": "full",
     }.get(x, default)
 
@@ -47,7 +47,7 @@ def test_main_success(
         # Check that a message was printed to stdout
         captured = capsys.readouterr()
         assert "Repository path: /mock/repo" in captured.out
-        assert "Using model: gemini-2.5-pro-preview-05-06" in captured.out
+        assert "Using model: gemini-2.5-pro" in captured.out
 
         # Check that sys.exit was not called
         mock_exit.assert_not_called()
@@ -70,7 +70,7 @@ def test_main_missing_gemini_api_key(mock_mcp_run, mock_getenv, mock_exit, capsy
     mock_getenv.side_effect = lambda x, default=None: {
         "REPO_PATH": "/mock/repo",
         "OPENAI_API_KEY": "mock-openai-api-key",
-        "YELLHORN_MCP_MODEL": "gemini-2.5-pro-preview-05-06",
+        "YELLHORN_MCP_MODEL": "gemini-2.5-pro",
         "YELLHORN_MCP_REASONING": "full",
     }.get(x, default)
 

@@ -28,8 +28,8 @@ The server requires the following environment variables:
 - `GEMINI_API_KEY` (required for Gemini models): Your Gemini API key
 - `OPENAI_API_KEY` (required for OpenAI models): Your OpenAI API key
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
-- `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro-preview-05-06"). Available options:
-  - Gemini models: "gemini-2.5-pro-preview-05-06", "gemini-2.5-flash-preview-05-20"
+- `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro"). Available options:
+  - Gemini models: "gemini-2.5-pro", "gemini-2.5-flash"
   - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "o3-deep-research", "o4-mini-deep-research"
   - Note: Deep Research models use `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
 - `YELLHORN_MCP_SEARCH` (optional): Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
@@ -142,7 +142,7 @@ gh auth login
 # Set environment variables for Gemini models
 export GEMINI_API_KEY=your_gemini_api_key_here
 export REPO_PATH=/path/to/your/repo
-export YELLHORN_MCP_MODEL=gemini-2.5-pro-preview-05-06
+export YELLHORN_MCP_MODEL=gemini-2.5-pro
 
 # OR for OpenAI models
 export OPENAI_API_KEY=your_openai_api_key_here

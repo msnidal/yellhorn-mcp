@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2025-07-06
+
+### Changed
+
+- Updated default Gemini model names from preview versions to stable versions:
+  - `gemini-2.5-pro-preview-05-06` → `gemini-2.5-pro`
+  - `gemini-2.5-flash-preview-05-20` → `gemini-2.5-flash`
+- Updated model names throughout documentation, examples, and tests
+- Updated pricing configuration keys to use the new stable model names
+
 ## [0.5.1] - 2025-07-06
 
 ### Added
