@@ -305,8 +305,64 @@ async def test_process_workplan_async_deep_research_model(mock_request_context, 
         tools = kwargs.get("tools", [])
         assert len(tools) == 2
         assert {"type": "web_search_preview"} in tools
-        assert {"type": "code_interpreter"} in tools
+        assert {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}} in tools
 
         # Verify input parameter
         input_content = kwargs.get("input", "")
         assert "Deep Research Feature Plan" in input_content
+
+
+@pytest.mark.asyncio
+async def test_process_judgement_async_deep_research_model(
+    mock_request_context, mock_openai_client
+):
+    """Test judgement generation with Deep Research model."""
+    mock_request_context.request_context.lifespan_context["model"] = "o4-mini-deep-research"
+
+    with (
+        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+        patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+    ):
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+        mock_format_metrics.return_value = (
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `o4-mini-deep-research`"
+        )
+
+        workplan = "1. Implement feature with web research\n2. Test implementation"
+        diff = "diff --git a/file.py b/file.py\n+def feature(): pass"
+
+        # Test judgement with Deep Research model
+        await process_judgement_async(
+            Path("/mock/repo"),
+            None,  # No Gemini client
+            mock_openai_client,
+            "o4-mini-deep-research",
+            workplan,
+            diff,
+            "main",
+            "feature-branch",
+            "456",  # subissue_to_update
+            "123",  # parent_workplan_issue_number
+            mock_request_context,
+        )
+
+        # Check OpenAI API call
+        mock_openai_client.responses.create.assert_called_once()
+        args, kwargs = mock_openai_client.responses.create.call_args
+
+        # Verify model is passed correctly
+        assert kwargs.get("model") == "o4-mini-deep-research"
+
+        # Verify tools are included for Deep Research model
+        tools = kwargs.get("tools", [])
+        assert len(tools) == 2
+        assert {"type": "web_search_preview"} in tools
+        assert {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}} in tools
+
+        # Verify input parameter
+        input_content = kwargs.get("input", "")
+        assert "<Original Workplan>" in input_content

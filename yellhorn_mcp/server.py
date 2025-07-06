@@ -1068,7 +1068,10 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 await ctx.log(
                     level="info", message=f"Enabling Deep Research tools for model {model}"
                 )
-                api_params["tools"] = [{"type": "web_search_preview"}, {"type": "code_interpreter"}]
+                api_params["tools"] = [
+                    {"type": "web_search_preview"},
+                    {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}},
+                ]
 
             # Call OpenAI Responses API
             response = await openai_client.responses.create(**api_params)
@@ -1449,7 +1452,10 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 await ctx.log(
                     level="info", message=f"Enabling Deep Research tools for model {model}"
                 )
-                api_params["tools"] = [{"type": "web_search_preview"}, {"type": "code_interpreter"}]
+                api_params["tools"] = [
+                    {"type": "web_search_preview"},
+                    {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}},
+                ]
 
             # Call OpenAI Responses API
             response = await openai_client.responses.create(**api_params)

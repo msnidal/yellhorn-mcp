@@ -3,6 +3,10 @@
     "yellhorn-mcp": {
       "type": "stdio",
       "command": "yellhorn-mcp",
+      "args": [
+        "--model",
+        "o3-deep-research"
+      ],
       "env": {}
     }
   }
