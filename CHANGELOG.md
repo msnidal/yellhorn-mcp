@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2025-07-06
+
+### Added
+
+- Added support for OpenAI Deep Research models (`o3-deep-research` and `o4-mini-deep-research`)
+- Added automatic `web_search_preview` and `code_interpreter` tools for Deep Research models
+- Added metadata comments to workplan and judgment GitHub issues for improved transparency
+- Added submission metadata comments showing query status, model configuration, and start time
+- Added completion metadata comments with performance metrics, token usage, and estimated costs
+- Added URL extraction and preservation in references sections
+- Added Pydantic models for submission and completion metadata
+- Added comment formatting utilities
+
+### Changed
+
+- Migrated all OpenAI integration from Chat Completions API to the new Responses API
+- Updated dependency versions for mcp, google-genai, aiohttp, pydantic, and openai packages
+
 ## [0.5.0] - 2025-06-01
 
 ### Added
