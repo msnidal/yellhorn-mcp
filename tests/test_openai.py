@@ -47,6 +47,7 @@ def mock_openai_client():
 
     # Mock model
     response.model = "gpt-4o-1234"
+    response.model_version = "gpt-4o-1234"
 
     # Setup the responses.create async method
     responses.create = AsyncMock(return_value=response)
