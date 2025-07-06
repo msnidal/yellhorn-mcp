@@ -1720,23 +1720,11 @@ async def test_process_workplan_async_with_new_search_grounding(
 ):
     """Test search grounding integration in workplan generation."""
 
-    from yellhorn_mcp.server import _get_gemini_search_tools, citations_to_markdown
+    from yellhorn_mcp.server import _get_gemini_search_tools
 
     # Test the search tools function directly
     search_tools = _get_gemini_search_tools("gemini-2.5-pro")
     assert search_tools is not None
-
-    # Test the citation function
-    mock_metadata = MagicMock()
-    mock_citation = MagicMock()
-    mock_citation.uri = "https://example.com"
-    mock_citation.title = "Example"
-    mock_metadata.citations = [mock_citation]
-
-    result = citations_to_markdown(mock_metadata, "Original text")
-    assert "Original text" in result
-    assert "## Citations" in result
-    assert "https://example.com" in result
 
 
 @pytest.mark.asyncio
@@ -1838,7 +1826,7 @@ async def test_process_workplan_async_search_grounding_enabled(
         patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
         patch("yellhorn_mcp.server.async_generate_content_with_config") as mock_generate,
         patch("yellhorn_mcp.server._get_gemini_search_tools") as mock_get_tools,
-        patch("yellhorn_mcp.server.citations_to_markdown") as mock_citations,
+        patch("yellhorn_mcp.server.add_citations") as mock_add_citations,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -1861,8 +1849,8 @@ async def test_process_workplan_async_search_grounding_enabled(
         mock_response.grounding_metadata = MagicMock()
         mock_generate.return_value = mock_response
 
-        # Mock citations processing
-        mock_citations.return_value = "Generated workplan content with citations"
+        # Mock add_citations processing
+        mock_add_citations.return_value = "Generated workplan content with citations"
 
         await process_workplan_async(
             Path("/mock/repo"),
@@ -1886,9 +1874,7 @@ async def test_process_workplan_async_search_grounding_enabled(
         assert call_args[1]["generation_config"] is not None  # generation_config should be passed
 
         # Verify citations processing was called
-        mock_citations.assert_called_once_with(
-            mock_response.grounding_metadata, "Generated workplan content"
-        )
+        mock_add_citations.assert_called_once_with(mock_response)
 
         # Verify the final content includes citations
         mock_update.assert_called_once()
@@ -1926,7 +1912,7 @@ async def test_process_judgement_async_search_grounding_enabled(
         patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
         patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
         patch("yellhorn_mcp.server._get_gemini_search_tools") as mock_get_tools,
-        patch("yellhorn_mcp.server.citations_to_markdown") as mock_citations,
+        patch("yellhorn_mcp.server.add_citations") as mock_add_citations,
     ):
         mock_generate.return_value = mock_response
 
@@ -1934,8 +1920,8 @@ async def test_process_judgement_async_search_grounding_enabled(
         mock_search_tools = [MagicMock()]
         mock_get_tools.return_value = mock_search_tools
 
-        # Mock citations processing
-        mock_citations.return_value = (
+        # Mock add_citations processing
+        mock_add_citations.return_value = (
             "## Judgement Summary\nImplementation looks good.\n\n## Citations\n[1] Example citation"
         )
 
@@ -1971,9 +1957,7 @@ async def test_process_judgement_async_search_grounding_enabled(
         assert call_args[1]["generation_config"] is not None  # generation_config should be passed
 
         # Verify citations processing was called
-        mock_citations.assert_called_once_with(
-            mock_response.grounding_metadata, "## Judgement Summary\nImplementation looks good."
-        )
+        mock_add_citations.assert_called_once_with(mock_response)
 
         # Verify update_github_issue was called with citations
         mock_update_issue.assert_called_once()

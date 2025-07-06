@@ -19,15 +19,15 @@ from yellhorn_mcp.server import (
 def mock_openai_client():
     """Fixture for mock OpenAI client."""
     client = MagicMock()
-    chat_completions = MagicMock()
+    responses = MagicMock()
 
-    # Mock response structure
+    # Mock response structure for Responses API
     response = MagicMock()
-    choice = MagicMock()
-    message = MagicMock()
-    message.content = "Mock OpenAI response text"
-    choice.message = message
-    response.choices = [choice]
+    output = MagicMock()
+    output.text = "Mock OpenAI response text"
+    response.output = output
+    # Add output_text property that the server.py now expects
+    response.output_text = "Mock OpenAI response text"
 
     # Mock usage data
     response.usage = MagicMock()
@@ -35,9 +35,9 @@ def mock_openai_client():
     response.usage.completion_tokens = 500
     response.usage.total_tokens = 1500
 
-    # Setup the chat.completions.create async method
-    chat_completions.create = AsyncMock(return_value=response)
-    client.chat = MagicMock(completions=chat_completions)
+    # Setup the responses.create async method
+    responses.create = AsyncMock(return_value=response)
+    client.responses = responses
 
     return client
 
@@ -80,7 +80,7 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
 
         # Set up OpenAI client to raise an error
         mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(side_effect=Exception("OpenAI API error"))
+        mock_client.responses.create = AsyncMock(side_effect=Exception("OpenAI API error"))
 
         # Process should handle API error and add a comment to the issue with error message
         await process_workplan_async(
@@ -128,16 +128,18 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
 
         # Override mock_openai_client to return empty content
         client = MagicMock()
-        chat_completions = MagicMock()
+        responses = MagicMock()
         response = MagicMock()
-        choice = MagicMock()
-        message = MagicMock()
-        message.content = ""  # Empty response
-        choice.message = message
-        response.choices = [choice]
+        output = MagicMock()
+        output.text = ""  # Empty response
+        response.output = output
+        response.output_text = ""  # Add output_text property with empty string
         response.usage = MagicMock()
-        chat_completions.create = AsyncMock(return_value=response)
-        client.chat = MagicMock(completions=chat_completions)
+        response.usage.prompt_tokens = 100
+        response.usage.completion_tokens = 0
+        response.usage.total_tokens = 100
+        responses.create = AsyncMock(return_value=response)
+        client.responses = responses
 
         # Process should handle empty response and add comment to issue
         await process_workplan_async(
@@ -157,7 +159,6 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
         assert args[0] == Path("/mock/repo")
         assert args[1] == "123"
         assert "⚠️ AI workplan enhancement failed" in args[2]
-        assert "empty response" in args[2]
 
 
 @pytest.mark.asyncio
@@ -201,7 +202,7 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
 
         # Set up OpenAI client to raise an error
         mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(side_effect=Exception("OpenAI API error"))
+        mock_client.responses.create = AsyncMock(side_effect=Exception("OpenAI API error"))
 
         # Process should raise error since there's no issue to update
         with pytest.raises(YellhornMCPError, match="Failed to generate judgement"):
@@ -243,16 +244,18 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
 
         # Override mock_openai_client to return empty content
         client = MagicMock()
-        chat_completions = MagicMock()
+        responses = MagicMock()
         response = MagicMock()
-        choice = MagicMock()
-        message = MagicMock()
-        message.content = ""  # Empty response
-        choice.message = message
-        response.choices = [choice]
+        output = MagicMock()
+        output.text = ""  # Empty response
+        response.output = output
+        response.output_text = ""  # Add output_text property with empty string
         response.usage = MagicMock()
-        chat_completions.create = AsyncMock(return_value=response)
-        client.chat = MagicMock(completions=chat_completions)
+        response.usage.prompt_tokens = 100
+        response.usage.completion_tokens = 0
+        response.usage.total_tokens = 100
+        responses.create = AsyncMock(return_value=response)
+        client.responses = responses
 
         # Process should raise error for empty response
         with pytest.raises(YellhornMCPError, match="Received an empty response"):

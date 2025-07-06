@@ -45,13 +45,7 @@ async def test_update_github_issue_error():
 @pytest.mark.asyncio
 async def test_openai_gemini_errors():
     """Test error handling for OpenAI and Gemini API errors."""
-    from yellhorn_mcp.server import (
-        create_github_subissue,
-        get_github_pr_diff,
-        post_github_pr_review,
-        process_judgement_async,
-        process_workplan_async,
-    )
+    from yellhorn_mcp.server import process_judgement_async, process_workplan_async
 
     # Create mock context
     mock_ctx = DummyContext()
@@ -90,7 +84,7 @@ async def test_get_github_pr_diff_error():
     """Test get_github_pr_diff with error."""
     from yellhorn_mcp.git_utils import get_github_pr_diff
 
-    with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh:
         mock_gh.side_effect = YellhornMCPError("Failed to fetch PR diff")
 
         with pytest.raises(YellhornMCPError, match="Failed to fetch GitHub PR diff"):
@@ -116,7 +110,7 @@ async def test_create_github_subissue_error():
     from yellhorn_mcp.git_utils import create_github_subissue
 
     # Test error when creating sub-issue
-    with patch("yellhorn_mcp.server.ensure_label_exists"):
+    with patch("yellhorn_mcp.git_utils.ensure_label_exists"):
         with patch("builtins.open", side_effect=PermissionError("Permission denied")):
             with pytest.raises(YellhornMCPError, match="Failed to create GitHub sub-issue"):
                 await create_github_subissue(
