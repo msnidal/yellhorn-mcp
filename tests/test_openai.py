@@ -38,6 +38,8 @@ def mock_openai_client():
     output = MagicMock()
     output.text = "Mock OpenAI response text"
     response.output = output
+    # Add output_text property that returns the text from output
+    response.output_text = "Mock OpenAI response text"
 
     # Mock usage data
     response.usage = MagicMock()
@@ -366,3 +368,131 @@ async def test_process_judgement_async_deep_research_model(
         # Verify input parameter
         input_content = kwargs.get("input", "")
         assert "<Original Workplan>" in input_content
+
+
+@pytest.mark.asyncio
+async def test_process_workplan_async_list_output(mock_request_context):
+    """Test workplan generation when OpenAI returns output as a list."""
+    # Create mock OpenAI client with list output
+    client = MagicMock()
+    responses = MagicMock()
+
+    # Mock response structure with list output (simulating Deep Research response)
+    response = MagicMock()
+    output_item = MagicMock()
+    output_item.text = "Mock OpenAI response from list output"
+    response.output = [output_item]  # Output as a list
+    # Add output_text property that returns the text from the first item in the list
+    response.output_text = "Mock OpenAI response from list output"
+
+    # Mock usage data
+    response.usage = MagicMock()
+    response.usage.prompt_tokens = 1000
+    response.usage.completion_tokens = 500
+    response.usage.total_tokens = 1500
+
+    # Mock model
+    response.model = "o3-deep-research"
+    response.model_version = "o3-deep-research-1234"
+
+    # Setup the responses.create async method
+    responses.create = AsyncMock(return_value=response)
+    client.responses = responses
+
+    with (
+        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+    ):
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+        mock_format_metrics.return_value = (
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `o3-deep-research`"
+        )
+
+        # Test OpenAI client workflow with list output
+        await process_workplan_async(
+            Path("/mock/repo"),
+            None,  # No Gemini client
+            client,
+            "o3-deep-research",
+            "Feature with List Output",
+            "124",
+            mock_request_context,
+            detailed_description="Test handling list output from Deep Research",
+        )
+
+        # Verify GitHub issue update contains the text from the list
+        mock_update.assert_called_once()
+        args, kwargs = mock_update.call_args
+        assert args[0] == Path("/mock/repo")
+        assert args[1] == "124"
+        assert "Mock OpenAI response from list output" in args[2]
+
+
+@pytest.mark.asyncio
+async def test_process_judgement_async_list_output(mock_request_context):
+    """Test judgement generation when OpenAI returns output as a list."""
+    # Create mock OpenAI client with list output
+    client = MagicMock()
+    responses = MagicMock()
+
+    # Mock response structure with list output
+    response = MagicMock()
+    output_item = MagicMock()
+    output_item.text = "Mock judgement from list output"
+    response.output = [output_item]  # Output as a list
+    # Add output_text property that returns the text from the first item in the list
+    response.output_text = "Mock judgement from list output"
+
+    # Mock usage data
+    response.usage = MagicMock()
+    response.usage.prompt_tokens = 1000
+    response.usage.completion_tokens = 500
+    response.usage.total_tokens = 1500
+
+    # Mock model
+    response.model = "o4-mini-deep-research"
+    response.model_version = "o4-mini-deep-research-1234"
+
+    # Setup the responses.create async method
+    responses.create = AsyncMock(return_value=response)
+    client.responses = responses
+
+    with (
+        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+        patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+    ):
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+        mock_format_metrics.return_value = (
+            "\n\n---\n## Completion Metrics\n*   **Model Used**: `o4-mini-deep-research`"
+        )
+
+        workplan = "1. Test list output\n2. Verify handling"
+        diff = "diff --git a/file.py b/file.py\n+def test(): pass"
+
+        # Test judgement with list output
+        await process_judgement_async(
+            Path("/mock/repo"),
+            None,  # No Gemini client
+            client,
+            "o4-mini-deep-research",
+            workplan,
+            diff,
+            "main",
+            "feature-branch",
+            "457",  # subissue_to_update
+            "125",  # parent_workplan_issue_number
+            mock_request_context,
+        )
+
+        # Verify the GitHub issue was updated with judgement from list
+        mock_update_issue.assert_called_once()
+        update_args = mock_update_issue.call_args[0]
+        issue_body = update_args[2]  # Third argument is the issue body
+        assert "Mock judgement from list output" in issue_body

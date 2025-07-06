@@ -26,6 +26,8 @@ def mock_openai_client():
     output = MagicMock()
     output.text = "Mock OpenAI response text"
     response.output = output
+    # Add output_text property that the server.py now expects
+    response.output_text = "Mock OpenAI response text"
 
     # Mock usage data
     response.usage = MagicMock()
@@ -131,7 +133,11 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
         output = MagicMock()
         output.text = ""  # Empty response
         response.output = output
+        response.output_text = ""  # Add output_text property with empty string
         response.usage = MagicMock()
+        response.usage.prompt_tokens = 100
+        response.usage.completion_tokens = 0
+        response.usage.total_tokens = 100
         responses.create = AsyncMock(return_value=response)
         client.responses = responses
 
@@ -243,7 +249,11 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
         output = MagicMock()
         output.text = ""  # Empty response
         response.output = output
+        response.output_text = ""  # Add output_text property with empty string
         response.usage = MagicMock()
+        response.usage.prompt_tokens = 100
+        response.usage.completion_tokens = 0
+        response.usage.total_tokens = 100
         responses.create = AsyncMock(return_value=response)
         client.responses = responses
 

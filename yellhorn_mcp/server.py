@@ -34,6 +34,7 @@ from mcp import Resource
 from mcp.server.fastmcp import Context, FastMCP
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
+from openai.types.responses import Response
 from pydantic import FileUrl
 
 from yellhorn_mcp import __version__
@@ -1074,10 +1075,11 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 ]
 
             # Call OpenAI Responses API
-            response = await openai_client.responses.create(**api_params)
+            response: Response = await openai_client.responses.create(**api_params)
 
             # Extract content and usage from the new response format
-            workplan_content = response.output.text  # Output is in response.output.text
+            # Handle case where output might be a list (Deep Research models sometimes return multiple outputs)
+            workplan_content = response.output_text
             usage_metadata = response.usage
         else:
             if gemini_client is None:
@@ -1458,10 +1460,10 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 ]
 
             # Call OpenAI Responses API
-            response = await openai_client.responses.create(**api_params)
+            response: Response = await openai_client.responses.create(**api_params)
 
             # Extract content and usage
-            judgement_content = response.output.text
+            judgement_content = response.output_text
             usage_metadata = response.usage
         else:
             if gemini_client is None:
