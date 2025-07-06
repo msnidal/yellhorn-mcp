@@ -47,7 +47,7 @@ def mock_openai_client():
     response.usage.prompt_tokens = 1000
     response.usage.completion_tokens = 500
     response.usage.total_tokens = 1500
-    
+
     # Mock model and system_fingerprint as strings
     response.model = "gpt-4o-1234"
     response.system_fingerprint = "fp_abc123"

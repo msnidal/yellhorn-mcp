@@ -96,8 +96,8 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
 
         # Verify error was logged (check in all calls, not just the last one)
         error_call_found = any(
-            call.kwargs.get("level") == "error" and 
-            "Failed to generate workplan: OpenAI API error" in call.kwargs.get("message", "")
+            call.kwargs.get("level") == "error"
+            and "Failed to generate workplan: OpenAI API error" in call.kwargs.get("message", "")
             for call in mock_ctx.log.call_args_list
         )
         assert error_call_found, "Error log not found in log calls"
@@ -221,8 +221,8 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
 
         # Verify error was logged (check in all calls, not just the last one)
         error_call_found = any(
-            call.kwargs.get("level") == "error" and 
-            "Failed to generate judgement: OpenAI API error" in call.kwargs.get("message", "")
+            call.kwargs.get("level") == "error"
+            and "Failed to generate judgement: OpenAI API error" in call.kwargs.get("message", "")
             for call in mock_ctx.log.call_args_list
         )
         assert error_call_found, "Error log not found in log calls"

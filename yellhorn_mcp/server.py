@@ -1175,10 +1175,15 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             if hasattr(response.choices[0], "finish_reason"):
                 finish_reason = response.choices[0].finish_reason
         elif not is_openai_model and usage_metadata:
-            # Gemini usage format
-            input_tokens = usage_metadata.get("prompt_token_count")
-            output_tokens = usage_metadata.get("candidates_token_count")
-            total_tokens = usage_metadata.get("total_token_count")
+            # Gemini usage format - handle both dict and object forms
+            if isinstance(usage_metadata, dict):
+                input_tokens = usage_metadata.get("prompt_token_count")
+                output_tokens = usage_metadata.get("candidates_token_count")
+                total_tokens = usage_metadata.get("total_token_count")
+            else:
+                input_tokens = getattr(usage_metadata, "prompt_token_count", None)
+                output_tokens = getattr(usage_metadata, "candidates_token_count", None)
+                total_tokens = getattr(usage_metadata, "total_token_count", None)
             # Check for search results in grounding metadata
             if hasattr(response, "grounding_metadata") and response.grounding_metadata:
                 if hasattr(response.grounding_metadata, "search_entry_point"):
@@ -1553,10 +1558,15 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             if hasattr(response.choices[0], "finish_reason"):
                 finish_reason = response.choices[0].finish_reason
         elif not is_openai_model and usage_metadata:
-            # Gemini usage format
-            input_tokens = usage_metadata.get("prompt_token_count")
-            output_tokens = usage_metadata.get("candidates_token_count")
-            total_tokens = usage_metadata.get("total_token_count")
+            # Gemini usage format - handle both dict and object forms
+            if isinstance(usage_metadata, dict):
+                input_tokens = usage_metadata.get("prompt_token_count")
+                output_tokens = usage_metadata.get("candidates_token_count")
+                total_tokens = usage_metadata.get("total_token_count")
+            else:
+                input_tokens = getattr(usage_metadata, "prompt_token_count", None)
+                output_tokens = getattr(usage_metadata, "candidates_token_count", None)
+                total_tokens = getattr(usage_metadata, "total_token_count", None)
             # Check for search results in grounding metadata
             if hasattr(response, "grounding_metadata") and response.grounding_metadata:
                 if hasattr(response.grounding_metadata, "search_entry_point"):

@@ -443,23 +443,25 @@ async def test_integration_process_judgement_lsp_mode():
                         )
 
                         with patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue:
-                            with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+                            with patch(
+                                "yellhorn_mcp.server.add_github_issue_comment"
+                            ) as mock_add_comment:
 
                                 # Call the function with LSP mode
                                 result = await process_judgement_async(
-                                repo_path,
-                                gemini_client,
-                                None,  # No OpenAI client
-                                model,
-                                workplan,
-                                diff,
-                                base_ref,
-                                head_ref,
-                                "subissue-123",  # subissue_to_update
-                                issue_number,  # parent_workplan_issue_number
-                                ctx,
-                                codebase_reasoning="lsp",
-                            )
+                                    repo_path,
+                                    gemini_client,
+                                    None,  # No OpenAI client
+                                    model,
+                                    workplan,
+                                    diff,
+                                    base_ref,
+                                    head_ref,
+                                    "subissue-123",  # subissue_to_update
+                                    issue_number,  # parent_workplan_issue_number
+                                    ctx,
+                                    codebase_reasoning="lsp",
+                                )
 
                                 # Verify LSP snapshot was used
                                 mock_lsp_snapshot.assert_called_once_with(repo_path)
