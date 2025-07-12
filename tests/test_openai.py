@@ -172,7 +172,7 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
 
         # Check OpenAI API call
         mock_openai_client.responses.create.assert_called_once()
-        args, kwargs = mock_openai_client.responses.create.call_args
+        _, kwargs = mock_openai_client.responses.create.call_args
 
         # Verify model is passed correctly
         assert kwargs.get("model") == "gpt-4o"
@@ -259,9 +259,7 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         patch(
             "yellhorn_mcp.judgement_processor.create_judgement_subissue", new_callable=AsyncMock
         ) as mock_create_subissue,
-        patch(
-            "yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock
-        ) as mock_add_comment,
+        patch("yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock),
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -293,7 +291,7 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
 
         # Check OpenAI API call
         mock_openai_client.responses.create.assert_called_once()
-        args, kwargs = mock_openai_client.responses.create.call_args
+        _, kwargs = mock_openai_client.responses.create.call_args
 
         # Verify model is passed correctly
         assert kwargs.get("model") == "gpt-4o"
@@ -321,9 +319,7 @@ async def test_process_workplan_async_deep_research_model(mock_request_context, 
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch(
-            "yellhorn_mcp.workplan_processor.update_issue_with_workplan", new_callable=AsyncMock
-        ) as mock_update,
+        patch("yellhorn_mcp.workplan_processor.update_issue_with_workplan", new_callable=AsyncMock),
         patch("yellhorn_mcp.workplan_processor.format_metrics_section") as mock_format_metrics,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -347,7 +343,7 @@ async def test_process_workplan_async_deep_research_model(mock_request_context, 
 
         # Check OpenAI API call
         mock_openai_client.responses.create.assert_called_once()
-        args, kwargs = mock_openai_client.responses.create.call_args
+        _, kwargs = mock_openai_client.responses.create.call_args
 
         # Verify model is passed correctly
         assert kwargs.get("model") == "o3-deep-research"
@@ -377,9 +373,7 @@ async def test_process_judgement_async_deep_research_model(
         patch(
             "yellhorn_mcp.judgement_processor.create_judgement_subissue", new_callable=AsyncMock
         ) as mock_create_subissue,
-        patch(
-            "yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock
-        ) as mock_add_comment,
+        patch("yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock),
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -411,7 +405,7 @@ async def test_process_judgement_async_deep_research_model(
 
         # Check OpenAI API call
         mock_openai_client.responses.create.assert_called_once()
-        args, kwargs = mock_openai_client.responses.create.call_args
+        _, kwargs = mock_openai_client.responses.create.call_args
 
         # Verify model is passed correctly
         assert kwargs.get("model") == "o4-mini-deep-research"
@@ -501,7 +495,7 @@ async def test_process_workplan_async_list_output(mock_request_context):
 
         # Verify GitHub issue update contains the text from the list
         mock_update.assert_called_once()
-        args, kwargs = mock_update.call_args
+        args, _ = mock_update.call_args
         assert args[0] == Path("/mock/repo")
         assert args[1] == "124"
         assert "Mock OpenAI response from list output" in args[2]
@@ -543,9 +537,7 @@ async def test_process_judgement_async_list_output(mock_request_context):
         patch(
             "yellhorn_mcp.judgement_processor.create_judgement_subissue", new_callable=AsyncMock
         ) as mock_create_subissue,
-        patch(
-            "yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock
-        ) as mock_add_comment,
+        patch("yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock),
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
