@@ -13,18 +13,18 @@ class TestGetGeminiSearchTools:
     """Tests for _get_gemini_search_tools function."""
 
     @patch("yellhorn_mcp.search_grounding.genai_types")
-    def test_gemini_15_model_uses_google_search_retrieval(self, mock_types):
-        """Test that Gemini 1.5 models use GoogleSearchRetrieval."""
+    def test_gemini_15_model_uses_google_search(self, mock_types):
+        """Test that Gemini 1.5 models now use GoogleSearch (same as 2.0+)."""
         mock_tool = Mock()
-        mock_search_retrieval = Mock()
+        mock_search = Mock()
         mock_types.Tool.return_value = mock_tool
-        mock_types.GoogleSearchRetrieval.return_value = mock_search_retrieval
+        mock_types.GoogleSearch.return_value = mock_search
 
         result = _get_gemini_search_tools("gemini-1.5-pro")
 
         assert result == [mock_tool]
-        mock_types.GoogleSearchRetrieval.assert_called_once()
-        mock_types.Tool.assert_called_once_with(google_search_retrieval=mock_search_retrieval)
+        mock_types.GoogleSearch.assert_called_once()
+        mock_types.Tool.assert_called_once_with(google_search=mock_search)
 
     @patch("yellhorn_mcp.search_grounding.genai_types")
     def test_gemini_20_model_uses_google_search(self, mock_types):

@@ -5,6 +5,15 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class UsageMetrics(BaseModel):
+    """Token usage metrics from LLM API calls."""
+
+    prompt_tokens: int = Field(description="Number of prompt/input tokens")
+    completion_tokens: int = Field(description="Number of completion/output tokens")
+    total_tokens: int = Field(description="Total tokens used")
+    model_name: str = Field(description="Model name used for the request")
+
+
 class SubmissionMetadata(BaseModel):
     """Metadata for the initial submission comment when a workplan or judgement is requested."""
 
@@ -45,4 +54,4 @@ class CompletionMetadata(BaseModel):
         default=None, description="Total characters in the prompt"
     )
     warnings: list[str] | None = Field(default=None, description="Any warnings to report")
-    timestamp: datetime = Field(description="Timestamp of completion")
+    timestamp: datetime | None = Field(default=None, description="Timestamp of completion")
