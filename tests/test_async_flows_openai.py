@@ -48,35 +48,53 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
     mock_ctx = DummyContext()
     mock_ctx.log = AsyncMock()
 
-    # Bypass the OpenAI client check by patching it directly
-    with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment:
-        # Create a typical error flow: add_github_issue_comment should be called with error message
+    # Test missing OpenAI client - should call add_issue_comment with error
+    with (
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh_command,
+    ):
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+        mock_gh_command.return_value = ""
+        
+        # Create a typical error flow: process_workplan_async catches exception and adds comment
         await process_workplan_async(
             Path("/mock/repo"),
             None,  # No Gemini client
-            None,  # No OpenAI client but we'll see the error in add_github_issue_comment
+            None,  # No OpenAI client - will cause exception
             "gpt-4o",  # OpenAI model
             "Feature Implementation Plan",
             "123",
-            mock_ctx,
-            detailed_description="Test description",
+            "full",  # codebase_reasoning
+            "Test description",  # detailed_description
+            ctx=mock_ctx,
         )
 
-        # Verify error was propagated to add_github_issue_comment with completion metadata
-        mock_add_comment.assert_called_once()
-        args = mock_add_comment.call_args[0]
-        # Now we expect a completion metadata comment with error status
-        assert "## ⚠️ Workplan generation failed" in args[2]
-        assert "### ⚠️ Warnings" in args[2]
+        # Verify error comment was added via gh command
+        mock_gh_command.assert_called()
+        # Find the call that adds the comment
+        comment_call = None
+        for call in mock_gh_command.call_args_list:
+            if call[0][1][0] == "issue" and call[0][1][1] == "comment":
+                comment_call = call
+                break
+        
+        assert comment_call is not None, "No issue comment call found"
+        # The call args are: repo_path, ["issue", "comment", issue_number, "--body", body]
+        assert comment_call[0][1][2] == "123"  # issue number
+        assert comment_call[0][1][4].startswith("❌ **Error generating workplan**")
+        assert "OpenAI client not initialized" in comment_call[0][1][4]
 
     # Test with OpenAI API error
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh_command,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
+        mock_gh_command.return_value = ""
 
         # Set up OpenAI client to raise an error
         mock_client = MagicMock()
@@ -90,26 +108,32 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
             "gpt-4o",
             "Feature Implementation Plan",
             "123",
-            mock_ctx,
-            detailed_description="Test description",
+            "full",  # codebase_reasoning
+            "Test description",  # detailed_description
+            ctx=mock_ctx,
         )
 
         # Verify error was logged (check in all calls, not just the last one)
         error_call_found = any(
             call.kwargs.get("level") == "error"
-            and "Failed to generate workplan: OpenAI API error" in call.kwargs.get("message", "")
+            and "Error processing workplan: OpenAI API error" in call.kwargs.get("message", "")
             for call in mock_ctx.log.call_args_list
         )
         assert error_call_found, "Error log not found in log calls"
 
-        # Verify comment was added with error message using completion metadata format
-        mock_add_comment.assert_called_once()
-        args = mock_add_comment.call_args[0]
-        assert args[0] == Path("/mock/repo")
-        assert args[1] == "123"
-        assert "## ⚠️ Workplan generation failed" in args[2]
-        assert "### ⚠️ Warnings" in args[2]
-        assert "OpenAI API error" in args[2]
+        # Verify comment was added with error message via gh command
+        mock_gh_command.assert_called()
+        # Find the call that adds the comment
+        comment_call = None
+        for call in mock_gh_command.call_args_list:
+            if call[0][1][0] == "issue" and call[0][1][1] == "comment":
+                comment_call = call
+                break
+        
+        assert comment_call is not None, "No issue comment call found"
+        assert comment_call[0][1][2] == "123"  # issue number
+        assert comment_call[0][1][4].startswith("❌ **Error generating workplan**")
+        assert "OpenAI API error" in comment_call[0][1][4]
 
 
 @pytest.mark.asyncio
@@ -121,10 +145,11 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh_command,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
+        mock_gh_command.return_value = ""
 
         # Override mock_openai_client to return empty content
         client = MagicMock()
@@ -149,16 +174,25 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
             "gpt-4o",
             "Feature Implementation Plan",
             "123",
-            mock_ctx,
-            detailed_description="Test description",
+            "full",  # codebase_reasoning
+            "Test description",  # detailed_description
+            ctx=mock_ctx,
         )
 
-        # Verify comment was added with error message
-        mock_add_comment.assert_called_once()
-        args = mock_add_comment.call_args[0]
-        assert args[0] == Path("/mock/repo")
-        assert args[1] == "123"
-        assert "⚠️ AI workplan enhancement failed" in args[2]
+        # Verify comment was added with error message via gh command
+        mock_gh_command.assert_called()
+        # Find the call that adds the comment
+        comment_call = None
+        for call in mock_gh_command.call_args_list:
+            if call[0][1][0] == "issue" and call[0][1][1] == "comment":
+                comment_call = call
+                break
+        
+        assert comment_call is not None, "No issue comment call found"
+        assert comment_call[0][1][2] == "123"  # issue number
+        # The empty response from OpenAI raises an exception, so we get the error format
+        assert comment_call[0][1][4].startswith("❌ **Error generating workplan**")
+        assert "Received empty response from OpenAI API" in comment_call[0][1][4]
 
 
 @pytest.mark.asyncio

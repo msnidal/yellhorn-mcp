@@ -278,26 +278,41 @@ async def test_run_git_command_failure():
 @pytest.mark.asyncio
 async def test_get_codebase_snapshot():
     """Test getting codebase snapshot."""
-    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
-        mock_git.return_value = "file1.py\nfile2.py\nfile3.py"
+    with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+        # Mock both calls to run_git_command (tracked files and untracked files)
+        mock_git.side_effect = [
+            "file1.py\nfile2.py",  # tracked files
+            "file3.py"  # untracked files
+        ]
 
-        with patch("builtins.open", create=True) as mock_open:
-            mock_file = MagicMock()
-            mock_file.__enter__.return_value.read.side_effect = ["content1", "content2", "content3"]
-            mock_open.return_value = mock_file
+        with patch("pathlib.Path.is_dir", return_value=False):
+            with patch("pathlib.Path.exists", return_value=False):
+                # Mock Path.stat() for file size check
+                mock_stat = MagicMock()
+                mock_stat.st_size = 100  # Small file size
+                with patch("pathlib.Path.stat", return_value=mock_stat):
+                    # Mock Path.read_text() for file contents
+                    file_contents = {
+                        "file1.py": "content1",
+                        "file2.py": "content2", 
+                        "file3.py": "content3"
+                    }
+                    def mock_read_text(self, *args, **kwargs):
+                        # Extract filename from the path
+                        filename = str(self).split("/")[-1]
+                        return file_contents.get(filename, "")
+                    
+                    with patch("pathlib.Path.read_text", mock_read_text):
+                        # Test without .yellhornignore
+                        files, contents = await get_codebase_snapshot(Path("/mock/repo"))
 
-            with patch("pathlib.Path.is_dir", return_value=False):
-                with patch("pathlib.Path.exists", return_value=False):
-                    # Test without .yellhornignore
-                    files, contents = await get_codebase_snapshot(Path("/mock/repo"))
-
-                    assert files == ["file1.py", "file2.py", "file3.py"]
-                    assert "file1.py" in contents
-                    assert "file2.py" in contents
-                    assert "file3.py" in contents
-                    assert contents["file1.py"] == "content1"
-                    assert contents["file2.py"] == "content2"
-                    assert contents["file3.py"] == "content3"
+                        assert files == ["file1.py", "file2.py", "file3.py"]
+                        assert "file1.py" in contents
+                        assert "file2.py" in contents
+                        assert "file3.py" in contents
+                        assert contents["file1.py"] == "content1"
+                        assert contents["file2.py"] == "content2"
+                        assert contents["file3.py"] == "content3"
 
 
 @pytest.mark.asyncio

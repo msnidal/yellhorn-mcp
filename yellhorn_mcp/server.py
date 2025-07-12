@@ -874,8 +874,13 @@ from yellhorn_mcp.git_utils import (
     ensure_label_exists,
     get_default_branch,
     get_github_pr_diff,
+    add_github_issue_comment as add_github_issue_comment_from_git_utils,
+    post_github_pr_review,
 )
 from yellhorn_mcp.comment_utils import format_submission_comment, format_completion_comment
+from yellhorn_mcp.judgement_processor import get_git_diff
+from yellhorn_mcp.search_grounding import _get_gemini_search_tools
+from yellhorn_mcp.gemini_integration import async_generate_content_with_config
 
 # Export for use by the CLI
-__all__ = ["mcp", "process_workplan_async", "process_judgement_async", "calculate_cost", "format_metrics_section", "get_codebase_snapshot", "build_file_structure_context", "format_codebase_for_prompt", "get_git_diff", "get_lsp_snapshot", "get_lsp_diff", "is_git_repository", "YellhornMCPError", "add_github_issue_comment", "update_github_issue", "create_github_subissue", "get_github_issue_body", "run_github_command", "run_git_command", "ensure_label_exists", "get_default_branch", "get_github_pr_diff", "format_submission_comment", "format_completion_comment"]
+__all__ = ["mcp", "process_workplan_async", "process_judgement_async", "calculate_cost", "format_metrics_section", "get_codebase_snapshot", "build_file_structure_context", "format_codebase_for_prompt", "get_git_diff", "get_lsp_snapshot", "get_lsp_diff", "is_git_repository", "YellhornMCPError", "add_github_issue_comment", "update_github_issue", "create_github_subissue", "get_github_issue_body", "run_github_command", "run_git_command", "ensure_label_exists", "get_default_branch", "get_github_pr_diff", "format_submission_comment", "format_completion_comment", "create_workplan", "get_workplan", "judge_workplan", "curate_context", "app_lifespan", "_get_gemini_search_tools", "async_generate_content_with_config", "add_github_issue_comment_from_git_utils", "post_github_pr_review"]

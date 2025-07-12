@@ -306,7 +306,7 @@ async def test_update_snapshot_with_full_diff_files():
 @pytest.mark.asyncio
 async def test_integration_process_workplan_lsp_mode():
     """Test the integration of LSP mode with process_workplan_async."""
-    from yellhorn_mcp.server import process_workplan_async
+    from yellhorn_mcp.workplan_processor import process_workplan_async
 
     # Mock dependencies
     repo_path = Path("/mock/repo")
@@ -341,48 +341,50 @@ async def test_integration_process_workplan_lsp_mode():
         with patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format:
             mock_format.return_value = "<formatted LSP snapshot>"
 
-            with patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_metrics:
+            with patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_metrics:
                 mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
-                with patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update:
-                    # Call the function with LSP mode
-                    await process_workplan_async(
-                        repo_path,
-                        gemini_client,
-                        None,  # No OpenAI client
-                        model,
-                        title,
-                        issue_number,
-                        ctx,
-                        detailed_description=detailed_description,
-                    )
+                with patch("yellhorn_mcp.github_integration.update_issue_with_workplan") as mock_update:
+                    with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_comment:
+                        # Call the function with LSP mode
+                        await process_workplan_async(
+                            repo_path,
+                            gemini_client,
+                            None,  # No OpenAI client
+                            model,
+                            title,
+                            issue_number,
+                            "lsp",  # codebase_reasoning
+                            detailed_description,
+                            ctx=ctx,
+                        )
 
-                    # Verify LSP snapshot was used
-                    mock_lsp_snapshot.assert_called_once_with(repo_path)
+                        # Verify LSP snapshot was used
+                        mock_lsp_snapshot.assert_called_once_with(repo_path)
 
-                    # Verify formatted snapshot was passed to the prompt
-                    # The prompt might be in either the old or new API call
-                    if gemini_client.aio.models.generate_content.called:
-                        prompt = gemini_client.aio.models.generate_content.call_args[1]["contents"]
-                        assert "<formatted LSP snapshot>" in prompt
-                    elif gemini_client.aio.generate_content.called:
-                        prompt = gemini_client.aio.generate_content.call_args[1]["contents"]
-                        assert "<formatted LSP snapshot>" in prompt
-                    else:
-                        assert False, "Neither generate_content method was called"
+                        # Verify formatted snapshot was passed to the prompt
+                        # The prompt might be in either the old or new API call
+                        if gemini_client.aio.models.generate_content.called:
+                            prompt = gemini_client.aio.models.generate_content.call_args[1]["contents"]
+                            assert "<formatted LSP snapshot>" in prompt
+                        elif gemini_client.aio.generate_content.called:
+                            prompt = gemini_client.aio.generate_content.call_args[1]["contents"]
+                            assert "<formatted LSP snapshot>" in prompt
+                        else:
+                            assert False, "Neither generate_content method was called"
 
-                    # Verify GitHub issue was updated
-                    mock_update.assert_called_once()
-                    issue_body = mock_update.call_args[0][2]
-                    assert "# Test Workplan" in issue_body
-                    assert "Mock workplan content" in issue_body
-                    assert "## Metrics" in issue_body
+                        # Verify GitHub issue was updated
+                        mock_update.assert_called_once()
+                        issue_body = mock_update.call_args[0][2]
+                        assert "# Test Workplan" in issue_body
+                        assert "Mock workplan content" in issue_body
+                        assert "## Metrics" in issue_body
 
 
 @pytest.mark.asyncio
 async def test_integration_process_judgement_lsp_mode():
     """Test the integration of LSP mode with process_judgement_async."""
-    from yellhorn_mcp.server import process_judgement_async
+    from yellhorn_mcp.judgement_processor import process_judgement_async
 
     # Mock dependencies
     repo_path = Path("/mock/repo")
@@ -432,11 +434,11 @@ async def test_integration_process_judgement_lsp_mode():
             with patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format:
                 mock_format.return_value = "<formatted LSP+diff snapshot>"
 
-                with patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_metrics:
+                with patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_metrics:
                     mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
                     with patch(
-                        "yellhorn_mcp.server.create_github_subissue"
+                        "yellhorn_mcp.github_integration.create_github_subissue"
                     ) as mock_create_subissue:
                         mock_create_subissue.return_value = (
                             "https://github.com/mock/repo/issues/456"
@@ -444,7 +446,7 @@ async def test_integration_process_judgement_lsp_mode():
 
                         with patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue:
                             with patch(
-                                "yellhorn_mcp.server.add_github_issue_comment"
+                                "yellhorn_mcp.github_integration.add_issue_comment"
                             ) as mock_add_comment:
 
                                 # Call the function with LSP mode
@@ -457,9 +459,11 @@ async def test_integration_process_judgement_lsp_mode():
                                     diff,
                                     base_ref,
                                     head_ref,
-                                    "subissue-123",  # subissue_to_update
+                                    "abc123",  # base_commit_hash
+                                    "def456",  # head_commit_hash
                                     issue_number,  # parent_workplan_issue_number
-                                    ctx,
+                                    "subissue-123",  # subissue_to_update
+                                    ctx=ctx,
                                     codebase_reasoning="lsp",
                                 )
 

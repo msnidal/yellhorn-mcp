@@ -290,13 +290,13 @@ async def test_e2e_prompt_formatting(tmp_git_repo):
     # Format for prompt
     prompt = await format_codebase_for_prompt(file_paths, file_contents)
 
-    # Verify prompt contains fenced code blocks
-    assert "```py" in prompt  # Note: may use py instead of python for extension
-    assert "```" in prompt
-
-    # Each file should be wrapped in code fence once (open and close)
-    # So total count should be 2 * number of files
-    assert prompt.count("```") == 2 * len(file_contents)
+    # Verify prompt contains the file structure and content
+    assert "<codebase_tree>" in prompt
+    assert "</codebase_tree>" in prompt
+    assert "<file_contents>" in prompt
+    assert "</file_contents>" in prompt
+    assert "--- File: pkg/sample.py ---" in prompt
+    assert "def hello()" in prompt
 
 
 @pytest.mark.asyncio
@@ -310,8 +310,9 @@ async def test_e2e_update_snapshot_with_diff(tmp_git_repo):
     file.write_text("def initial(): pass")
 
     # Mock the git operations for initial snapshot
-    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git_1:
-        mock_git_1.return_value = "pkg/sample.py"
+    with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git_1:
+        # get_codebase_snapshot calls run_git_command twice: for tracked and untracked files
+        mock_git_1.side_effect = ["pkg/sample.py", ""]  # tracked files, untracked files
 
         # Mock is_git_repository to always return True
         with patch("yellhorn_mcp.git_utils.is_git_repository", return_value=True):
