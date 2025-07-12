@@ -27,7 +27,7 @@ async def test_fence_function():
 @pytest.mark.asyncio
 async def test_lsp_snapshot_returns_plain_text():
     """Test that get_lsp_snapshot returns plain text without code fences."""
-    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot:
         mock_snapshot.return_value = (["file1.py", "file2.go"], {})
 
         with patch("yellhorn_mcp.lsp_utils.extract_python_api") as mock_extract_py:

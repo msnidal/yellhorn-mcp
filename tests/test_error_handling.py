@@ -32,13 +32,13 @@ async def test_run_github_command_file_not_found():
 @pytest.mark.asyncio
 async def test_update_github_issue_error():
     """Test update_github_issue with error during GitHub CLI execution."""
-    # Create a temporary file path that will fail when accessed
-    with patch("builtins.open") as mock_open:
-        mock_open.side_effect = PermissionError("Permission denied")
+    from yellhorn_mcp.git_utils import update_github_issue
+
+    # Mock run_github_command to raise an error
+    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_run:
+        mock_run.side_effect = YellhornMCPError("GitHub CLI command failed: error")
 
         with pytest.raises(YellhornMCPError, match="Failed to update GitHub issue"):
-            from yellhorn_mcp.git_utils import update_github_issue
-
             await update_github_issue(Path("/mock/repo"), "123", "Test content")
 
 
@@ -111,12 +111,14 @@ async def test_post_github_pr_review_error():
     """Test post_github_pr_review with error."""
     from yellhorn_mcp.git_utils import post_github_pr_review
 
-    with patch("pathlib.Path.exists", return_value=True):
-        with patch("builtins.open", side_effect=PermissionError("Permission denied")):
-            with pytest.raises(YellhornMCPError, match="Failed to post GitHub PR review"):
-                await post_github_pr_review(
-                    Path("/mock/repo"), "https://github.com/user/repo/pull/123", "Review content"
-                )
+    # Mock run_github_command to raise an error
+    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_run:
+        mock_run.side_effect = YellhornMCPError("GitHub CLI command failed: error")
+
+        with pytest.raises(YellhornMCPError, match="Failed to post GitHub PR review"):
+            await post_github_pr_review(
+                Path("/mock/repo"), "https://github.com/user/repo/pull/123", "Review content"
+            )
 
 
 @pytest.mark.asyncio

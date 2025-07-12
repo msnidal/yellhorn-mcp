@@ -6,12 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from mcp.server.fastmcp import Context
 
-from yellhorn_mcp.server import (
-    calculate_cost,
-    format_metrics_section,
-    process_judgement_async,
-    process_workplan_async,
-)
+from yellhorn_mcp.cost_tracker import calculate_cost, format_metrics_section
+from yellhorn_mcp.judgement_processor import process_judgement_async
+from yellhorn_mcp.workplan_processor import process_workplan_async
 
 
 @pytest.fixture
@@ -36,17 +33,14 @@ def mock_openai_client():
 
     # Mock response structure for Responses API
     response = MagicMock()
-    output = MagicMock()
-    output.text = "Mock OpenAI response text"
-    response.output = output
-    # Add output_text property that returns the text from output
     response.output_text = "Mock OpenAI response text"
 
     # Mock usage data
-    response.usage = MagicMock()
-    response.usage.prompt_tokens = 1000
-    response.usage.completion_tokens = 500
-    response.usage.total_tokens = 1500
+    usage = MagicMock()
+    usage.prompt_tokens = 1000
+    usage.completion_tokens = 500
+    usage.total_tokens = 1500
+    response.usage = usage
 
     # Mock model
     response.model = "gpt-4o-1234"
@@ -96,8 +90,8 @@ def test_format_metrics_section_openai():
     """Test the format_metrics_section function with OpenAI usage data."""
     # Mock OpenAI usage data
     usage_metadata = MagicMock()
-    usage_metadata.prompt_tokens = 1000
-    usage_metadata.completion_tokens = 500
+    usage_metadata.input_tokens = 1000
+    usage_metadata.output_tokens = 500
     usage_metadata.total_tokens = 1500
 
     model = "gpt-4o"
@@ -110,10 +104,10 @@ def test_format_metrics_section_openai():
         # Check that it contains all the expected sections
         assert "\n\n---\n## Completion Metrics" in result
         assert f"**Model Used**: `{model}`" in result
-        assert "**Input Tokens**: 1000" in result
-        assert "**Output Tokens**: 500" in result
-        assert "**Total Tokens**: 1500" in result
-        assert "**Estimated Cost**: $0.0125" in result
+        assert "*   **Input Tokens**: 1000" in result
+        assert "*   **Output Tokens**: 500" in result
+        assert "*   **Total Tokens**: 1500" in result
+        assert "*   **Estimated Cost**: $0.0125" in result
 
         # Check the calculate_cost was called with the right parameters
         mock_calculate_cost.assert_called_once_with(model, 1000, 500)
@@ -125,40 +119,56 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.github_integration.update_issue_with_workplan") as mock_update,
-        patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
-        patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh_command,
+        patch(
+            "yellhorn_mcp.workplan_processor.update_issue_with_workplan", new_callable=AsyncMock
+        ) as mock_update,
+        patch("yellhorn_mcp.workplan_processor.format_metrics_section") as mock_format_metrics,
+        patch(
+            "yellhorn_mcp.workplan_processor.add_issue_comment", new_callable=AsyncMock
+        ) as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
         mock_format_metrics.return_value = (
             "\n\n---\n## Completion Metrics\n*   **Model Used**: `gpt-4o`"
         )
+        # Mock add_issue_comment to not raise an error
+        mock_add_comment.return_value = None
+
+        # Set up mock_request_context.log to capture log messages
+        log_messages = []
+
+        async def capture_log(level, message):
+            log_messages.append((level, message))
+
+        mock_request_context.log = AsyncMock(side_effect=capture_log)
 
         # Test OpenAI client workflow
-        try:
-            await process_workplan_async(
-                Path("/mock/repo"),
-                None,  # No Gemini client
-                mock_openai_client,
-                "gpt-4o",
-                "Feature Implementation Plan",
-                "123",
-                "full",  # codebase_reasoning
-                "Create a new feature to support X",  # detailed_description
-                ctx=mock_request_context,
-            )
-        except Exception as e:
-            print(f"Exception in test: {e}")
-            raise
+        await process_workplan_async(
+            Path("/mock/repo"),
+            None,  # No Gemini client
+            mock_openai_client,
+            "gpt-4o",
+            "Feature Implementation Plan",
+            "123",
+            "full",  # codebase_reasoning
+            "Create a new feature to support X",  # detailed_description
+            ctx=mock_request_context,
+        )
+
+        # Print log messages for debugging
+        print(f"Log messages: {log_messages}")
 
         # Print debug info
         print(f"update_github_issue called: {mock_update.called}")
         print(f"format_metrics_section called: {mock_format_metrics.called}")
         print(f"add_issue_comment called: {mock_add_comment.called}")
         if mock_add_comment.called:
-            print(f"Comment: {mock_add_comment.call_args}")
+            print(f"Comment calls: {mock_add_comment.call_args_list}")
+            # Check if any error comments were made
+            for call in mock_add_comment.call_args_list:
+                if "Error" in str(call):
+                    print(f"Error comment found: {call}")
 
         # Check OpenAI API call
         mock_openai_client.responses.create.assert_called_once()
@@ -200,7 +210,9 @@ async def test_openai_client_required():
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.github_integration.update_issue_with_workplan") as mock_update,
+        patch(
+            "yellhorn_mcp.workplan_processor.update_issue_with_workplan", new_callable=AsyncMock
+        ) as mock_update,
         patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh_command,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -241,11 +253,15 @@ async def test_openai_client_required():
 async def test_process_judgement_async_openai(mock_request_context, mock_openai_client):
     """Test judgement generation with OpenAI model."""
     with (
-        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.github_integration.create_judgement_subissue") as mock_create_subissue,
-        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.judgement_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.judgement_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.judgement_processor.format_metrics_section") as mock_format_metrics,
+        patch(
+            "yellhorn_mcp.judgement_processor.create_judgement_subissue", new_callable=AsyncMock
+        ) as mock_create_subissue,
+        patch(
+            "yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock
+        ) as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -305,8 +321,10 @@ async def test_process_workplan_async_deep_research_model(mock_request_context, 
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.github_integration.update_issue_with_workplan") as mock_update,
-        patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
+        patch(
+            "yellhorn_mcp.workplan_processor.update_issue_with_workplan", new_callable=AsyncMock
+        ) as mock_update,
+        patch("yellhorn_mcp.workplan_processor.format_metrics_section") as mock_format_metrics,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -353,11 +371,15 @@ async def test_process_judgement_async_deep_research_model(
     mock_request_context.request_context.lifespan_context["model"] = "o4-mini-deep-research"
 
     with (
-        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.github_integration.create_judgement_subissue") as mock_create_subissue,
-        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.judgement_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.judgement_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.judgement_processor.format_metrics_section") as mock_format_metrics,
+        patch(
+            "yellhorn_mcp.judgement_processor.create_judgement_subissue", new_callable=AsyncMock
+        ) as mock_create_subissue,
+        patch(
+            "yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock
+        ) as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -437,8 +459,10 @@ async def test_process_workplan_async_list_output(mock_request_context):
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.github_integration.update_issue_with_workplan") as mock_update,
-        patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
+        patch(
+            "yellhorn_mcp.workplan_processor.update_issue_with_workplan", new_callable=AsyncMock
+        ) as mock_update,
+        patch("yellhorn_mcp.workplan_processor.format_metrics_section") as mock_format_metrics,
         patch("yellhorn_mcp.openai_integration.generate_workplan_with_openai") as mock_openai_gen,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -513,11 +537,15 @@ async def test_process_judgement_async_list_output(mock_request_context):
     client.responses = responses
 
     with (
-        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.github_integration.create_judgement_subissue") as mock_create_subissue,
-        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.judgement_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.judgement_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.judgement_processor.format_metrics_section") as mock_format_metrics,
+        patch(
+            "yellhorn_mcp.judgement_processor.create_judgement_subissue", new_callable=AsyncMock
+        ) as mock_create_subissue,
+        patch(
+            "yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock
+        ) as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"

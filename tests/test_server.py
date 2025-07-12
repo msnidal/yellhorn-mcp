@@ -484,68 +484,67 @@ def test_calculate_cost():
     assert cost is None
 
 
-
-
 @pytest.mark.asyncio
 async def test_create_workplan(mock_request_context, mock_genai_client):
     """Test creating a workplan."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
-    with patch("yellhorn_mcp.git_utils.ensure_label_exists") as mock_ensure_label:
-        with patch("yellhorn_mcp.git_utils.run_github_command") as mock_run_gh:
-            with patch("yellhorn_mcp.github_integration.create_github_issue") as mock_create_issue:
-                mock_create_issue.return_value = {
-                    "number": "123",
-                    "url": "https://github.com/user/repo/issues/123",
-                }
+    with patch(
+        "yellhorn_mcp.server.create_github_issue", new_callable=AsyncMock
+    ) as mock_create_issue:
+        mock_create_issue.return_value = {
+            "number": "123",
+            "url": "https://github.com/user/repo/issues/123",
+        }
 
-                with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment:
-                    with patch("asyncio.create_task") as mock_create_task:
-                        # Test with required title and detailed description (default codebase_reasoning="full")
-                        response = await create_workplan(
-                            title="Feature Implementation Plan",
-                            detailed_description="Create a new feature to support X",
-                            ctx=mock_request_context,
-                        )
+        with patch(
+            "yellhorn_mcp.server.add_issue_comment", new_callable=AsyncMock
+        ) as mock_add_comment:
+            with patch("asyncio.create_task") as mock_create_task:
+                # Mock the return value of create_task to avoid actual async processing
+                mock_task = MagicMock()
+                mock_create_task.return_value = mock_task
 
-                        # Parse response as JSON and check contents
-                        import json
+                # Test with required title and detailed description (default codebase_reasoning="full")
+                response = await create_workplan(
+                    title="Feature Implementation Plan",
+                    detailed_description="Create a new feature to support X",
+                    ctx=mock_request_context,
+                )
 
-                        result = json.loads(response)
-                        assert result["issue_url"] == "https://github.com/user/repo/issues/123"
-                        assert result["issue_number"] == "123"
+                # Parse response as JSON and check contents
+                import json
 
-                        mock_ensure_label.assert_called_once_with(
-                            Path("/mock/repo"), "yellhorn-mcp", "Issues created by yellhorn-mcp"
-                        )
-                        mock_create_issue.assert_called_once()
-                        mock_create_task.assert_called_once()
+                result = json.loads(response)
+                assert result["issue_url"] == "https://github.com/user/repo/issues/123"
+                assert result["issue_number"] == "123"
 
-                        # Check that the GitHub issue is created with the provided title
-                        issue_call_args = mock_create_issue.call_args[0]
-                        assert issue_call_args[1] == "Feature Implementation Plan"  # title
-                        assert (
-                            issue_call_args[2] == "Create a new feature to support X"
-                        )  # description
+                mock_create_issue.assert_called_once()
+                mock_create_task.assert_called_once()
 
-                        # Verify that add_github_issue_comment was called with the submission metadata
-                        mock_add_comment.assert_called_once()
-                        comment_args = mock_add_comment.call_args
-                        assert comment_args[0][0] == Path("/mock/repo")  # repo_path
-                        assert comment_args[0][1] == "123"  # issue_number
-                        submission_comment = comment_args[0][2]  # comment content
+                # Check that the GitHub issue is created with the provided title
+                issue_call_args = mock_create_issue.call_args[0]
+                assert issue_call_args[1] == "Feature Implementation Plan"  # title
+                assert issue_call_args[2] == "Create a new feature to support X"  # description
 
-                        # Verify the submission comment contains expected metadata
-                        assert "## 🚀 Generating workplan..." in submission_comment
-                        assert "**Model**: `gemini-2.5-pro`" in submission_comment
-                        assert "**Search Grounding**: " in submission_comment
-                        assert "**Codebase Reasoning**: `full`" in submission_comment
-                        assert "**Yellhorn Version**: " in submission_comment
-                        assert (
-                            "_This issue will be updated once generation is complete._"
-                            in submission_comment
-                        )
+                # Verify that add_github_issue_comment was called with the submission metadata
+                mock_add_comment.assert_called_once()
+                comment_args = mock_add_comment.call_args
+                assert comment_args[0][0] == Path("/mock/repo")  # repo_path
+                assert comment_args[0][1] == "123"  # issue_number
+                submission_comment = comment_args[0][2]  # comment content
+
+                # Verify the submission comment contains expected metadata
+                assert "## 🚀 Generating workplan..." in submission_comment
+                assert "**Model**: `gemini-2.5-pro`" in submission_comment
+                assert "**Search Grounding**: " in submission_comment
+                assert "**Codebase Reasoning**: `full`" in submission_comment
+                assert "**Yellhorn Version**: " in submission_comment
+                assert (
+                    "_This issue will be updated once generation is complete._"
+                    in submission_comment
+                )
 
                 # Check that the process_workplan_async task is created with the correct parameters
                 args, kwargs = mock_create_task.call_args
@@ -555,8 +554,7 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
                 coroutine.close()
 
                 # Reset mocks for next test
-                mock_ensure_label.reset_mock()
-                mock_gh.reset_mock()
+                mock_create_issue.reset_mock()
                 mock_add_comment.reset_mock()
                 mock_create_task.reset_mock()
 
@@ -573,22 +571,20 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
                 assert result["issue_url"] == "https://github.com/user/repo/issues/123"
                 assert result["issue_number"] == "123"
 
-                mock_ensure_label.assert_called_once()
-                mock_gh.assert_called_once()
+                mock_create_issue.assert_called_once()
                 # Verify that no async task was created for AI processing
                 mock_create_task.assert_not_called()
 
-                # Verify that add_github_issue_comment was NOT called (codebase_reasoning="none")
-                mock_add_comment.assert_not_called()
+                # Verify that add_github_issue_comment was called even with codebase_reasoning="none"
+                mock_add_comment.assert_called_once()
+                comment_args = mock_add_comment.call_args
+                submission_comment = comment_args[0][2]
+                assert "**Codebase Reasoning**: `none`" in submission_comment
 
-                # Check the body content again
-                body_index = mock_gh.call_args[0][1].index("--body") + 1
-                body_content = mock_gh.call_args[0][1][body_index]
-                assert "# Basic Plan" in body_content
-                assert "## Description" in body_content
-                assert "Simple plan description" in body_content
-                # Verify the placeholder message is NOT present
-                assert "Generating detailed workplan" not in body_content
+                # Check the create issue call
+                issue_call_args = mock_create_issue.call_args[0]
+                assert issue_call_args[1] == "Basic Plan"  # title
+                assert issue_call_args[2] == "Simple plan description"  # body
 
 
 @pytest.mark.asyncio
