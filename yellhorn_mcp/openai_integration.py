@@ -57,8 +57,8 @@ async def generate_workplan_with_openai(
         if ctx:
             await ctx.log(level="info", message=f"Enabling Deep Research tools for model {model}")
         api_params["tools"] = [
-            {"type": "live_web_search"},
-            {"type": "report_generator"},
+            {"type": "web_search_preview"},
+            {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}}
         ]
 
     # Call OpenAI Responses API
@@ -126,8 +126,8 @@ async def generate_judgement_with_openai(
         if ctx:
             await ctx.log(level="info", message=f"Enabling Deep Research tools for model {model}")
         api_params["tools"] = [
-            {"type": "live_web_search"},
-            {"type": "report_generator"},
+            {"type": "web_search_preview"},
+            {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}}
         ]
 
     # Call OpenAI Responses API

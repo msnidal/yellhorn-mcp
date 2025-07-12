@@ -64,13 +64,15 @@ async def get_git_diff(
             # Import LSP utilities
             from yellhorn_mcp.lsp_utils import get_lsp_diff
 
-            # For lsp mode, get full diff then transform to skeleton view
-            full_diff = await run_git_command(
-                repo_path, ["diff", "--patch", f"{base_ref}...{head_ref}"]
+            # For lsp mode, get changed files and create LSP diff
+            changed_files_output = await run_git_command(
+                repo_path, ["diff", "--name-only", f"{base_ref}...{head_ref}"]
             )
-            if full_diff:
+            changed_files = changed_files_output.strip().split("\n") if changed_files_output else []
+            
+            if changed_files:
                 # Get LSP diff which shows signatures of changed functions and full content of changed files
-                lsp_diff = await get_lsp_diff(repo_path, full_diff)
+                lsp_diff = await get_lsp_diff(repo_path, base_ref, head_ref, changed_files)
                 return lsp_diff
             else:
                 return ""
@@ -226,7 +228,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
         if not judgement_content:
             api_name = "OpenAI" if is_openai_model else "Gemini"
-            raise YellhornMCPError(f"Received an empty response from {api_name} API.")
+            raise YellhornMCPError(f"Failed to generate judgement: Received an empty response from {api_name} API.")
 
         # Calculate generation time if we have metadata
         if completion_metadata and _meta and "start_time" in _meta:
@@ -321,9 +323,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             issue_match = re.search(r"/issues/(\d+)", subissue_url)
             if issue_match:
                 sub_issue_number = issue_match.group(1)
-                completion_comment = format_completion_comment(
-                    submission_metadata, completion_metadata
-                )
+                completion_comment = format_completion_comment(completion_metadata)
                 await add_issue_comment(repo_path, sub_issue_number, completion_comment)
 
     except Exception as e:
@@ -341,3 +341,6 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 await ctx.log(
                     level="error", message=f"Failed to add error comment to issue: {str(e)}"
                 )
+        
+        # Re-raise as YellhornMCPError to signal failure outward
+        raise YellhornMCPError(error_msg)

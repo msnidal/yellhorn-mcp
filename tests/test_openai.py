@@ -244,7 +244,7 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
         patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.github_integration.create_judgement_subissue") as mock_create_subissue,
         patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -252,6 +252,8 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         mock_format_metrics.return_value = (
             "\n\n---\n## Completion Metrics\n*   **Model Used**: `gpt-4o`"
         )
+        # Mock the create_judgement_subissue to return a URL
+        mock_create_subissue.return_value = "https://github.com/repo/issues/457"
 
         workplan = "1. Implement X\n2. Test X"
         diff = "diff --git a/file.py b/file.py\n+def x(): pass"
@@ -282,12 +284,15 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
 
         # Verify input parameter is used (instead of messages)
         input_content = kwargs.get("input", "")
-        assert "<Original Workplan>" in input_content
+        assert "Original Workplan" in input_content
 
-        # Verify the GitHub issue was updated with judgement and metrics
-        mock_update_issue.assert_called_once()
-        update_args = mock_update_issue.call_args[0]
-        issue_body = update_args[2]  # Third argument is the issue body
+        # Verify the GitHub sub-issue was created with judgement and metrics
+        mock_create_subissue.assert_called_once()
+        create_args = mock_create_subissue.call_args[0]
+        assert create_args[0] == Path("/mock/repo")
+        assert create_args[1] == "123"  # parent issue number
+        assert "Judgement for #123" in create_args[2]  # title
+        issue_body = create_args[3]  # Fourth argument is the issue body
         assert "Mock OpenAI response text" in issue_body
         assert "## Completion Metrics" in issue_body
 
@@ -351,7 +356,7 @@ async def test_process_judgement_async_deep_research_model(
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
         patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.github_integration.create_judgement_subissue") as mock_create_subissue,
         patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -359,6 +364,8 @@ async def test_process_judgement_async_deep_research_model(
         mock_format_metrics.return_value = (
             "\n\n---\n## Completion Metrics\n*   **Model Used**: `o4-mini-deep-research`"
         )
+        # Mock the create_judgement_subissue to return a URL
+        mock_create_subissue.return_value = "https://github.com/repo/issues/457"
 
         workplan = "1. Implement feature with web research\n2. Test implementation"
         diff = "diff --git a/file.py b/file.py\n+def feature(): pass"
@@ -395,7 +402,7 @@ async def test_process_judgement_async_deep_research_model(
 
         # Verify input parameter
         input_content = kwargs.get("input", "")
-        assert "<Original Workplan>" in input_content
+        assert "Original Workplan" in input_content
 
 
 @pytest.mark.asyncio
@@ -505,7 +512,7 @@ async def test_process_judgement_async_list_output(mock_request_context):
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
         patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.github_integration.create_judgement_subissue") as mock_create_subissue,
         patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -513,6 +520,8 @@ async def test_process_judgement_async_list_output(mock_request_context):
         mock_format_metrics.return_value = (
             "\n\n---\n## Completion Metrics\n*   **Model Used**: `o4-mini-deep-research`"
         )
+        # Mock the create_judgement_subissue to return a URL
+        mock_create_subissue.return_value = "https://github.com/repo/issues/458"
 
         workplan = "1. Test list output\n2. Verify handling"
         diff = "diff --git a/file.py b/file.py\n+def test(): pass"
@@ -534,8 +543,11 @@ async def test_process_judgement_async_list_output(mock_request_context):
             ctx=mock_request_context,
         )
 
-        # Verify the GitHub issue was updated with judgement from list
-        mock_update_issue.assert_called_once()
-        update_args = mock_update_issue.call_args[0]
-        issue_body = update_args[2]  # Third argument is the issue body
+        # Verify the GitHub sub-issue was created with judgement from list
+        mock_create_subissue.assert_called_once()
+        create_args = mock_create_subissue.call_args[0]
+        assert create_args[0] == Path("/mock/repo")
+        assert create_args[1] == "125"  # parent issue number
+        assert "Judgement for #125" in create_args[2]  # title
+        issue_body = create_args[3]  # Fourth argument is the issue body
         assert "Mock judgement from list output" in issue_body

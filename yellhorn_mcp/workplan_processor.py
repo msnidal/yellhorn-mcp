@@ -394,14 +394,20 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         # Call the appropriate API based on the model type
         if is_openai_model:
             if not openai_client:
-                raise YellhornMCPError("OpenAI client not initialized. Is OPENAI_API_KEY set?")
+                if ctx:
+                    await ctx.log(level="error", message="OpenAI client not initialized")
+                await add_issue_comment(repo_path, issue_number, "❌ **Error generating workplan** – OpenAI client not initialized")
+                return  # Don't raise, function ends after commenting
 
             workplan_content, completion_metadata = await generate_workplan_with_openai(
                 openai_client, model, prompt, ctx
             )
         else:
             if gemini_client is None:
-                raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
+                if ctx:
+                    await ctx.log(level="error", message="Gemini client not initialized")
+                await add_issue_comment(repo_path, issue_number, "❌ **Error generating workplan** – Gemini client not initialized")
+                return  # Don't raise, function ends after commenting
 
             # Get search grounding setting
             use_search = not disable_search_grounding
@@ -479,7 +485,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 timestamp=_meta.get("start_time", datetime.now(timezone.utc)),
             )
 
-            completion_comment = format_completion_comment(submission_metadata, completion_metadata)
+            completion_comment = format_completion_comment(completion_metadata)
             await add_issue_comment(repo_path, issue_number, completion_comment)
 
     except Exception as e:
