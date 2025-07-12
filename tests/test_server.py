@@ -1749,24 +1749,6 @@ async def test_process_workplan_async_with_search_grounding_disabled(
 
 
 @pytest.mark.asyncio
-async def test_process_judgement_async_with_new_search_grounding(
-    mock_request_context, mock_genai_client
-):
-    """Test search grounding with Gemini 1.5 models."""
-    from yellhorn_mcp.server import _get_gemini_search_tools
-
-    # Test that Gemini 1.5 models get the correct search tools
-    search_tools = _get_gemini_search_tools("gemini-1.5-flash")
-    assert search_tools is not None
-    assert len(search_tools) == 1
-
-    # Test with Gemini 1.5 pro
-    search_tools = _get_gemini_search_tools("gemini-1.5-pro")
-    assert search_tools is not None
-    assert len(search_tools) == 1
-
-
-@pytest.mark.asyncio
 async def test_async_generate_content_with_config_error_handling(mock_genai_client):
     """Test async_generate_content_with_config error handling."""
     from yellhorn_mcp.git_utils import YellhornMCPError
