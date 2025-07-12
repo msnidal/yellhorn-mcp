@@ -19,8 +19,8 @@ MODEL_PRICING = {
             "above_200k": 0.15,  # Flash doesn't have different pricing tiers
         },
         "output": {
-            "default": 0.60,
-            "above_200k": 0.60,
+            "default": 3.50,
+            "above_200k": 3.50,
         },
     },
     # OpenAI models

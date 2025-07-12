@@ -535,65 +535,57 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
     with patch("yellhorn_mcp.git_utils.ensure_label_exists") as mock_ensure_label:
-        with patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh:
-            mock_gh.return_value = "https://github.com/user/repo/issues/123"
+        with patch("yellhorn_mcp.git_utils.run_github_command") as mock_run_gh:
+            with patch("yellhorn_mcp.github_integration.create_github_issue") as mock_create_issue:
+                mock_create_issue.return_value = {
+                    "number": "123",
+                    "url": "https://github.com/user/repo/issues/123"
+                }
 
-            with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment:
-                with patch("asyncio.create_task") as mock_create_task:
-                    # Test with required title and detailed description (default codebase_reasoning="full")
-                    response = await create_workplan(
-                        title="Feature Implementation Plan",
-                        detailed_description="Create a new feature to support X",
-                        ctx=mock_request_context,
-                    )
+                with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment:
+                    with patch("asyncio.create_task") as mock_create_task:
+                        # Test with required title and detailed description (default codebase_reasoning="full")
+                        response = await create_workplan(
+                            title="Feature Implementation Plan",
+                            detailed_description="Create a new feature to support X",
+                            ctx=mock_request_context,
+                        )
 
-                # Parse response as JSON and check contents
-                import json
+                        # Parse response as JSON and check contents
+                        import json
 
-                result = json.loads(response)
-                assert result["issue_url"] == "https://github.com/user/repo/issues/123"
-                assert result["issue_number"] == "123"
+                        result = json.loads(response)
+                        assert result["issue_url"] == "https://github.com/user/repo/issues/123"
+                        assert result["issue_number"] == "123"
 
-                mock_ensure_label.assert_called_once_with(
-                    Path("/mock/repo"), "yellhorn-mcp", "Issues created by yellhorn-mcp"
-                )
-                mock_gh.assert_called_once()
-                mock_create_task.assert_called_once()
+                        mock_ensure_label.assert_called_once_with(
+                            Path("/mock/repo"), "yellhorn-mcp", "Issues created by yellhorn-mcp"
+                        )
+                        mock_create_issue.assert_called_once()
+                        mock_create_task.assert_called_once()
 
-                # Check that the GitHub issue is created with the provided title and yellhorn-mcp label
-                issue_call_args = mock_gh.call_args[0]
-                assert "issue" in issue_call_args[1]
-                assert "create" in issue_call_args[1]
-                assert "Feature Implementation Plan" in issue_call_args[1]
-                assert "--label" in issue_call_args[1]
-                assert "yellhorn-mcp" in issue_call_args[1]
+                        # Check that the GitHub issue is created with the provided title
+                        issue_call_args = mock_create_issue.call_args[0]
+                        assert issue_call_args[1] == "Feature Implementation Plan"  # title
+                        assert issue_call_args[2] == "Create a new feature to support X"  # description
 
-                # Get the body argument which is '--body' followed by the content
-                body_index = issue_call_args[1].index("--body") + 1
-                body_content = issue_call_args[1][body_index]
-                assert "# Feature Implementation Plan" in body_content
-                assert "## Description" in body_content
-                assert "Create a new feature to support X" in body_content
-                # Verify the placeholder message for AI processing is included
-                assert "Generating detailed workplan" in body_content
+                        # Verify that add_github_issue_comment was called with the submission metadata
+                        mock_add_comment.assert_called_once()
+                        comment_args = mock_add_comment.call_args
+                        assert comment_args[0][0] == Path("/mock/repo")  # repo_path
+                        assert comment_args[0][1] == "123"  # issue_number
+                        submission_comment = comment_args[0][2]  # comment content
 
-                # Verify that add_github_issue_comment was called with the submission metadata
-                mock_add_comment.assert_called_once()
-                comment_args = mock_add_comment.call_args
-                assert comment_args[0][0] == Path("/mock/repo")  # repo_path
-                assert comment_args[0][1] == "123"  # issue_number
-                submission_comment = comment_args[0][2]  # comment content
-
-                # Verify the submission comment contains expected metadata
-                assert "## 🚀 Generating workplan..." in submission_comment
-                assert "**Model**: `gemini-2.5-pro`" in submission_comment
-                assert "**Search Grounding**: " in submission_comment
-                assert "**Codebase Reasoning**: `full`" in submission_comment
-                assert "**Yellhorn Version**: " in submission_comment
-                assert (
-                    "_This issue will be updated once generation is complete._"
-                    in submission_comment
-                )
+                        # Verify the submission comment contains expected metadata
+                        assert "## 🚀 Generating workplan..." in submission_comment
+                        assert "**Model**: `gemini-2.5-pro`" in submission_comment
+                        assert "**Search Grounding**: " in submission_comment
+                        assert "**Codebase Reasoning**: `full`" in submission_comment
+                        assert "**Yellhorn Version**: " in submission_comment
+                        assert (
+                            "_This issue will be updated once generation is complete._"
+                            in submission_comment
+                        )
 
                 # Check that the process_workplan_async task is created with the correct parameters
                 args, kwargs = mock_create_task.call_args

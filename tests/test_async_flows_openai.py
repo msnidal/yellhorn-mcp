@@ -201,29 +201,23 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
     mock_ctx = DummyContext()
     mock_ctx.log = AsyncMock()
 
-    # Test with missing OpenAI client
-    with (
-        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-    ):
-        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
-        mock_format.return_value = "Formatted codebase"
-
-        # Should raise error when OpenAI client is None but model is OpenAI
-        with pytest.raises(YellhornMCPError, match="OpenAI client not initialized"):
-            await process_judgement_async(
-                Path("/mock/repo"),
-                None,  # No Gemini client
-                None,  # No OpenAI client
-                "gpt-4o",  # OpenAI model
-                "Workplan content",
-                "Diff content",
-                "main",
-                "HEAD",
-                "456",  # subissue_to_update
-                "123",  # parent_workplan_issue_number
-                mock_ctx,
-            )
+    # Test with missing OpenAI client  
+    with pytest.raises(YellhornMCPError, match="OpenAI client not initialized"):
+        await process_judgement_async(
+            Path("/mock/repo"),
+            None,  # No Gemini client
+            None,  # No OpenAI client
+            "gpt-4o",  # OpenAI model
+            "Workplan content",
+            "Diff content",
+            "main",
+            "HEAD",
+            "abc123",  # base_commit_hash
+            "def456",  # head_commit_hash
+            "123",  # parent_workplan_issue_number
+            "456",  # subissue_to_update
+            ctx=mock_ctx,
+        )
 
     # Test with OpenAI API error
     with (

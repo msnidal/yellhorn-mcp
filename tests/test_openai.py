@@ -125,7 +125,7 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.github_integration.update_issue_with_workplan") as mock_update,
         patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
         patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
         patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh_command,
@@ -200,7 +200,7 @@ async def test_openai_client_required():
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.github_integration.update_issue_with_workplan") as mock_update,
         patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh_command,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -300,7 +300,7 @@ async def test_process_workplan_async_deep_research_model(mock_request_context, 
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.github_integration.update_issue_with_workplan") as mock_update,
         patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -430,14 +430,26 @@ async def test_process_workplan_async_list_output(mock_request_context):
     with (
         patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
         patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.github_integration.update_issue_with_workplan") as mock_update,
         patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_format_metrics,
+        patch("yellhorn_mcp.openai_integration.generate_workplan_with_openai") as mock_openai_gen,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
         mock_format_metrics.return_value = (
             "\n\n---\n## Completion Metrics\n*   **Model Used**: `o3-deep-research`"
         )
+        
+        # Mock the OpenAI generation to return content and metadata
+        from yellhorn_mcp.metadata_models import CompletionMetadata
+        mock_completion_metadata = CompletionMetadata(
+            status="✅ Workplan generated successfully",
+            generation_time_seconds=2.5,
+            input_tokens=1000,
+            output_tokens=500,
+            total_tokens=1500
+        )
+        mock_openai_gen.return_value = ("Mock OpenAI response from list output", mock_completion_metadata)
 
         # Test OpenAI client workflow with list output
         await process_workplan_async(
