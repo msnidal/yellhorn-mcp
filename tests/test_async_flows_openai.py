@@ -49,7 +49,15 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
     mock_ctx.log = AsyncMock()
 
     # Bypass the OpenAI client check by patching it directly
-    with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+    with (
+        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+    ):
+        # Mock the codebase snapshot to avoid Git calls
+        mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
+        mock_format.return_value = "Formatted codebase"
+        
         # Create a typical error flow: add_github_issue_comment should be called with error message
         await process_workplan_async(
             Path("/mock/repo"),
@@ -63,12 +71,12 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
             detailed_description="Test description",
         )
 
-        # Verify error was propagated to add_github_issue_comment with completion metadata
+        # Verify error was propagated to add_github_issue_comment with error message
         mock_add_comment.assert_called_once()
         args = mock_add_comment.call_args[0]
-        # Now we expect a completion metadata comment with error status
-        assert "## ⚠️ Workplan generation failed" in args[2]
-        assert "### ⚠️ Warnings" in args[2]
+        # Now we expect an error message comment
+        assert "⚠️ AI workplan enhancement failed" in args[2]
+        assert "LLM Manager not initialized" in args[2]
 
     # Test with OpenAI API error
     with (
@@ -222,11 +230,14 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
                 mock_ctx,
             )
 
-        # Verify error was logged
-        mock_ctx.log.assert_called_with(
-            level="error", message="Failed to generate judgement: LLM Manager not initialized"
-        )
-        assert error_call_found, "Error log not found in log calls"
+        # Verify error was logged - check if log was called with our error message
+        error_logged = False
+        for call in mock_ctx.log.call_args_list:
+            args, kwargs = call
+            if kwargs.get("level") == "error" and "Failed to generate judgement: LLM Manager not initialized" in kwargs.get("message", ""):
+                error_logged = True
+                break
+        assert error_logged, f"Expected error log not found. Actual calls: {mock_ctx.log.call_args_list}"
 
 
 @pytest.mark.asyncio

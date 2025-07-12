@@ -55,7 +55,7 @@ from yellhorn_mcp.git_utils import (
     update_github_issue,
 )
 from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
-from yellhorn_mcp.search_grounding import _get_gemini_search_tools, add_citations
+from yellhorn_mcp.search_grounding import _get_gemini_search_tools, add_citations, add_citations_from_metadata
 from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 
 from yellhorn_mcp.lsp_utils import get_lsp_snapshot, get_lsp_diff, update_snapshot_with_full_diff_files
@@ -205,10 +205,9 @@ def format_metrics_section(model: str, usage_metadata: Any) -> str:
     if not usage:
         return na_metrics
 
-    cost = calculate_cost(model, usage.prompt_tokens, usage.completion_tokens)
-    input_tokens = usage_metadata.prompt_tokens
-    output_tokens = usage_metadata.completion_tokens
-    total_tokens = usage_metadata.total_tokens
+    input_tokens = usage.prompt_tokens
+    output_tokens = usage.completion_tokens
+    total_tokens = usage.total_tokens
 
     if input_tokens is None or output_tokens is None or total_tokens is None:
         return na_metrics
@@ -1095,25 +1094,25 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         llm_kwargs = {}
         
         # Handle search grounding for Gemini models
-        # if model.startswith("gemini-") and actual_use_search_grounding:
-        #     await ctx.log(
-        #         level="info",
-        #         message=f"Attempting to enable search grounding for model {model}"
-        #     )
-            # try:
-                # from google.genai.types import GenerateContentConfig
-                # search_tools = _get_gemini_search_tools(model)
-                # if search_tools:
-                    # llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
-                    # await ctx.log(
-                    #     level="info",
-                    #     message=f"Search tools configured for model {model}: {search_tools}",
-                    # )
-            # except ImportError:
-            #     await ctx.log(
-            #         level="warning",
-            #         message="GenerateContentConfig not available, skipping search grounding",
-            #     )
+        if model.startswith("gemini-") and actual_use_search_grounding:
+            await ctx.log(
+                level="info",
+                message=f"Attempting to enable search grounding for model {model}"
+            )
+            try:
+                from google.genai.types import GenerateContentConfig
+                search_tools = _get_gemini_search_tools(model)
+                if search_tools:
+                    llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
+                    await ctx.log(
+                        level="info",
+                        message=f"Search tools configured for model {model}: {search_tools}",
+                    )
+            except ImportError:
+                await ctx.log(
+                    level="warning",
+                    message="GenerateContentConfig not available, skipping search grounding",
+                )
 
         try:
             # Call LLM through the manager with citation support
@@ -1141,9 +1140,9 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 
                 # Process citations if available
                 if "grounding_metadata" in response_data and response_data["grounding_metadata"]:
-                    workplan_content = citations_to_markdown(
-                        response_data["grounding_metadata"],
-                        workplan_content
+                    workplan_content = add_citations_from_metadata(
+                        workplan_content, 
+                        response_data["grounding_metadata"]
                     )
             
         except Exception as e:
@@ -1155,9 +1154,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             await add_github_issue_comment(repo_path, issue_number, error_message_comment)
             return
 
-        # Process citations if search was enabled and metadata exists
-        if not is_openai_model and response:
-            workplan_content = add_citations(response)
+
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
@@ -1189,15 +1186,15 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         safety_ratings = None
         context_size_chars = len(prompt)
 
-        if is_openai_model and usage_metadata:
+        if is_openai_model(model) and usage_metadata:
             # OpenAI usage format
             input_tokens = getattr(usage_metadata, "prompt_tokens", None)
             output_tokens = getattr(usage_metadata, "completion_tokens", None)
             total_tokens = getattr(usage_metadata, "total_tokens", None)
-            model_version_used = getattr(response, "model_version", None)
+            model_version_used = None  # Not available through LLMManager
             # Note: system_fingerprint and finish_reason are not available in Responses API
             # These fields are specific to the Chat Completions API
-        elif not is_openai_model and usage_metadata:
+        elif not is_openai_model(model) and usage_metadata:
             # Gemini usage format - handle both dict and object forms
             if isinstance(usage_metadata, dict):
                 input_tokens = usage_metadata.get("prompt_token_count")
@@ -1207,37 +1204,8 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
                 input_tokens = getattr(usage_metadata, "prompt_token_count", None)
                 output_tokens = getattr(usage_metadata, "candidates_token_count", None)
                 total_tokens = getattr(usage_metadata, "total_token_count", None)
-            # Check for search results in grounding metadata
-            if hasattr(response, "grounding_metadata") and response.grounding_metadata:
-                if hasattr(response.grounding_metadata, "search_entry_point"):
-                    search_results_used = len(
-                        getattr(response.grounding_metadata.search_entry_point, "sources", [])
-                    )
-            # Extract safety ratings if available
-            if hasattr(response, "candidates") and response.candidates:
-                candidate = response.candidates[0]
-                if hasattr(candidate, "safety_ratings") and candidate.safety_ratings:
-                    safety_ratings = [
-                        {
-                            "category": (
-                                rating.category.name
-                                if hasattr(rating.category, "name")
-                                else str(rating.category)
-                            ),
-                            "probability": (
-                                rating.probability.name
-                                if hasattr(rating.probability, "name")
-                                else str(rating.probability)
-                            ),
-                        }
-                        for rating in candidate.safety_ratings
-                    ]
-                if hasattr(candidate, "finish_reason"):
-                    finish_reason = (
-                        candidate.finish_reason.name
-                        if hasattr(candidate.finish_reason, "name")
-                        else str(candidate.finish_reason)
-                    )
+            # Note: search results, safety ratings, and finish reason are not available through LLMManager
+            # These would require access to the raw Gemini response object
 
         # Calculate cost if we have token counts
         if input_tokens and output_tokens:
@@ -1472,17 +1440,35 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
         # Use LLMManager to handle chunking and aggregation automatically
         try:
-            response = await llm_manager.call_llm_with_usage(
-                model=model,
-                prompt=prompt,
-                temperature=0.0,
-                **llm_kwargs
-            )
-
-            # Extract usage metadata if available (for logging purposes)
-            usage_metadata = response["usage_metadata"]
-            
-            judgement_content = response["content"]
+            # Call LLM through the manager with citation support
+            if is_openai_model(model):
+                # OpenAI models don't support citations, use call with usage
+                response_data = await llm_manager.call_llm_with_usage(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    **llm_kwargs
+                )
+                judgement_content = response_data["content"]
+                usage_metadata = response_data["usage_metadata"]
+            else:
+                # Gemini models - use citation-aware call
+                response_data = await llm_manager.call_llm_with_citations(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    **llm_kwargs
+                )
+                
+                judgement_content = response_data["content"]
+                usage_metadata = response_data["usage_metadata"]
+                
+                # Process citations if available
+                if "grounding_metadata" in response_data and response_data["grounding_metadata"]:
+                    judgement_content = add_citations_from_metadata(
+                        judgement_content, 
+                        response_data["grounding_metadata"]
+                    )
 
         except Exception as e:
             error_message = f"Failed to generate judgement: {str(e)}"
@@ -1491,10 +1477,6 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
         if not judgement_content:
             raise YellhornMCPError(f"Received an empty response from LLM.")
-
-        # Process citations if search was enabled and metadata exists
-        # Note: This would need to be handled differently with LLMManager
-        # For now, we'll skip citation processing as LLMManager doesn't expose raw response metadata
 
         # Format metrics section
         metrics_section = format_metrics_section(model, usage_metadata)
@@ -1541,13 +1523,13 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         safety_ratings = None
         context_size_chars = len(prompt)
 
-        if is_openai_model and usage_metadata:
+        if is_openai_model(model) and usage_metadata:
             # OpenAI usage format
             input_tokens = getattr(usage_metadata, "prompt_tokens", None)
             output_tokens = getattr(usage_metadata, "completion_tokens", None)
             total_tokens = getattr(usage_metadata, "total_tokens", None)
-            model_version_used = getattr(response, "model_version", None)
-        elif not is_openai_model and usage_metadata:
+            model_version_used = None  # Not available through LLMManager
+        elif not is_openai_model(model) and usage_metadata:
             # Gemini usage format - handle both dict and object forms
             if isinstance(usage_metadata, dict):
                 input_tokens = usage_metadata.get("prompt_token_count")
@@ -1557,37 +1539,8 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 input_tokens = getattr(usage_metadata, "prompt_token_count", None)
                 output_tokens = getattr(usage_metadata, "candidates_token_count", None)
                 total_tokens = getattr(usage_metadata, "total_token_count", None)
-            # Check for search results in grounding metadata
-            if hasattr(response, "grounding_metadata") and response.grounding_metadata:
-                if hasattr(response.grounding_metadata, "search_entry_point"):
-                    search_results_used = len(
-                        getattr(response.grounding_metadata.search_entry_point, "sources", [])
-                    )
-            # Extract safety ratings if available
-            if hasattr(response, "candidates") and response.candidates:
-                candidate = response.candidates[0]
-                if hasattr(candidate, "safety_ratings") and candidate.safety_ratings:
-                    safety_ratings = [
-                        {
-                            "category": (
-                                rating.category.name
-                                if hasattr(rating.category, "name")
-                                else str(rating.category)
-                            ),
-                            "probability": (
-                                rating.probability.name
-                                if hasattr(rating.probability, "name")
-                                else str(rating.probability)
-                            ),
-                        }
-                        for rating in candidate.safety_ratings
-                    ]
-                if hasattr(candidate, "finish_reason"):
-                    finish_reason = (
-                        candidate.finish_reason.name
-                        if hasattr(candidate.finish_reason, "name")
-                        else str(candidate.finish_reason)
-                    )
+            # Note: search results, safety ratings, and finish reason are not available through LLMManager
+            # These would require access to the raw Gemini response object
 
         # Calculate cost if we have token counts
         if input_tokens and output_tokens:
@@ -2023,49 +1976,13 @@ Based on the user's task above, identify the most important directories that sho
                 message=f"Analysis complete, found {len(all_important_dirs)} important directories: {dirs_str}",
             )
 
-        except Exception as chunk_error:
+        except Exception as e:
             await ctx.log(
                 level="error",
-                message=f"Error processing chunk {chunk_idx + 1}: {str(chunk_error)} ({type(chunk_error).__name__})",
+                message=f"Error during LLM analysis: {str(e)} ({type(e).__name__})",
             )
-            # Continue with next chunk despite errors
-
-            # Return results from this chunk
-            return chunk_important_dirs
-
-        # Use semaphore to limit concurrency to 5 parallel calls
-        semaphore = asyncio.Semaphore(5)
-
-        async def bounded_process_chunk(chunk_idx: int, dir_chunk: list[str]) -> set[str]:
-            async with semaphore:
-                return await process_chunk(chunk_idx, dir_chunk)
-
-        # If we only have one chunk, process it directly
-        if len(dir_chunks) == 1:
-            important_dirs = await process_chunk(0, dir_chunks[0])
-            all_important_dirs.update(important_dirs)
-        else:
-            # Create tasks for all chunks
-            tasks: list[asyncio.Task[set[str]]] = []
-            for chunk_idx, dir_chunk in enumerate(dir_chunks):
-                task = asyncio.create_task(bounded_process_chunk(chunk_idx, dir_chunk))
-                tasks.append(task)
-
-            # Wait for all tasks to complete and collect results
-            await ctx.log(
-                level="info", message=f"Waiting for {len(tasks)} parallel LLM tasks to complete"
-            )
-            completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Process results
-            for result in completed_tasks:
-                if isinstance(result, BaseException):
-                    # Log the exception but continue
-                    await ctx.log(level="error", message=f"Parallel task failed: {str(result)}")
-                    continue
-
-                # Update our important directories collection
-                all_important_dirs.update(result)
+            # Continue with fallback behavior
+            all_important_dirs = set(sorted_dirs)
 
         # If we didn't get any important directories, include all directories
         if not all_important_dirs:

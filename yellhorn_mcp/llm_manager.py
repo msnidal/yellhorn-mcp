@@ -562,13 +562,16 @@ class LLMManager:
             # Fallback to dict config
             config_class = dict
         
+        # Extract generation_config if provided (for search grounding)
+        generation_config = kwargs.pop("generation_config", None)
+        
         # Build config
         config_dict = {
             "temperature": temperature,
             "response_mime_type": "application/json" if response_format == "json" else "text/plain",
         }
         
-        # Add any additional kwargs
+        # Add any additional kwargs (excluding generation_config)
         config_dict.update(kwargs)
         
         # Create config instance
@@ -578,12 +581,19 @@ class LLMManager:
             config = config_dict
         
         try:
+            # Prepare API call parameters
+            api_params = {
+                "model": f"models/{model}",
+                "contents": full_prompt,
+                "config": config
+            }
+            
+            # Add generation_config if provided (for search grounding)
+            if generation_config:
+                api_params["config"] = generation_config
+            
             # Make the API call
-            response = await self.gemini_client.aio.models.generate_content(
-                model=f"models/{model}",
-                contents=full_prompt,
-                config=config
-            )
+            response = await self.gemini_client.aio.models.generate_content(**api_params)
             
             # Extract text from response
             if hasattr(response, 'text'):

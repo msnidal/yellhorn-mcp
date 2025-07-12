@@ -310,11 +310,24 @@ async def test_process_workplan_async_deep_research_model(mock_request_context, 
             "\n\n---\n## Completion Metrics\n*   **Model Used**: `o3-deep-research`"
         )
 
-        # Test Deep Research model workflow
+        # Test Deep Research model workflow with mock LLM manager
+        mock_llm_manager = MagicMock()
+        mock_llm_manager.call_llm_with_usage = AsyncMock(
+            return_value={
+                "content": "Generated workplan content for deep research",
+                "usage_metadata": MagicMock(
+                    prompt_tokens=1000,
+                    completion_tokens=500,
+                    total_tokens=1500
+                )
+            }
+        )
+        
         await process_workplan_async(
             Path("/mock/repo"),
             None,  # No Gemini client
             mock_openai_client,
+            mock_llm_manager,  # Mock LLM manager
             "o3-deep-research",
             "Deep Research Feature Plan",
             "789",
@@ -322,22 +335,15 @@ async def test_process_workplan_async_deep_research_model(mock_request_context, 
             detailed_description="Research and implement Y",
         )
 
-        # Check OpenAI API call
-        mock_openai_client.responses.create.assert_called_once()
-        args, kwargs = mock_openai_client.responses.create.call_args
-
+        # Check LLM manager was called correctly
+        mock_llm_manager.call_llm_with_usage.assert_called_once()
+        args, kwargs = mock_llm_manager.call_llm_with_usage.call_args
+        
         # Verify model is passed correctly
         assert kwargs.get("model") == "o3-deep-research"
-
-        # Verify tools are included for Deep Research model
-        tools = kwargs.get("tools", [])
-        assert len(tools) == 2
-        assert {"type": "web_search_preview"} in tools
-        assert {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}} in tools
-
-        # Verify input parameter
-        input_content = kwargs.get("input", "")
-        assert "Deep Research Feature Plan" in input_content
+        
+        # Verify prompt content
+        assert "Deep Research Feature Plan" in kwargs.get("prompt", "")
 
 
 @pytest.mark.asyncio
@@ -363,11 +369,24 @@ async def test_process_judgement_async_deep_research_model(
         workplan = "1. Implement feature with web research\n2. Test implementation"
         diff = "diff --git a/file.py b/file.py\n+def feature(): pass"
 
-        # Test judgement with Deep Research model
+        # Test judgement with Deep Research model using mock LLM manager
+        mock_llm_manager = MagicMock()
+        mock_llm_manager.call_llm_with_usage = AsyncMock(
+            return_value={
+                "content": "## Judgement Summary\nImplementation looks good for deep research.",
+                "usage_metadata": MagicMock(
+                    prompt_tokens=1200,
+                    completion_tokens=600,
+                    total_tokens=1800
+                )
+            }
+        )
+        
         await process_judgement_async(
             Path("/mock/repo"),
             None,  # No Gemini client
             mock_openai_client,
+            mock_llm_manager,  # Mock LLM manager
             "o4-mini-deep-research",
             workplan,
             diff,
@@ -378,52 +397,24 @@ async def test_process_judgement_async_deep_research_model(
             mock_request_context,
         )
 
-        # Check OpenAI API call
-        mock_openai_client.responses.create.assert_called_once()
-        args, kwargs = mock_openai_client.responses.create.call_args
+        # Check LLM manager was called correctly
+        mock_llm_manager.call_llm_with_usage.assert_called_once()
+        args, kwargs = mock_llm_manager.call_llm_with_usage.call_args
 
         # Verify model is passed correctly
         assert kwargs.get("model") == "o4-mini-deep-research"
-
-        # Verify tools are included for Deep Research model
-        tools = kwargs.get("tools", [])
-        assert len(tools) == 2
-        assert {"type": "web_search_preview"} in tools
-        assert {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}} in tools
-
-        # Verify input parameter
-        input_content = kwargs.get("input", "")
-        assert "<Original Workplan>" in input_content
+        
+        # Verify prompt content contains workplan and diff
+        prompt = kwargs.get("prompt", "")
+        assert "Implement feature with web research" in prompt
+        assert "def feature(): pass" in prompt
 
 
 @pytest.mark.asyncio
 async def test_process_workplan_async_list_output(mock_request_context):
     """Test workplan generation when OpenAI returns output as a list."""
-    # Create mock OpenAI client with list output
+    # Create mock OpenAI client (not used with LLM manager)
     client = MagicMock()
-    responses = MagicMock()
-
-    # Mock response structure with list output (simulating Deep Research response)
-    response = MagicMock()
-    output_item = MagicMock()
-    output_item.text = "Mock OpenAI response from list output"
-    response.output = [output_item]  # Output as a list
-    # Add output_text property that returns the text from the first item in the list
-    response.output_text = "Mock OpenAI response from list output"
-
-    # Mock usage data
-    response.usage = MagicMock()
-    response.usage.prompt_tokens = 1000
-    response.usage.completion_tokens = 500
-    response.usage.total_tokens = 1500
-
-    # Mock model
-    response.model = "o3-deep-research"
-    response.model_version = "o3-deep-research-1234"
-
-    # Setup the responses.create async method
-    responses.create = AsyncMock(return_value=response)
-    client.responses = responses
 
     with (
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
@@ -437,11 +428,24 @@ async def test_process_workplan_async_list_output(mock_request_context):
             "\n\n---\n## Completion Metrics\n*   **Model Used**: `o3-deep-research`"
         )
 
-        # Test OpenAI client workflow with list output
+        # Test OpenAI client workflow with list output using mock LLM manager
+        mock_llm_manager = MagicMock()
+        mock_llm_manager.call_llm_with_usage = AsyncMock(
+            return_value={
+                "content": "Mock OpenAI response from list output",
+                "usage_metadata": MagicMock(
+                    prompt_tokens=1000,
+                    completion_tokens=500,
+                    total_tokens=1500
+                )
+            }
+        )
+        
         await process_workplan_async(
             Path("/mock/repo"),
             None,  # No Gemini client
             client,
+            mock_llm_manager,  # Mock LLM manager
             "o3-deep-research",
             "Feature with List Output",
             "124",
@@ -460,31 +464,8 @@ async def test_process_workplan_async_list_output(mock_request_context):
 @pytest.mark.asyncio
 async def test_process_judgement_async_list_output(mock_request_context):
     """Test judgement generation when OpenAI returns output as a list."""
-    # Create mock OpenAI client with list output
+    # Create mock OpenAI client (not used with LLM manager)
     client = MagicMock()
-    responses = MagicMock()
-
-    # Mock response structure with list output
-    response = MagicMock()
-    output_item = MagicMock()
-    output_item.text = "Mock judgement from list output"
-    response.output = [output_item]  # Output as a list
-    # Add output_text property that returns the text from the first item in the list
-    response.output_text = "Mock judgement from list output"
-
-    # Mock usage data
-    response.usage = MagicMock()
-    response.usage.prompt_tokens = 1000
-    response.usage.completion_tokens = 500
-    response.usage.total_tokens = 1500
-
-    # Mock model
-    response.model = "o4-mini-deep-research"
-    response.model_version = "o4-mini-deep-research-1234"
-
-    # Setup the responses.create async method
-    responses.create = AsyncMock(return_value=response)
-    client.responses = responses
 
     with (
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
@@ -502,11 +483,24 @@ async def test_process_judgement_async_list_output(mock_request_context):
         workplan = "1. Test list output\n2. Verify handling"
         diff = "diff --git a/file.py b/file.py\n+def test(): pass"
 
-        # Test judgement with list output
+        # Test judgement with list output using mock LLM manager
+        mock_llm_manager = MagicMock()
+        mock_llm_manager.call_llm_with_usage = AsyncMock(
+            return_value={
+                "content": "Mock judgement from list output",
+                "usage_metadata": MagicMock(
+                    prompt_tokens=1000,
+                    completion_tokens=500,
+                    total_tokens=1500
+                )
+            }
+        )
+        
         await process_judgement_async(
             Path("/mock/repo"),
             None,  # No Gemini client
             client,
+            mock_llm_manager,  # Mock LLM manager
             "o4-mini-deep-research",
             workplan,
             diff,

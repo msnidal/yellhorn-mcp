@@ -87,3 +87,62 @@ def add_citations(response: genai_types.GenerateContentResponse) -> str:
             text = text[:end_index] + citation_string + text[end_index:]
 
     return text
+
+
+def add_citations_from_metadata(text: str, grounding_metadata) -> str:
+    """
+    Inserts citation links into text based on grounding metadata.
+    
+    This is a more direct version of add_citations that works with just the
+    grounding metadata instead of requiring a full response object.
+    
+    Args:
+        text: The text to add citations to
+        grounding_metadata: The grounding metadata from Gemini API response
+        
+    Returns:
+        The text with citations inserted.
+    """
+    if not text or not grounding_metadata:
+        return text
+        
+    supports = (
+        grounding_metadata.grounding_supports
+        if hasattr(grounding_metadata, 'grounding_supports') and grounding_metadata.grounding_supports
+        else []
+    )
+    chunks = (
+        grounding_metadata.grounding_chunks
+        if hasattr(grounding_metadata, 'grounding_chunks') and grounding_metadata.grounding_chunks
+        else []
+    )
+    
+    if not supports or not chunks:
+        return text
+    
+    # Sort supports by end_index in descending order to avoid shifting issues when inserting.
+    sorted_supports = sorted(
+        supports,
+        key=lambda s: s.segment.end_index if s.segment and s.segment.end_index is not None else 0,
+        reverse=True,
+    )
+    
+    for support in sorted_supports:
+        end_index = (
+            support.segment.end_index
+            if support.segment and support.segment.end_index is not None
+            else 0
+        )
+        if support.grounding_chunk_indices:
+            # Create citation string like [1](link1)[2](link2)
+            citation_links = []
+            for i in support.grounding_chunk_indices:
+                if i < len(chunks):
+                    chunk = chunks[i]
+                    uri = chunk.web.uri if chunk.web and chunk.web.uri else None
+                    citation_links.append(f"[{i + 1}]({uri})")
+            
+            citation_string = ", ".join(citation_links)
+            text = text[:end_index] + citation_string + text[end_index:]
+    
+    return text
