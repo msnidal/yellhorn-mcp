@@ -202,7 +202,6 @@ from yellhorn_mcp.git_utils import (
     create_github_subissue,
     ensure_label_exists,
     get_default_branch,
-    get_git_diff,
     get_github_issue_body,
     get_github_pr_diff,
     is_git_repository,
@@ -218,6 +217,7 @@ from yellhorn_mcp.server import (
     create_workplan,
     format_metrics_section,
     get_codebase_snapshot,
+    get_git_diff,
     get_workplan,
     judge_workplan,
     process_workplan_async,
@@ -278,7 +278,7 @@ async def test_run_git_command_failure():
 @pytest.mark.asyncio
 async def test_get_codebase_snapshot():
     """Test getting codebase snapshot."""
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
         mock_git.return_value = "file1.py\nfile2.py\nfile3.py"
 
         with patch("builtins.open", create=True) as mock_open:
@@ -476,7 +476,7 @@ def test_format_metrics_section():
 
     model = "gemini-2.5-pro"
 
-    with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
+    with patch("yellhorn_mcp.cost_tracker.calculate_cost") as mock_calculate_cost:
         mock_calculate_cost.return_value = 0.0175
 
         result = format_metrics_section(model, metadata)
@@ -501,7 +501,7 @@ def test_format_metrics_section():
 
     metadata2 = CustomMetadata()
 
-    with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
+    with patch("yellhorn_mcp.cost_tracker.calculate_cost") as mock_calculate_cost:
         mock_calculate_cost.return_value = 0.035
 
         result = format_metrics_section(model, metadata2)
@@ -519,11 +519,11 @@ async def test_create_workplan(mock_request_context, mock_genai_client):
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
-    with patch("yellhorn_mcp.server.ensure_label_exists") as mock_ensure_label:
-        with patch("yellhorn_mcp.server.run_github_command") as mock_gh:
+    with patch("yellhorn_mcp.git_utils.ensure_label_exists") as mock_ensure_label:
+        with patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh:
             mock_gh.return_value = "https://github.com/user/repo/issues/123"
 
-            with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+            with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment:
                 with patch("asyncio.create_task") as mock_create_task:
                     # Test with required title and detailed description (default codebase_reasoning="full")
                     response = await create_workplan(
@@ -835,11 +835,11 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
     )
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
-        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_format_metrics,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
     ):
 
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -958,10 +958,10 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
     )
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -1009,10 +1009,10 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
     )
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -1055,7 +1055,7 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
 @pytest.mark.asyncio
 async def test_get_workplan(mock_request_context):
     """Test getting the workplan with the required issue number."""
-    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+    with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
         mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
         # Test getting the workplan with the required issue number
@@ -1077,7 +1077,7 @@ async def test_get_workplan(mock_request_context):
 @pytest.mark.asyncio
 async def test_get_workplan_with_different_issue(mock_request_context):
     """Test getting the workplan with a different issue number."""
-    with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+    with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
         mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
 
         # Test with a different issue number
@@ -1104,18 +1104,18 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
-    with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_run_git:
         # Mock the git rev-parse commands
         mock_run_git.side_effect = ["abc1234", "def5678"]  # base_commit_hash, head_commit_hash
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+        with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
             mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
-            with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
+            with patch("yellhorn_mcp.judgement_processor.get_git_diff") as mock_get_diff:
                 mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-                with patch("yellhorn_mcp.server.create_github_subissue") as mock_create_subissue:
-                    with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+                with patch("yellhorn_mcp.git_utils.create_github_subissue") as mock_create_subissue:
+                    with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment:
                         with patch("asyncio.create_task") as mock_create_task:
                             mock_create_subissue.return_value = (
                                 "https://github.com/user/repo/issues/789"
@@ -1237,7 +1237,7 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
             await judge_workplan(ctx=mock_request_context, issue_number="123")
 
     # Test with invalid git ref
-    with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_run_git:
         # Simulate error with invalid git ref
         mock_run_git.side_effect = YellhornMCPError("Invalid git reference")
 
@@ -1256,23 +1256,23 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
-    with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_run_git:
         # Mock the git rev-parse commands
         mock_run_git.side_effect = [
             "v1.0-hash",
             "feature-hash",
         ]  # base_commit_hash, head_commit_hash
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+        with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
             mock_get_issue.return_value = "# Different workplan\n\n1. Implement Y\n2. Test Y"
 
-            with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
+            with patch("yellhorn_mcp.judgement_processor.get_git_diff") as mock_get_diff:
                 mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-                with patch("yellhorn_mcp.server.create_github_subissue") as mock_create_subissue:
+                with patch("yellhorn_mcp.git_utils.create_github_subissue") as mock_create_subissue:
                     mock_create_subissue.return_value = "https://github.com/user/repo/issues/999"
 
-                    with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+                    with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment:
                         with patch("asyncio.create_task") as mock_create_task:
                             # Test with a different issue number and custom refs
                             base_ref = "v1.0"
@@ -1355,19 +1355,19 @@ async def test_judge_workplan_disable_search_grounding(mock_request_context, moc
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = True
 
-    with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_run_git:
         mock_run_git.side_effect = ["abc1234", "def5678"]
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+        with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
             mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
-            with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
+            with patch("yellhorn_mcp.judgement_processor.get_git_diff") as mock_get_diff:
                 mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-                with patch("yellhorn_mcp.server.create_github_subissue") as mock_create_subissue:
+                with patch("yellhorn_mcp.git_utils.create_github_subissue") as mock_create_subissue:
                     mock_create_subissue.return_value = "https://github.com/user/repo/issues/789"
 
-                    with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+                    with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment:
                         with patch("asyncio.create_task") as mock_create_task:
                             # Test with disable_search_grounding=True
                             result = await judge_workplan(
@@ -1400,14 +1400,14 @@ async def test_judge_workplan_empty_diff(mock_request_context, mock_genai_client
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
 
-    with patch("yellhorn_mcp.server.run_git_command") as mock_run_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_run_git:
         # First test: empty diff
         mock_run_git.side_effect = ["abc1234", "def5678"]
 
-        with patch("yellhorn_mcp.server.get_github_issue_body") as mock_get_issue:
+        with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
             mock_get_issue.return_value = "# workplan\n\n1. Implement X\n2. Test X"
 
-            with patch("yellhorn_mcp.server.get_git_diff") as mock_get_diff:
+            with patch("yellhorn_mcp.judgement_processor.get_git_diff") as mock_get_diff:
                 # Test with empty diff
                 mock_get_diff.return_value = ""
 
@@ -1458,12 +1458,12 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
     mock_response.candidates = [mock_candidate]
 
     # Mock the async generate content function
-    with patch("yellhorn_mcp.server.async_generate_content_with_config") as mock_generate:
+    with patch("yellhorn_mcp.gemini_integration.async_generate_content_with_config") as mock_generate:
         mock_generate.return_value = mock_response
 
-        with patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue:
-            with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
-                with patch("yellhorn_mcp.server._get_gemini_search_tools") as mock_get_tools:
+        with patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue:
+            with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment:
+                with patch("yellhorn_mcp.search_grounding._get_gemini_search_tools") as mock_get_tools:
                     mock_get_tools.return_value = [MagicMock()]
 
                     # Set context for search grounding
@@ -1646,10 +1646,10 @@ async def test_process_workplan_async_with_citations(mock_request_context, mock_
     )
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
-        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_format_metrics,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -1818,13 +1818,13 @@ async def test_process_workplan_async_search_grounding_enabled(
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = True
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
-        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.server.async_generate_content_with_config") as mock_generate,
-        patch("yellhorn_mcp.server._get_gemini_search_tools") as mock_get_tools,
-        patch("yellhorn_mcp.server.add_citations") as mock_add_citations,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_format_metrics,
+        patch("yellhorn_mcp.gemini_integration.async_generate_content_with_config") as mock_generate,
+        patch("yellhorn_mcp.search_grounding._get_gemini_search_tools") as mock_get_tools,
+        patch("yellhorn_mcp.search_grounding.add_citations") as mock_add_citations,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -1906,11 +1906,11 @@ async def test_process_judgement_async_search_grounding_enabled(
     mock_response.candidates = [mock_candidate]
 
     with (
-        patch("yellhorn_mcp.server.async_generate_content_with_config") as mock_generate,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
-        patch("yellhorn_mcp.server._get_gemini_search_tools") as mock_get_tools,
-        patch("yellhorn_mcp.server.add_citations") as mock_add_citations,
+        patch("yellhorn_mcp.gemini_integration.async_generate_content_with_config") as mock_generate,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.search_grounding._get_gemini_search_tools") as mock_get_tools,
+        patch("yellhorn_mcp.search_grounding.add_citations") as mock_add_citations,
     ):
         mock_generate.return_value = mock_response
 

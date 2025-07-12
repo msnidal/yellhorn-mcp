@@ -181,7 +181,7 @@ def broken_function(
 @pytest.mark.asyncio
 async def test_get_lsp_snapshot():
     """Test getting an LSP-style snapshot of the codebase."""
-    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot:
         mock_snapshot.return_value = (["file1.py", "file2.py", "file3.go", "other.txt"], {})
 
         with patch("yellhorn_mcp.lsp_utils.extract_python_api") as mock_extract_py:
@@ -254,7 +254,7 @@ async def test_update_snapshot_with_full_diff_files():
     }
 
     # Test simplified version - just check that it doesn't crash
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
         # Return a diff mentioning file1.py and file2.py
         mock_git.return_value = "--- a/file1.py\n+++ b/file1.py\n--- a/file2.py\n+++ b/file2.py"
 
@@ -338,13 +338,13 @@ async def test_integration_process_workplan_lsp_mode():
     with patch("yellhorn_mcp.lsp_utils.get_lsp_snapshot") as mock_lsp_snapshot:
         mock_lsp_snapshot.return_value = (["file1.py"], {"file1.py": "```py\ndef function1()\n```"})
 
-        with patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format:
+        with patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format:
             mock_format.return_value = "<formatted LSP snapshot>"
 
-            with patch("yellhorn_mcp.server.format_metrics_section") as mock_metrics:
+            with patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_metrics:
                 mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
-                with patch("yellhorn_mcp.server.update_github_issue") as mock_update:
+                with patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update:
                     # Call the function with LSP mode
                     await process_workplan_async(
                         repo_path,
@@ -429,10 +429,10 @@ async def test_integration_process_judgement_lsp_mode():
                 {"file1.py": "```py\ndef function1_full_content()\n```"},
             )
 
-            with patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format:
+            with patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format:
                 mock_format.return_value = "<formatted LSP+diff snapshot>"
 
-                with patch("yellhorn_mcp.server.format_metrics_section") as mock_metrics:
+                with patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_metrics:
                     mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
                     with patch(
@@ -442,7 +442,7 @@ async def test_integration_process_judgement_lsp_mode():
                             "https://github.com/mock/repo/issues/456"
                         )
 
-                        with patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue:
+                        with patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue:
                             with patch(
                                 "yellhorn_mcp.server.add_github_issue_comment"
                             ) as mock_add_comment:
@@ -488,7 +488,7 @@ async def test_get_lsp_diff():
     changed_files = ["file1.py", "file2.py", "file3.go", "file4.md"]
 
     # Mock the necessary functions
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
         # Set up the mock to return different file contents
         def mock_git_side_effect(*args, **kwargs):
             cmd = args[1]
@@ -621,7 +621,7 @@ async def test_get_lsp_diff_no_api_changes():
     changed_files = ["implementation.py"]
 
     # Mock the necessary functions
-    with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
         # Set up the mock to return similar API but different implementation
         def mock_git_side_effect(*args, **kwargs):
             cmd = args[1]

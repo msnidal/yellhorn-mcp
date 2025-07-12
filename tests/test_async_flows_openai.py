@@ -49,7 +49,7 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
     mock_ctx.log = AsyncMock()
 
     # Bypass the OpenAI client check by patching it directly
-    with patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment:
+    with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment:
         # Create a typical error flow: add_github_issue_comment should be called with error message
         await process_workplan_async(
             Path("/mock/repo"),
@@ -71,9 +71,9 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
 
     # Test with OpenAI API error
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -119,9 +119,9 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
     mock_ctx.log = AsyncMock()
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -169,8 +169,8 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
 
     # Test with missing OpenAI client
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -193,9 +193,9 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
 
     # Test with OpenAI API error
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -236,8 +236,8 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
     mock_ctx.log = AsyncMock()
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"

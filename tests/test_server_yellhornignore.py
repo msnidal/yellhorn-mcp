@@ -28,17 +28,26 @@ async def test_yellhornignore_file_reading():
         )
 
         # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.return_value = "\n".join(
-                [
-                    "file1.py",
-                    "file2.js",
-                    "file3.log",
-                    "node_modules/package.json",
-                    "dist/bundle.js",
-                    "src/components/Button.js",
-                ]
-            )
+        with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+            # First call is for tracked files, second is for untracked files
+            mock_git.side_effect = [
+                # First call: tracked files
+                "\n".join(
+                    [
+                        "file1.py",
+                        "file2.js",
+                        "src/components/Button.js",
+                    ]
+                ),
+                # Second call: untracked files
+                "\n".join(
+                    [
+                        "file3.log",
+                        "node_modules/package.json",
+                        "dist/bundle.js",
+                    ]
+                ),
+            ]
 
             # Create a test file that can be read
             (tmp_path / "file1.py").write_text("# Test file 1")
@@ -82,8 +91,12 @@ async def test_yellhornignore_file_error_handling():
         yellhornignore_path.write_text("*.log\nnode_modules/")
 
         # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.return_value = "file1.py\nfile2.js\nfile3.log"
+        with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+            # First call is for tracked files, second is for untracked files
+            mock_git.side_effect = [
+                "file1.py\nfile2.js",  # tracked files
+                "file3.log",  # untracked files
+            ]
 
             # Mock open to raise an exception when reading .yellhornignore
             with patch("builtins.open") as mock_open:
@@ -123,8 +136,12 @@ async def test_get_codebase_snapshot_directory_handling():
         os.makedirs(tmp_path / "src")
 
         # Mock run_git_command to return file paths including a directory
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.return_value = "file1.py\nsrc"
+        with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+            # First call is for tracked files, second is for untracked files
+            mock_git.side_effect = [
+                "file1.py",  # tracked files
+                "src",  # untracked files (directory)
+            ]
 
             # Create test file
             (tmp_path / "file1.py").write_text("# Test file 1")
@@ -171,8 +188,12 @@ async def test_get_codebase_snapshot_binary_file_handling():
             f.write(b"\x89PNG\r\n\x1a\n")  # PNG file header
 
         # Mock run_git_command to return our test files
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.return_value = "file1.py\nfile2.jpg"
+        with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+            # First call is for tracked files, second is for untracked files
+            mock_git.side_effect = [
+                "file1.py",  # tracked files
+                "file2.jpg",  # untracked files
+            ]
 
             # Make sure Path.is_dir returns False for our paths
             with patch.object(Path, "is_dir", return_value=False):
@@ -222,19 +243,28 @@ async def test_yellhornignore_whitelist_functionality():
         )
 
         # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.return_value = "\n".join(
-                [
-                    "file1.py",
-                    "file2.js",
-                    "regular.log",
-                    "important.log",
-                    "node_modules/package.json",
-                    "node_modules/important-package.json",
-                    "dist/bundle.js",
-                    "src/components/Button.js",
-                ]
-            )
+        with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+            # First call is for tracked files, second is for untracked files
+            mock_git.side_effect = [
+                # First call: tracked files
+                "\n".join(
+                    [
+                        "file1.py",
+                        "file2.js",
+                        "src/components/Button.js",
+                    ]
+                ),
+                # Second call: untracked files
+                "\n".join(
+                    [
+                        "regular.log",
+                        "important.log",
+                        "node_modules/package.json",
+                        "node_modules/important-package.json",
+                        "dist/bundle.js",
+                    ]
+                ),
+            ]
 
             # Create files for testing
             (tmp_path / "file1.py").write_text("# Test file 1")
@@ -309,7 +339,7 @@ async def test_curate_context():
     user_task = "Implementing a new feature for data processing"
 
     # Setup mock for get_codebase_snapshot
-    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot:
         # First test: No files found
         mock_snapshot.return_value = ([], {})
 
@@ -382,7 +412,7 @@ tests/test_data
 
     # Test with .yellhornignore file
     mock_ctx.reset_mock()
-    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot:
         # Create a list of files to analyze
         mock_sample_files = [
             "src/main.py",
@@ -471,7 +501,7 @@ docs
 
     # Test with depth_limit parameter
     mock_ctx.reset_mock()
-    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot:
         # Create a list of files with various depths
         mock_sample_files = [
             "root_file.py",  # depth 1
@@ -513,7 +543,7 @@ first_level
 
     # Test error handling during LLM call
     mock_ctx.reset_mock()
-    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot:
         # Create a simple list of files
         mock_snapshot.return_value = (["file1.py", "file2.py"], {})
 
@@ -555,7 +585,7 @@ first_level
         "openai_client": MagicMock(),
     }
 
-    with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot:
         # Create a simple list of files
         mock_snapshot.return_value = (["src/file1.py", "src/file2.py"], {})
 

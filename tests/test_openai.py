@@ -101,7 +101,7 @@ def test_format_metrics_section_openai():
 
     model = "gpt-4o"
 
-    with patch("yellhorn_mcp.server.calculate_cost") as mock_calculate_cost:
+    with patch("yellhorn_mcp.cost_tracker.calculate_cost") as mock_calculate_cost:
         mock_calculate_cost.return_value = 0.0125
 
         result = format_metrics_section(model, usage_metadata)
@@ -122,10 +122,10 @@ def test_format_metrics_section_openai():
 async def test_process_workplan_async_openai(mock_request_context, mock_openai_client):
     """Test workplan generation with OpenAI model."""
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
-        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_format_metrics,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -183,10 +183,10 @@ async def test_openai_client_required():
     mock_ctx.log = AsyncMock()
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_comment,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -218,11 +218,11 @@ async def test_openai_client_required():
 async def test_process_judgement_async_openai(mock_request_context, mock_openai_client):
     """Test judgement generation with OpenAI model."""
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_format_metrics,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -273,10 +273,10 @@ async def test_process_workplan_async_deep_research_model(mock_request_context, 
     mock_request_context.request_context.lifespan_context["model"] = "o3-deep-research"
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
-        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_format_metrics,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -322,11 +322,11 @@ async def test_process_judgement_async_deep_research_model(
     mock_request_context.request_context.lifespan_context["model"] = "o4-mini-deep-research"
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_format_metrics,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -400,10 +400,10 @@ async def test_process_workplan_async_list_output(mock_request_context):
     client.responses = responses
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update,
-        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update,
+        patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_format_metrics,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -461,11 +461,11 @@ async def test_process_judgement_async_list_output(mock_request_context):
     client.responses = responses
 
     with (
-        patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.server.format_codebase_for_prompt") as mock_format,
-        patch("yellhorn_mcp.server.format_metrics_section") as mock_format_metrics,
-        patch("yellhorn_mcp.server.update_github_issue") as mock_update_issue,
-        patch("yellhorn_mcp.server.add_github_issue_comment") as mock_add_comment,
+        patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot,
+        patch("yellhorn_mcp.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch("yellhorn_mcp.cost_tracker.format_metrics_section_raw") as mock_format_metrics,
+        patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue,
+        patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
