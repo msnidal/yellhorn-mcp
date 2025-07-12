@@ -69,7 +69,7 @@ async def get_git_diff(
                 repo_path, ["diff", "--name-only", f"{base_ref}...{head_ref}"]
             )
             changed_files = changed_files_output.strip().split("\n") if changed_files_output else []
-            
+
             if changed_files:
                 # Get LSP diff which shows signatures of changed functions and full content of changed files
                 lsp_diff = await get_lsp_diff(repo_path, base_ref, head_ref, changed_files)
@@ -228,7 +228,9 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
         if not judgement_content:
             api_name = "OpenAI" if is_openai_model else "Gemini"
-            raise YellhornMCPError(f"Failed to generate judgement: Received an empty response from {api_name} API.")
+            raise YellhornMCPError(
+                f"Failed to generate judgement: Received an empty response from {api_name} API."
+            )
 
         # Calculate generation time if we have metadata
         if completion_metadata and _meta and "start_time" in _meta:
@@ -341,6 +343,6 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 await ctx.log(
                     level="error", message=f"Failed to add error comment to issue: {str(e)}"
                 )
-        
+
         # Re-raise as YellhornMCPError to signal failure outward
         raise YellhornMCPError(error_msg)

@@ -91,3 +91,82 @@ def test_format_metrics_section_none_token_values():
 
     result = format_metrics_section("gpt-4o", metadata)
     assert "N/A" in result
+
+
+def test_format_metrics_section_openai_dict_unexpected():
+    """Test format_metrics_section with OpenAI model but dict metadata (unexpected)."""
+    # OpenAI models should not receive dict metadata
+    metadata = {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
+
+    result = format_metrics_section("gpt-4o", metadata)
+    assert "N/A" in result
+    assert "**Model Used**: N/A" in result
+
+
+def test_format_metrics_section_gemini_object_with_attrs():
+    """Test format_metrics_section with Gemini model and object metadata."""
+    # Gemini model with object metadata
+    metadata = MagicMock()
+    metadata.prompt_token_count = 1000
+    metadata.candidates_token_count = 500
+    metadata.total_token_count = 1500
+
+    result = format_metrics_section("gemini-2.5-pro", metadata)
+    assert "**Model Used**: `gemini-2.5-pro`" in result
+    assert "**Input Tokens**: 1000" in result
+    assert "**Output Tokens**: 500" in result
+    assert "**Total Tokens**: 1500" in result
+
+
+def test_format_metrics_section_gemini_dict():
+    """Test format_metrics_section with Gemini model and dict metadata."""
+    # Gemini model with dict metadata
+    metadata = {
+        "prompt_token_count": 1000,
+        "candidates_token_count": 500,
+        "total_token_count": 1500,
+    }
+
+    result = format_metrics_section("gemini-2.5-pro", metadata)
+    assert "**Model Used**: `gemini-2.5-pro`" in result
+    assert "**Input Tokens**: 1000" in result
+    assert "**Output Tokens**: 500" in result
+    assert "**Total Tokens**: 1500" in result
+
+
+def test_format_metrics_section_missing_attributes():
+    """Test format_metrics_section with objects missing expected attributes."""
+
+    # OpenAI model without prompt_tokens attribute
+    class IncompleteOpenAI:
+        completion_tokens = 500
+        total_tokens = 1500
+
+    metadata = IncompleteOpenAI()
+    result = format_metrics_section("gpt-4o", metadata)
+    assert "N/A" in result
+
+    # Gemini model without prompt_token_count attribute
+    class IncompleteGemini:
+        candidates_token_count = 500
+        total_token_count = 1500
+
+    metadata = IncompleteGemini()
+    result = format_metrics_section("gemini-2.5-pro", metadata)
+    assert "N/A" in result
+
+
+def test_format_metrics_section_auto_calculate_total():
+    """Test format_metrics_section auto-calculates total_tokens when None."""
+    # Gemini model with None total_tokens
+    metadata = {
+        "prompt_token_count": 1000,
+        "candidates_token_count": 500,
+        "total_token_count": None,
+    }
+
+    result = format_metrics_section("gemini-2.5-pro", metadata)
+    assert "**Model Used**: `gemini-2.5-pro`" in result
+    assert "**Input Tokens**: 1000" in result
+    assert "**Output Tokens**: 500" in result
+    assert "**Total Tokens**: 1500" in result  # Should be auto-calculated

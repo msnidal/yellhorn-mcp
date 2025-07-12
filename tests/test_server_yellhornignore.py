@@ -100,13 +100,13 @@ async def test_yellhornignore_file_error_handling():
 
             # Mock Path.read_text to raise an exception when reading .yellhornignore
             original_read_text = Path.read_text
-            
+
             def mock_read_text(self, *args, **kwargs):
                 if str(self).endswith(".yellhornignore"):
                     raise PermissionError("Permission denied")
                 # For other files, use the real read_text
                 return original_read_text(self, *args, **kwargs)
-            
+
             with patch.object(Path, "read_text", mock_read_text):
 
                 # Create test files

@@ -396,7 +396,11 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             if not openai_client:
                 if ctx:
                     await ctx.log(level="error", message="OpenAI client not initialized")
-                await add_issue_comment(repo_path, issue_number, "❌ **Error generating workplan** – OpenAI client not initialized")
+                await add_issue_comment(
+                    repo_path,
+                    issue_number,
+                    "❌ **Error generating workplan** – OpenAI client not initialized",
+                )
                 return  # Don't raise, function ends after commenting
 
             workplan_content, completion_metadata = await generate_workplan_with_openai(
@@ -406,7 +410,11 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             if gemini_client is None:
                 if ctx:
                     await ctx.log(level="error", message="Gemini client not initialized")
-                await add_issue_comment(repo_path, issue_number, "❌ **Error generating workplan** – Gemini client not initialized")
+                await add_issue_comment(
+                    repo_path,
+                    issue_number,
+                    "❌ **Error generating workplan** – Gemini client not initialized",
+                )
                 return  # Don't raise, function ends after commenting
 
             # Get search grounding setting

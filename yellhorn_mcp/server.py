@@ -640,7 +640,9 @@ IMPORTANT: Return ONLY the JSON array, no other text or markdown formatting."""
         # Restore original search grounding setting on error
         if disable_search_grounding:
             try:
-                ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
+                ctx.request_context.lifespan_context["use_search_grounding"] = (
+                    original_search_grounding
+                )
             except NameError:
                 pass  # original_search_grounding was not defined yet
         raise YellhornMCPError(f"Failed to curate context: {str(e)}")
@@ -854,33 +856,79 @@ async def judge_workplan(
         # Restore original search grounding setting on error
         if disable_search_grounding:
             try:
-                ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
+                ctx.request_context.lifespan_context["use_search_grounding"] = (
+                    original_search_grounding
+                )
             except NameError:
                 pass  # original_search_grounding was not defined yet
         raise YellhornMCPError(f"Failed to create judgement: {str(e)}")
 
 
+from yellhorn_mcp.comment_utils import format_completion_comment, format_submission_comment
+
 # Re-export for backward compatibility with tests
-from yellhorn_mcp.cost_tracker import calculate_cost, format_metrics_section_raw as format_metrics_section
-from yellhorn_mcp.workplan_processor import get_codebase_snapshot, build_file_structure_context, format_codebase_for_prompt
-from yellhorn_mcp.lsp_utils import get_lsp_snapshot, get_lsp_diff
-from yellhorn_mcp.github_integration import add_issue_comment as add_github_issue_comment
+from yellhorn_mcp.cost_tracker import (
+    calculate_cost,
+)
+from yellhorn_mcp.cost_tracker import format_metrics_section_raw as format_metrics_section
+from yellhorn_mcp.gemini_integration import async_generate_content_with_config
 from yellhorn_mcp.git_utils import (
-    update_github_issue,
+    add_github_issue_comment as add_github_issue_comment_from_git_utils,
+)
+from yellhorn_mcp.git_utils import (
     create_github_subissue,
-    get_github_issue_body,
-    run_github_command,
-    run_git_command,
     ensure_label_exists,
     get_default_branch,
+    get_github_issue_body,
     get_github_pr_diff,
-    add_github_issue_comment as add_github_issue_comment_from_git_utils,
     post_github_pr_review,
+    run_git_command,
+    run_github_command,
+    update_github_issue,
 )
-from yellhorn_mcp.comment_utils import format_submission_comment, format_completion_comment
+from yellhorn_mcp.github_integration import add_issue_comment as add_github_issue_comment
 from yellhorn_mcp.judgement_processor import get_git_diff
+from yellhorn_mcp.lsp_utils import get_lsp_diff, get_lsp_snapshot
 from yellhorn_mcp.search_grounding import _get_gemini_search_tools
-from yellhorn_mcp.gemini_integration import async_generate_content_with_config
+from yellhorn_mcp.workplan_processor import (
+    build_file_structure_context,
+    format_codebase_for_prompt,
+    get_codebase_snapshot,
+)
 
 # Export for use by the CLI
-__all__ = ["mcp", "process_workplan_async", "process_judgement_async", "calculate_cost", "format_metrics_section", "get_codebase_snapshot", "build_file_structure_context", "format_codebase_for_prompt", "get_git_diff", "get_lsp_snapshot", "get_lsp_diff", "is_git_repository", "YellhornMCPError", "add_github_issue_comment", "update_github_issue", "create_github_subissue", "get_github_issue_body", "run_github_command", "run_git_command", "ensure_label_exists", "get_default_branch", "get_github_pr_diff", "format_submission_comment", "format_completion_comment", "create_workplan", "get_workplan", "judge_workplan", "curate_context", "app_lifespan", "_get_gemini_search_tools", "async_generate_content_with_config", "add_github_issue_comment_from_git_utils", "post_github_pr_review"]
+__all__ = [
+    "mcp",
+    "process_workplan_async",
+    "process_judgement_async",
+    "calculate_cost",
+    "format_metrics_section",
+    "get_codebase_snapshot",
+    "build_file_structure_context",
+    "format_codebase_for_prompt",
+    "get_git_diff",
+    "get_lsp_snapshot",
+    "get_lsp_diff",
+    "is_git_repository",
+    "YellhornMCPError",
+    "add_github_issue_comment",
+    "update_github_issue",
+    "create_github_subissue",
+    "get_github_issue_body",
+    "run_github_command",
+    "run_git_command",
+    "ensure_label_exists",
+    "get_default_branch",
+    "get_github_pr_diff",
+    "format_submission_comment",
+    "format_completion_comment",
+    "create_workplan",
+    "get_workplan",
+    "judge_workplan",
+    "curate_context",
+    "app_lifespan",
+    "_get_gemini_search_tools",
+    "async_generate_content_with_config",
+    "add_github_issue_comment_from_git_utils",
+    "post_github_pr_review",
+]

@@ -57,7 +57,7 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
         mock_gh_command.return_value = ""
-        
+
         # Create a typical error flow: process_workplan_async catches exception and adds comment
         await process_workplan_async(
             Path("/mock/repo"),
@@ -79,7 +79,7 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
             if call[0][1][0] == "issue" and call[0][1][1] == "comment":
                 comment_call = call
                 break
-        
+
         assert comment_call is not None, "No issue comment call found"
         # The call args are: repo_path, ["issue", "comment", issue_number, "--body", body]
         assert comment_call[0][1][2] == "123"  # issue number
@@ -129,7 +129,7 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
             if call[0][1][0] == "issue" and call[0][1][1] == "comment":
                 comment_call = call
                 break
-        
+
         assert comment_call is not None, "No issue comment call found"
         assert comment_call[0][1][2] == "123"  # issue number
         assert comment_call[0][1][4].startswith("❌ **Error generating workplan**")
@@ -187,7 +187,7 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
             if call[0][1][0] == "issue" and call[0][1][1] == "comment":
                 comment_call = call
                 break
-        
+
         assert comment_call is not None, "No issue comment call found"
         assert comment_call[0][1][2] == "123"  # issue number
         # The empty response from OpenAI raises an exception, so we get the error format
@@ -208,7 +208,7 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
     ):
         mock_snapshot.return_value = ([], {})
         mock_git_cmd.return_value = ""
-        
+
         with pytest.raises(YellhornMCPError, match="OpenAI client not initialized"):
             await process_judgement_async(
                 Path("/mock/repo"),
@@ -295,7 +295,10 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
         client.responses = responses
 
         # Process should raise error for empty response
-        with pytest.raises(YellhornMCPError, match="Error processing judgement: Received empty response from OpenAI API"):
+        with pytest.raises(
+            YellhornMCPError,
+            match="Error processing judgement: Received empty response from OpenAI API",
+        ):
             await process_judgement_async(
                 Path("/mock/repo"),
                 None,  # No Gemini client

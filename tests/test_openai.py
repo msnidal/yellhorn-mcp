@@ -152,7 +152,7 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
         except Exception as e:
             print(f"Exception in test: {e}")
             raise
-        
+
         # Print debug info
         print(f"update_github_issue called: {mock_update.called}")
         print(f"format_metrics_section called: {mock_format_metrics.called}")
@@ -230,7 +230,7 @@ async def test_openai_client_required():
             if call[0][1][0] == "issue" and call[0][1][1] == "comment":
                 comment_call = call
                 break
-        
+
         assert comment_call is not None, "No issue comment call found"
         assert comment_call[0][1][2] == "123"  # issue number
         assert "❌ **Error generating workplan**" in comment_call[0][1][4]
@@ -446,17 +446,21 @@ async def test_process_workplan_async_list_output(mock_request_context):
         mock_format_metrics.return_value = (
             "\n\n---\n## Completion Metrics\n*   **Model Used**: `o3-deep-research`"
         )
-        
+
         # Mock the OpenAI generation to return content and metadata
         from yellhorn_mcp.metadata_models import CompletionMetadata
+
         mock_completion_metadata = CompletionMetadata(
             status="✅ Workplan generated successfully",
             generation_time_seconds=2.5,
             input_tokens=1000,
             output_tokens=500,
-            total_tokens=1500
+            total_tokens=1500,
         )
-        mock_openai_gen.return_value = ("Mock OpenAI response from list output", mock_completion_metadata)
+        mock_openai_gen.return_value = (
+            "Mock OpenAI response from list output",
+            mock_completion_metadata,
+        )
 
         # Test OpenAI client workflow with list output
         await process_workplan_async(

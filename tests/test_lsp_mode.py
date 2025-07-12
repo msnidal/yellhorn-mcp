@@ -344,7 +344,9 @@ async def test_integration_process_workplan_lsp_mode():
             with patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_metrics:
                 mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
-                with patch("yellhorn_mcp.github_integration.update_issue_with_workplan") as mock_update:
+                with patch(
+                    "yellhorn_mcp.github_integration.update_issue_with_workplan"
+                ) as mock_update:
                     with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_comment:
                         # Call the function with LSP mode
                         await process_workplan_async(
@@ -365,7 +367,9 @@ async def test_integration_process_workplan_lsp_mode():
                         # Verify formatted snapshot was passed to the prompt
                         # The prompt might be in either the old or new API call
                         if gemini_client.aio.models.generate_content.called:
-                            prompt = gemini_client.aio.models.generate_content.call_args[1]["contents"]
+                            prompt = gemini_client.aio.models.generate_content.call_args[1][
+                                "contents"
+                            ]
                             assert "<formatted LSP snapshot>" in prompt
                         elif gemini_client.aio.generate_content.called:
                             prompt = gemini_client.aio.generate_content.call_args[1]["contents"]
@@ -444,7 +448,9 @@ async def test_integration_process_judgement_lsp_mode():
                             "https://github.com/mock/repo/issues/456"
                         )
 
-                        with patch("yellhorn_mcp.git_utils.update_github_issue") as mock_update_issue:
+                        with patch(
+                            "yellhorn_mcp.git_utils.update_github_issue"
+                        ) as mock_update_issue:
                             with patch(
                                 "yellhorn_mcp.github_integration.add_issue_comment"
                             ) as mock_add_comment:
