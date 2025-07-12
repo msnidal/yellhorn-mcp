@@ -4,34 +4,7 @@ This module handles token usage tracking, cost calculation,
 and metrics formatting for various AI models.
 """
 
-from typing import Protocol, TypedDict, cast
-
 from yellhorn_mcp.metadata_models import CompletionMetadata
-
-
-class OpenAIUsage(Protocol):
-    """Protocol for OpenAI usage metadata objects."""
-
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-
-
-class GeminiUsageDict(TypedDict, total=False):
-    """TypedDict for Gemini usage metadata dictionaries."""
-
-    prompt_token_count: int
-    candidates_token_count: int
-    total_token_count: int
-
-
-class GeminiUsage(Protocol):
-    """Protocol for Gemini usage metadata objects."""
-
-    prompt_token_count: int
-    candidates_token_count: int | None
-    total_token_count: int | None
-
 
 # Pricing configuration for models (USD per 1M tokens)
 MODEL_PRICING = {
@@ -135,75 +108,6 @@ def format_metrics_section(model: str, usage: CompletionMetadata | None) -> str:
     # If total_tokens is None, calculate it
     if total_tokens is None:
         total_tokens = input_tokens + output_tokens
-
-    return f"""\n\n---\n## Completion Metrics
-*   **Model Used**: `{model}`
-*   **Input Tokens**: {input_tokens}
-*   **Output Tokens**: {output_tokens}
-*   **Total Tokens**: {total_tokens}
-*   **Estimated Cost**: {cost_str}"""
-
-
-def format_metrics_section_raw(
-    model: str, usage_metadata: OpenAIUsage | GeminiUsage | GeminiUsageDict | object | None
-) -> str:
-    """Formats the completion metrics from raw usage metadata.
-
-    This is a legacy function that handles raw usage metadata objects.
-    Prefer using format_metrics_section with CompletionMetadata instead.
-
-    Args:
-        model: The model name used for generation.
-        usage_metadata: Raw usage metadata object or dict.
-
-    Returns:
-        Formatted Markdown section with completion metrics.
-    """
-    na_metrics = "\n\n---\n## Completion Metrics\n* **Model Used**: N/A\n* **Input Tokens**: N/A\n* **Output Tokens**: N/A\n* **Total Tokens**: N/A\n* **Estimated Cost**: N/A"
-
-    if usage_metadata is None:
-        return na_metrics
-
-    # Handle different attribute names between Gemini and OpenAI usage metadata
-    if model.startswith("gpt-") or model.startswith("o"):  # OpenAI models
-        # OpenAI usage should be an object, not a dict
-        if isinstance(usage_metadata, dict):
-            # Unexpected type for OpenAI usage
-            return na_metrics
-        # Check if we have a proper CompletionUsage object
-        if not hasattr(usage_metadata, "prompt_tokens"):
-            return na_metrics
-        # Safe to access OpenAI attributes directly - cast for type checker
-        openai_usage = cast(OpenAIUsage, usage_metadata)
-        input_tokens = openai_usage.prompt_tokens
-        output_tokens = openai_usage.completion_tokens
-        total_tokens = openai_usage.total_tokens
-    else:  # Gemini models
-        # Handle both dict and object forms of usage_metadata
-        if isinstance(usage_metadata, dict):
-            input_tokens = usage_metadata.get("prompt_token_count")
-            output_tokens = usage_metadata.get("candidates_token_count")
-            total_tokens = usage_metadata.get("total_token_count")
-        else:
-            # Object form - check if it has the expected attributes
-            if not hasattr(usage_metadata, "prompt_token_count"):
-                return na_metrics
-            # Cast for type checker
-            gemini_usage = cast(GeminiUsage, usage_metadata)
-            input_tokens = gemini_usage.prompt_token_count
-            output_tokens = getattr(gemini_usage, "candidates_token_count", None)
-            total_tokens = getattr(gemini_usage, "total_token_count", None)
-
-    # Check if we got valid token values
-    if input_tokens is None or output_tokens is None:
-        return na_metrics
-
-    # Calculate total_tokens if not provided
-    if total_tokens is None:
-        total_tokens = input_tokens + output_tokens
-
-    cost = calculate_cost(model, input_tokens, output_tokens)
-    cost_str = f"${cost:.4f}" if cost is not None else "N/A"
 
     return f"""\n\n---\n## Completion Metrics
 *   **Model Used**: `{model}`

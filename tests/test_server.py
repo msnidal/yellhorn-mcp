@@ -457,6 +457,8 @@ def test_is_git_repository():
 
 def test_calculate_cost():
     """Test the calculate_cost function with different token counts and models."""
+    from yellhorn_mcp.cost_tracker import calculate_cost
+
     # Test with standard model and default tier (below 200k tokens)
     cost = calculate_cost("gemini-2.5-pro", 100_000, 50_000)
     # Expected: (100,000 / 1M) * 1.25 + (50,000 / 1M) * 10.00 = 0.125 + 0.5 = 0.625
@@ -482,51 +484,6 @@ def test_calculate_cost():
     assert cost is None
 
 
-def test_format_metrics_section():
-    """Test the format_metrics_section function with different metadata."""
-    # Test with all metadata provided
-    metadata = MagicMock()
-    metadata.prompt_token_count = 1000
-    metadata.candidates_token_count = 500
-    metadata.total_token_count = 1500
-
-    model = "gemini-2.5-pro"
-
-    with patch("yellhorn_mcp.cost_tracker.calculate_cost") as mock_calculate_cost:
-        mock_calculate_cost.return_value = 0.0175
-
-        result = format_metrics_section(model, metadata)
-
-        # Check that it contains all the expected sections
-        assert "\n\n---\n## Completion Metrics" in result
-        assert f"**Model Used**: `{model}`" in result
-        assert "**Input Tokens**: 1000" in result
-        assert "**Output Tokens**: 500" in result
-        assert "**Total Tokens**: 1500" in result
-        assert "**Estimated Cost**: $0.0175" in result
-
-        # Check the calculate_cost was called with the right parameters
-        mock_calculate_cost.assert_called_once_with(model, 1000, 500)
-
-    # Create a custom dict-like object instead of MagicMock
-    class CustomMetadata:
-        def __init__(self):
-            self.prompt_token_count = 2000
-            self.candidates_token_count = 800
-            self.total_token_count = 2800
-
-    metadata2 = CustomMetadata()
-
-    with patch("yellhorn_mcp.cost_tracker.calculate_cost") as mock_calculate_cost:
-        mock_calculate_cost.return_value = 0.035
-
-        result = format_metrics_section(model, metadata2)
-
-        # Check that the total is calculated
-        assert "**Total Tokens**: 2800" in result
-
-        # Check the calculate_cost was called with the right parameters
-        mock_calculate_cost.assert_called_once_with(model, 2000, 800)
 
 
 @pytest.mark.asyncio

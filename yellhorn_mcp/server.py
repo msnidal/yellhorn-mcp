@@ -869,8 +869,8 @@ from yellhorn_mcp.comment_utils import format_completion_comment, format_submiss
 # Re-export for backward compatibility with tests
 from yellhorn_mcp.cost_tracker import (
     calculate_cost,
+    format_metrics_section,
 )
-from yellhorn_mcp.cost_tracker import format_metrics_section_raw as format_metrics_section
 from yellhorn_mcp.gemini_integration import async_generate_content_with_config
 from yellhorn_mcp.git_utils import (
     add_github_issue_comment as add_github_issue_comment_from_git_utils,
