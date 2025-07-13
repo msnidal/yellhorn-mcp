@@ -50,6 +50,7 @@ async def test_openai_gemini_errors():
     # Create mock context
     mock_ctx = DummyContext()
     mock_ctx.log = AsyncMock()
+    mock_ctx.request_context.lifespan_context["github_command_func"] = AsyncMock()
 
     # Test OpenAI API error in process_judgement_async
     with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
@@ -66,8 +67,6 @@ async def test_openai_gemini_errors():
             with pytest.raises(YellhornMCPError, match="LLM Manager not initialized"):
                 await process_judgement_async(
                     Path("/mock/repo"),
-                    None,  # No Gemini client
-                    mock_openai,
                     None,  # No LLM manager
                     "gpt-4o",
                     "Workplan content",

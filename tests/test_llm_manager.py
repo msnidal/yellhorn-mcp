@@ -7,6 +7,14 @@ from yellhorn_mcp.llm_manager import LLMManager
 from yellhorn_mcp.token_counter import TokenCounter
 
 
+class MockGeminiUsage:
+    """Helper class to mock Gemini usage metadata with proper attributes."""
+    def __init__(self, prompt_tokens=10, candidates_tokens=20, total_tokens=30):
+        self.prompt_token_count = prompt_tokens
+        self.candidates_token_count = candidates_tokens
+        self.total_token_count = total_tokens
+
+
 class TestLLMManager:
     """Test suite for LLMManager class."""
     
@@ -76,9 +84,12 @@ class TestLLMManager:
         """Test simple OpenAI call without chunking."""
         mock_openai = MagicMock()
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content="Test response"))]
+        mock_response.output = [MagicMock(content=[MagicMock(text="Test response")])]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        # Ensure output_text is not present so it uses the output array structure
+        del mock_response.output_text
         
-        mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
         
         manager = LLMManager(openai_client=mock_openai)
         
@@ -89,7 +100,7 @@ class TestLLMManager:
         )
         
         assert result == "Test response"
-        mock_openai.chat.completions.create.assert_called_once()
+        mock_openai.responses.create.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_call_llm_simple_gemini(self):
@@ -116,9 +127,12 @@ class TestLLMManager:
         """Test call with system message."""
         mock_openai = MagicMock()
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content="Test response"))]
+        mock_response.output = [MagicMock(content=[MagicMock(text="Test response")])]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        # Ensure output_text is not present so it uses the output array structure
+        del mock_response.output_text
         
-        mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
         
         manager = LLMManager(openai_client=mock_openai)
         
@@ -131,22 +145,22 @@ class TestLLMManager:
         
         assert result == "Test response"
         
-        # Check that system message was included
-        call_args = mock_openai.chat.completions.create.call_args
-        messages = call_args[1]["messages"]
-        assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "You are a helpful assistant"
-        assert messages[1]["role"] == "user"
-        assert messages[1]["content"] == "Test prompt"
+        # Check that system message was included in instructions parameter
+        call_args = mock_openai.responses.create.call_args
+        assert call_args[1]["instructions"] == "You are a helpful assistant"
+        assert call_args[1]["input"] == "Test prompt"
     
     @pytest.mark.asyncio
     async def test_call_llm_json_response(self):
         """Test JSON response format."""
         mock_openai = MagicMock()
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content='{"key": "value"}'))]
+        mock_response.output = [MagicMock(content=[MagicMock(text='{"key": "value"}')])]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        # Ensure output_text is not present so it uses the output array structure
+        del mock_response.output_text
         
-        mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
         
         manager = LLMManager(openai_client=mock_openai)
         
@@ -167,7 +181,9 @@ class TestLLMManager:
         responses = []
         for i in range(2):  
             mock_response = MagicMock()
-            mock_response.choices = [MagicMock(message=MagicMock(content=f"Response chunk {i+1}"))]
+            mock_response.output = [MagicMock(content=[MagicMock(text=f"Response chunk {i+1}")])]
+            # Ensure output_text is not present so it uses the output array structure
+            del mock_response.output_text
             # Add usage metadata to mock response
             mock_response.usage = MagicMock(
                 prompt_tokens=1000,
@@ -176,7 +192,7 @@ class TestLLMManager:
             )
             responses.append(mock_response)
         
-        mock_openai.chat.completions.create = AsyncMock(side_effect=responses)
+        mock_openai.responses.create = AsyncMock(side_effect=responses)
         
         manager = LLMManager(openai_client=mock_openai)
         
@@ -190,7 +206,7 @@ class TestLLMManager:
         )
         
         # Should have made multiple calls
-        assert mock_openai.chat.completions.create.call_count >= 2
+        assert mock_openai.responses.create.call_count >= 2
         
         # Result should be concatenated
         assert "Response chunk 1" in result
@@ -289,7 +305,7 @@ class TestLLMManager:
     async def test_error_handling_openai(self):
         """Test error handling for OpenAI calls."""
         mock_openai = MagicMock()
-        mock_openai.chat.completions.create = AsyncMock(side_effect=Exception("API Error"))
+        mock_openai.responses.create = AsyncMock(side_effect=Exception("API Error"))
         
         manager = LLMManager(openai_client=mock_openai)
         
@@ -339,3 +355,244 @@ class TestLLMManager:
         
         assert result == ["chunk1", "chunk2"]
         mock_split.assert_called_once()
+    
+    def test_is_deep_research_model(self):
+        """Test deep research model detection."""
+        manager = LLMManager()
+        
+        # Test deep research models
+        assert manager._is_deep_research_model("o3-mini") is True
+        assert manager._is_deep_research_model("o3") is True
+        assert manager._is_deep_research_model("o4-preview") is True
+        assert manager._is_deep_research_model("o4-mini") is True
+        
+        # Test non-deep research models
+        assert manager._is_deep_research_model("gpt-4o") is False
+        assert manager._is_deep_research_model("gpt-4o-mini") is False
+        assert manager._is_deep_research_model("gemini-2.5-pro") is False
+        assert manager._is_deep_research_model("unknown-model") is False
+    
+    @pytest.mark.asyncio
+    async def test_call_openai_deep_research_tools(self):
+        """Test OpenAI deep research model with tools enabled."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Deep research response")])]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        # Ensure output_text is not present so it uses the output array structure
+        del mock_response.output_text
+        
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(openai_client=mock_openai)
+        
+        result = await manager.call_llm(
+            prompt="Research this topic",
+            model="o3-mini",
+            temperature=0.7
+        )
+        
+        assert result == "Deep research response"
+        
+        # Verify the API was called with deep research tools
+        call_args = mock_openai.responses.create.call_args[1]
+        assert "tools" in call_args
+        assert len(call_args["tools"]) == 2
+        assert call_args["tools"][0]["type"] == "web_search_preview"
+        assert call_args["tools"][1]["type"] == "code_interpreter"
+        assert call_args["tools"][1]["container"]["type"] == "auto"
+    
+    @pytest.mark.asyncio
+    async def test_call_openai_regular_model_no_tools(self):
+        """Test regular OpenAI model without deep research tools."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Regular response")])]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        # Ensure output_text is not present so it uses the output array structure
+        del mock_response.output_text
+        
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(openai_client=mock_openai)
+        
+        result = await manager.call_llm(
+            prompt="Regular prompt",
+            model="gpt-4o",
+            temperature=0.7
+        )
+        
+        assert result == "Regular response"
+        
+        # Verify no tools were added for regular models
+        call_args = mock_openai.responses.create.call_args[1]
+        assert "tools" not in call_args
+    
+    @pytest.mark.asyncio
+    async def test_call_openai_output_text_property(self):
+        """Test OpenAI response with output_text property."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output_text = "Response via output_text"
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(openai_client=mock_openai)
+        
+        result = await manager.call_llm(
+            prompt="Test prompt",
+            model="o3-mini",
+            temperature=0.7
+        )
+        
+        assert result == "Response via output_text"
+    
+    @pytest.mark.asyncio
+    async def test_call_llm_with_citations_gemini_grounding(self):
+        """Test call_llm_with_citations with Gemini grounding metadata."""
+        mock_gemini = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Grounded response"
+        # Create a proper mock usage metadata object that mimics Gemini structure
+        mock_response.usage_metadata = MockGeminiUsage(prompt_tokens=15, candidates_tokens=25, total_tokens=40)
+        
+        # Mock grounding metadata in candidates[0]
+        mock_candidate = MagicMock()
+        mock_grounding_metadata = MagicMock()
+        mock_grounding_metadata.search_entry_point = MagicMock()
+        mock_candidate.grounding_metadata = mock_grounding_metadata
+        mock_response.candidates = [mock_candidate]
+        
+        mock_gemini.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(gemini_client=mock_gemini)
+        
+        result = await manager.call_llm_with_citations(
+            prompt="Search for information",
+            model="gemini-2.5-pro",
+            temperature=0.0
+        )
+        
+        assert result["content"] == "Grounded response"
+        assert "usage_metadata" in result
+        assert result["usage_metadata"].prompt_tokens == 15
+        assert result["usage_metadata"].completion_tokens == 25
+        assert result["usage_metadata"].total_tokens == 40
+        assert "grounding_metadata" in result
+        assert result["grounding_metadata"] is not None
+        assert hasattr(result["grounding_metadata"], "search_entry_point")
+    
+    @pytest.mark.asyncio
+    async def test_call_llm_with_citations_gemini_no_grounding(self):
+        """Test call_llm_with_citations with Gemini but no grounding metadata."""
+        mock_gemini = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Regular response"
+        # Create a proper mock usage metadata object that mimics Gemini structure
+        mock_response.usage_metadata = MockGeminiUsage()
+        mock_response.candidates = []
+        # Explicitly set grounding metadata to None to ensure it's not present
+        mock_response.grounding_metadata = None
+        
+        mock_gemini.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(gemini_client=mock_gemini)
+        
+        result = await manager.call_llm_with_citations(
+            prompt="Regular prompt",
+            model="gemini-2.5-pro",
+            temperature=0.0
+        )
+        
+        assert result["content"] == "Regular response"
+        assert "usage_metadata" in result
+        assert "grounding_metadata" not in result
+    
+    @pytest.mark.asyncio
+    async def test_call_llm_with_citations_gemini_grounding_on_response(self):
+        """Test call_llm_with_citations with grounding metadata directly on response."""
+        mock_gemini = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Grounded response"
+        # Create a proper mock usage metadata object that mimics Gemini structure
+        mock_response.usage_metadata = MockGeminiUsage(prompt_tokens=15, candidates_tokens=25, total_tokens=40)
+        
+        # Mock grounding metadata directly on response
+        mock_grounding_metadata = MagicMock()
+        mock_grounding_metadata.search_entry_point = MagicMock()
+        mock_response.grounding_metadata = mock_grounding_metadata
+        
+        mock_gemini.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(gemini_client=mock_gemini)
+        
+        result = await manager.call_llm_with_citations(
+            prompt="Search for information",
+            model="gemini-2.5-pro",
+            temperature=0.0
+        )
+        
+        assert result["content"] == "Grounded response"
+        assert "grounding_metadata" in result
+        assert result["grounding_metadata"] is not None
+        assert hasattr(result["grounding_metadata"], "search_entry_point")
+    
+    @pytest.mark.asyncio
+    async def test_call_llm_with_citations_openai(self):
+        """Test call_llm_with_citations with OpenAI model (no grounding)."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="OpenAI response")])]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        # Ensure output_text is not present so it uses the output array structure
+        del mock_response.output_text
+        
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(openai_client=mock_openai)
+        
+        result = await manager.call_llm_with_citations(
+            prompt="Test prompt",
+            model="gpt-4o",
+            temperature=0.0
+        )
+        
+        assert result["content"] == "OpenAI response"
+        assert "usage_metadata" in result
+        assert result["usage_metadata"].prompt_tokens == 10
+        assert "grounding_metadata" not in result
+    
+    @pytest.mark.asyncio
+    async def test_gemini_generation_config_merging(self):
+        """Test Gemini generation_config merging with search grounding tools."""
+        from google.genai.types import GenerateContentConfig
+        
+        mock_gemini = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Grounded response"
+        # Create a proper mock usage metadata object that mimics Gemini structure
+        mock_response.usage_metadata = MockGeminiUsage(prompt_tokens=15, candidates_tokens=25, total_tokens=40)
+        
+        mock_gemini.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(gemini_client=mock_gemini)
+        
+        # Create a mock generation config with search tools
+        mock_generation_config = MagicMock(spec=GenerateContentConfig)
+        mock_generation_config.tools = [MagicMock()]
+        mock_generation_config.tool_config = MagicMock()
+        
+        result = await manager.call_llm(
+            prompt="Search query",
+            model="gemini-2.5-pro",
+            temperature=0.0,
+            generation_config=mock_generation_config
+        )
+        
+        assert result == "Grounded response"
+        
+        # Verify the API was called with merged config
+        call_args = mock_gemini.aio.models.generate_content.call_args[1]
+        assert "config" in call_args
+        # The config should include both temperature and tools from generation_config

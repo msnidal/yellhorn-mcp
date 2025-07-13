@@ -331,6 +331,7 @@ async def test_integration_process_workplan_lsp_mode():
     ctx.request_context.lifespan_context = {
         "codebase_reasoning": "lsp",
         "use_search_grounding": False,  # Disable search grounding for test
+        "github_command_func": AsyncMock(),
     }
     ctx.log = AsyncMock()
     detailed_description = "Test description"
@@ -363,8 +364,6 @@ async def test_integration_process_workplan_lsp_mode():
                         try:
                             await process_workplan_async(
                                 repo_path,
-                                gemini_client,
-                                None,  # No OpenAI client
                                 mock_llm_manager,  # Mock LLM manager
                                 model,
                                 title,
@@ -430,6 +429,7 @@ async def test_integration_process_judgement_lsp_mode():
     ctx.request_context.lifespan_context = {
         "codebase_reasoning": "lsp",
         "use_search_grounding": False,  # Disable search grounding for test
+        "github_command_func": AsyncMock(),
     }
     ctx.log = AsyncMock()
 
@@ -482,8 +482,6 @@ async def test_integration_process_judgement_lsp_mode():
                                     # Call the function with LSP mode
                                     result = await process_judgement_async(
                                         repo_path,
-                                        gemini_client,
-                                        None,  # No OpenAI client
                                         mock_llm_manager,  # Mock LLM manager
                                         model,
                                         workplan,

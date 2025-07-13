@@ -47,6 +47,8 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
     """Test error handling in process_workplan_async with OpenAI models."""
     mock_ctx = DummyContext()
     mock_ctx.log = AsyncMock()
+    # Add required github_command_func to lifespan_context
+    mock_ctx.request_context.lifespan_context["github_command_func"] = AsyncMock()
 
     # Bypass the OpenAI client check by patching it directly
     with (
@@ -61,19 +63,19 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
         # Create a typical error flow: add_github_issue_comment should be called with error message
         await process_workplan_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            None,  # No OpenAI client but we'll see the error in add_github_issue_comment
             None,  # No LLM manager
             "gpt-4o",  # OpenAI model
             "Feature Implementation Plan",
             "123",
             mock_ctx,
-            detailed_description="Test description",
+            "Test description",  # detailed_description
         )
 
         # Verify error was propagated to add_github_issue_comment with error message
         mock_add_comment.assert_called_once()
         args = mock_add_comment.call_args[0]
+        assert args[0] == Path("/mock/repo")
+        assert args[1] == "123"
         # Now we expect an error message comment
         assert "⚠️ AI workplan enhancement failed" in args[2]
         assert "LLM Manager not initialized" in args[2]
@@ -94,22 +96,20 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
         # Process should handle API error and add a comment to the issue with error message
         await process_workplan_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            mock_client,
             None,  # No LLM manager
             "gpt-4o",
             "Feature Implementation Plan",
             "123",
             mock_ctx,
-            detailed_description="Test description",
+            "Test description",  # detailed_description
         )
 
         # Verify error was logged
-        mock_ctx.log.assert_called_with(
+        mock_ctx.log.assert_any_call(
             level="error", message="Failed to generate workplan: LLM Manager not initialized"
         )
 
-        # Verify comment was added with error message using completion metadata format
+        # Verify comment was added with error message
         mock_add_comment.assert_called_once()
         args = mock_add_comment.call_args[0]
         assert args[0] == Path("/mock/repo")
@@ -123,6 +123,8 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
     """Test process_workplan_async with empty OpenAI response."""
     mock_ctx = DummyContext()
     mock_ctx.log = AsyncMock()
+    # Add required github_command_func to lifespan_context
+    mock_ctx.request_context.lifespan_context["github_command_func"] = AsyncMock()
 
     with (
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
@@ -150,14 +152,12 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
         # Process should handle empty response and add comment to issue
         await process_workplan_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            client,
             None,  # No LLM manager
             "gpt-4o",
             "Feature Implementation Plan",
             "123",
             mock_ctx,
-            detailed_description="Test description",
+            "Test description",  # detailed_description
         )
 
         # Verify comment was added with error message
@@ -174,6 +174,10 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
     """Test error handling in process_judgement_async with OpenAI models."""
     mock_ctx = DummyContext()
     mock_ctx.log = AsyncMock()
+    # Add required github_command_func to lifespan_context
+    mock_ctx.request_context.lifespan_context["github_command_func"] = AsyncMock()
+    # Add required github_command_func to lifespan_context
+    mock_ctx.request_context.lifespan_context["github_command_func"] = AsyncMock()
 
     # Test with missing OpenAI client
     with (
@@ -187,8 +191,6 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
         with pytest.raises(YellhornMCPError, match="LLM Manager not initialized"):
             await process_judgement_async(
                 Path("/mock/repo"),
-                None,  # No Gemini client
-                None,  # No OpenAI client
                 None,  # No LLM manager
                 "gpt-4o",  # OpenAI model
                 "Workplan content",
@@ -217,8 +219,6 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
         with pytest.raises(YellhornMCPError, match="Failed to generate judgement"):
             await process_judgement_async(
                 Path("/mock/repo"),
-                None,  # No Gemini client
-                mock_client,
                 None,  # No LLM manager
                 "gpt-4o",
                 "Workplan content",
@@ -245,6 +245,8 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
     """Test process_judgement_async with empty OpenAI response."""
     mock_ctx = DummyContext()
     mock_ctx.log = AsyncMock()
+    # Add required github_command_func to lifespan_context
+    mock_ctx.request_context.lifespan_context["github_command_func"] = AsyncMock()
 
     with (
         patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot,
@@ -272,8 +274,6 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
         with pytest.raises(YellhornMCPError, match="LLM Manager not initialized"):
             await process_judgement_async(
                 Path("/mock/repo"),
-                None,  # No Gemini client
-                client,
                 None,  # No LLM manager
                 "gpt-4o",
                 "Workplan content",

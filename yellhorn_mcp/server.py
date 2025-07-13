@@ -302,6 +302,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
             "llm_manager": llm_manager,
             "model": model,
             "use_search_grounding": use_search_grounding,
+            "github_command_func": run_github_command,
         }
     finally:
         pass
@@ -327,13 +328,14 @@ async def list_resources(ctx: Context, resource_type: str | None = None) -> list
         List of resources (GitHub issues with yellhorn-mcp or yellhorn-review-subissue label).
     """
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+    github_command_func = ctx.request_context.lifespan_context["github_command_func"]
     resources = []
 
     try:
         # Handle workplan resources
         if resource_type is None or resource_type == "yellhorn_workplan":
             # Get all issues with the yellhorn-mcp label
-            json_output = await run_github_command(
+            json_output = await github_command_func(
                 repo_path,
                 ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"],
             )
@@ -357,7 +359,7 @@ async def list_resources(ctx: Context, resource_type: str | None = None) -> list
         # Handle judgement sub-issue resources
         if resource_type is None or resource_type == "yellhorn_judgement_subissue":
             # Get all issues with the yellhorn-judgement-subissue label
-            json_output = await run_github_command(
+            json_output = await github_command_func(
                 repo_path,
                 [
                     "issue",
@@ -415,10 +417,11 @@ async def read_resource(ctx: Context, resource_id: str, resource_type: str | Non
         raise ValueError(f"Unsupported resource type: {resource_type}")
 
     repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+    github_command_func = ctx.request_context.lifespan_context["github_command_func"]
 
     try:
         # Fetch the issue content using the issue number as resource_id
-        return await get_github_issue_body(repo_path, resource_id)
+        return await get_github_issue_body(repo_path, resource_id, github_command_func)
     except Exception as e:
         raise ValueError(f"Failed to get resource: {str(e)}")
 
@@ -464,6 +467,7 @@ async def create_workplan(
     """
     try:
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+        github_command_func = ctx.request_context.lifespan_context["github_command_func"]
 
         # Handle search grounding override if specified
         original_search_grounding = ctx.request_context.lifespan_context.get(
@@ -477,7 +481,7 @@ async def create_workplan(
             )
 
         # Ensure we have the required label
-        await ensure_label_exists(repo_path, "yellhorn-mcp", "Issues created by yellhorn-mcp")
+        await ensure_label_exists(repo_path, "yellhorn-mcp", "Issues created by yellhorn-mcp", github_command_func)
 
         # Prepare initial issue body
         if codebase_reasoning == "none":
@@ -505,7 +509,7 @@ This workplan will be updated asynchronously with a comprehensive implementation
         )
 
         # Create the GitHub issue
-        result = await run_github_command(
+        result = await github_command_func(
             repo_path,
             [
                 "issue",
@@ -550,7 +554,7 @@ This workplan will be updated asynchronously with a comprehensive implementation
 
             # Format and post the submission comment
             submission_comment = format_submission_comment(submission_metadata)
-            await add_github_issue_comment(repo_path, issue_number, submission_comment)
+            await add_github_issue_comment(repo_path, issue_number, submission_comment, github_command_func)
 
             await ctx.log(
                 level="info", message=f"Posted submission metadata comment to issue #{issue_number}"
@@ -576,8 +580,6 @@ This workplan will be updated asynchronously with a comprehensive implementation
             asyncio.create_task(
                 process_workplan_async(
                     repo_path,
-                    gemini_client,
-                    openai_client,
                     llm_manager,
                     model,
                     title,
@@ -631,7 +633,8 @@ async def get_workplan(ctx: Context, issue_number: str) -> str:
     """
     try:
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-        return await get_github_issue_body(repo_path, issue_number)
+        github_command_func = ctx.request_context.lifespan_context["github_command_func"]
+        return await get_github_issue_body(repo_path, issue_number, github_command_func)
     except Exception as e:
         raise YellhornMCPError(f"Failed to retrieve workplan: {str(e)}")
 
@@ -948,8 +951,6 @@ async def get_git_diff(
 
 async def process_workplan_async(
     repo_path: Path,
-    gemini_client: genai.Client | None,
-    openai_client: AsyncOpenAI | None,
     llm_manager: LLMManager | None,
     model: str,
     title: str,
@@ -980,15 +981,18 @@ async def process_workplan_async(
     try:
         # Get codebase snapshot based on reasoning mode
         codebase_reasoning = ctx.request_context.lifespan_context.get("codebase_reasoning", "full")
+        github_command_func = ctx.request_context.lifespan_context["github_command_func"]
 
-        # Define a logging function to use Context for logging
-        async def context_log(message):
+        # Define ctx.log function for codebase snapshot logging
+        async def log_function(message: str):
             await ctx.log(level="info", message=message)
+
+        # Store messages to log them later since get_codebase_snapshot expects sync function
 
         # Get codebase info based on reasoning mode
         if codebase_reasoning == "lsp":
             file_paths, _ = await get_codebase_snapshot(
-                repo_path, _mode="paths", log_function=context_log
+                repo_path, _mode="paths", log_function=log_function
             )
 
             file_paths, file_contents = await get_lsp_snapshot(repo_path, file_paths)
@@ -999,7 +1003,7 @@ async def process_workplan_async(
             # For file_structure mode, we only need the file paths, not the contents
             # Pass ctx.log as the logging function to capture filtering info
             file_paths, _ = await get_codebase_snapshot(
-                repo_path, _mode="paths", log_function=context_log
+                repo_path, _mode="paths", log_function=log_function
             )
 
             # Use the build_file_structure_context function to create the codebase info
@@ -1013,7 +1017,7 @@ async def process_workplan_async(
                 message="Using full mode with content retrieval for workplan generation",
             )
             file_paths, file_contents = await get_codebase_snapshot(
-                repo_path, log_function=context_log
+                repo_path, log_function=log_function
             )
             # Format with tree and full file contents
             codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
@@ -1151,7 +1155,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             
             # Add comment instead of overwriting
             error_message_comment = f"⚠️ AI workplan enhancement failed: {str(e)}"
-            await add_github_issue_comment(repo_path, issue_number, error_message_comment)
+            await add_github_issue_comment(repo_path, issue_number, error_message_comment, github_command_func)
             return
 
 
@@ -1163,7 +1167,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         full_body = f"# {title}\n\n{workplan_content}{metrics_section}"
 
         # Update the GitHub issue with the generated workplan and metrics
-        await update_github_issue(repo_path, issue_number, full_body)
+        await update_github_issue(repo_path, issue_number, full_body, github_command_func)
         await ctx.log(
             level="info",
             message=f"Successfully updated GitHub issue #{issue_number} with generated workplan and metrics",
@@ -1231,7 +1235,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
 
         # Format and post the completion comment
         completion_comment = format_completion_comment(completion_metadata)
-        await add_github_issue_comment(repo_path, issue_number, completion_comment)
+        await add_github_issue_comment(repo_path, issue_number, completion_comment, github_command_func)
         await ctx.log(
             level="info", message=f"Posted completion metadata comment to issue #{issue_number}"
         )
@@ -1247,7 +1251,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
 
 *This debug information is provided to help evaluate and improve prompt engineering.*
 """
-            await add_github_issue_comment(repo_path, issue_number, debug_comment)
+            await add_github_issue_comment(repo_path, issue_number, debug_comment, github_command_func)
             await ctx.log(
                 level="info",
                 message=f"Added debug information (prompt) as comment to issue #{issue_number}",
@@ -1259,7 +1263,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
 
         try:        # Add comment instead of overwriting
             error_message_comment = f"⚠️ AI workplan enhancement failed: {str(e)}"
-            await add_github_issue_comment(repo_path, issue_number, error_message_comment)
+            await add_github_issue_comment(repo_path, issue_number, error_message_comment, github_command_func)
         except Exception as comment_error:
             await ctx.log(
                 level="error",
@@ -1269,8 +1273,6 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
 
 async def process_judgement_async(
     repo_path: Path,
-    gemini_client: genai.Client | None,
-    openai_client: AsyncOpenAI | None,
     llm_manager: LLMManager | None,
     model: str,
     workplan_content: str,
@@ -1319,18 +1321,21 @@ async def process_judgement_async(
         None (function updates the existing sub-issue).
     """
     try:
-        # Define context_log function similar to process_workplan_async
-        async def context_log(message):
-            await ctx.log(level="info", message=message)
+        # Extract github_command_func from context
+        github_command_func = ctx.request_context.lifespan_context["github_command_func"]
             
-        # Process LSP snapshot if requested
+        # Define ctx.log function for codebase snapshot logging
+        async def log_function(message: str):
+            await ctx.log(level="info", message=message)
+
+        # Get codebase info based on reasoning mode
         if codebase_reasoning == "lsp":
             await ctx.log(
                 level="info", message="Using LSP mode for codebase reasoning in judgement"
             )
 
             file_paths, _ = await get_codebase_snapshot(
-                repo_path, _mode="paths", log_function=context_log
+                repo_path, _mode="paths", log_function=log_function
             )
             # Get LSP snapshot of the codebase
             file_paths, file_contents = await get_lsp_snapshot(repo_path, file_paths)
@@ -1339,9 +1344,44 @@ async def process_judgement_async(
             file_paths, file_contents = await update_snapshot_with_full_diff_files(
                 repo_path, base_ref, head_ref, file_paths, file_contents
             )
+            # Format with tree and LSP file contents
+            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
+
+        elif codebase_reasoning == "file_structure":
+            await ctx.log(
+                level="info", message="Using file structure mode for codebase reasoning in judgement"
+            )
+            # For file_structure mode, we only need the file paths, not the contents
+            file_paths, _ = await get_codebase_snapshot(
+                repo_path, _mode="paths", log_function=log_function
+            )
+
+            # Use the build_file_structure_context function to create the codebase info
+            codebase_info = build_file_structure_context(file_paths)
+
+        elif codebase_reasoning == "none":
+            await ctx.log(
+                level="info", message="Using no codebase context for judgement (none mode)"
+            )
+            # No codebase context - just use the workplan and diff
+            codebase_info = "No codebase context provided (none mode)."
+
+        else:
+            # Default full mode - get all file paths and contents
+            await ctx.log(
+                level="info", message="Using full mode with content retrieval for judgement"
+            )
+            file_paths, file_contents = await get_codebase_snapshot(
+                repo_path, log_function=log_function
+            )
+            # Format with tree and full file contents
+            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct a more structured prompt
         prompt = f"""You are an expert code evaluator judging if a code diff correctly implements a workplan.
+
+{codebase_info}
+
 <Original Workplan>
 {workplan_content}
 </Original Workplan>
@@ -1499,7 +1539,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             level="info",
             message=f"Updating sub-issue #{subissue_to_update} with generated judgement",
         )
-        await update_github_issue(repo_path, subissue_to_update, final_body)
+        await update_github_issue(repo_path, subissue_to_update, final_body, github_command_func)
 
         await ctx.log(
             level="info",
@@ -1566,7 +1606,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
         # Format and post the completion comment
         completion_comment = format_completion_comment(completion_metadata)
-        await add_github_issue_comment(repo_path, subissue_to_update, completion_comment)
+        await add_github_issue_comment(repo_path, subissue_to_update, completion_comment, github_command_func)
         await ctx.log(
             level="info",
             message=f"Posted completion metadata comment to sub-issue #{subissue_to_update}",
@@ -1583,7 +1623,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
 *This debug information is provided to help evaluate and improve prompt engineering.*
 """
-            await add_github_issue_comment(repo_path, subissue_to_update, debug_comment)
+            await add_github_issue_comment(repo_path, subissue_to_update, debug_comment, github_command_func)
             await ctx.log(
                 level="info",
                 message=f"Added debug information (prompt) as comment to sub-issue #{subissue_to_update}",
@@ -1618,7 +1658,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Format and post the completion comment
         completion_comment = format_completion_comment(completion_metadata)
         try:
-            await add_github_issue_comment(repo_path, subissue_to_update, completion_comment)
+            await add_github_issue_comment(repo_path, subissue_to_update, completion_comment, github_command_func)
             await ctx.log(
                 level="info",
                 message=f"Posted error completion metadata comment to sub-issue #{subissue_to_update}",
@@ -1673,10 +1713,12 @@ async def curate_context(
     try:
         # Get repository path from context
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-        gemini_client: genai.Client = ctx.request_context.lifespan_context.get("gemini_client")
-        openai_client: AsyncOpenAI = ctx.request_context.lifespan_context.get("openai_client")
         llm_manager = ctx.request_context.lifespan_context.get("llm_manager")
         model: str = ctx.request_context.lifespan_context["model"]
+
+        # Define ctx.log function for codebase snapshot logging
+        async def log_function(message: str):
+            await ctx.log(level="info", message=message)
 
         # Handle search grounding override if specified
         original_search_grounding = ctx.request_context.lifespan_context.get(
@@ -1718,7 +1760,7 @@ async def curate_context(
         # Get file paths from codebase snapshot
         # The get_codebase_snapshot already respects .gitignore patterns by default
         # This will give us only tracked and untracked files that aren't ignored by git
-        file_paths, _ = await get_codebase_snapshot(repo_path, use_yellhorn_context=False, _mode="paths")
+        file_paths, _ = await get_codebase_snapshot(repo_path, use_yellhorn_context=False, _mode="paths", log_function=log_function)
 
         if not file_paths:
             raise YellhornMCPError("No files found in repository to analyze")
@@ -2193,8 +2235,8 @@ async def judge_workplan(
         # Get the repository path and other context data
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
         model = ctx.request_context.lifespan_context["model"]
-        gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
-        openai_client = ctx.request_context.lifespan_context.get("openai_client")
+        llm_manager = ctx.request_context.lifespan_context.get("llm_manager")
+        github_command_func = ctx.request_context.lifespan_context["github_command_func"]
 
         # Handle search grounding override if specified
         original_search_grounding = ctx.request_context.lifespan_context.get(
@@ -2212,7 +2254,7 @@ async def judge_workplan(
         head_commit_hash = await run_git_command(repo_path, ["rev-parse", head_ref])
 
         # Fetch the workplan and generate diff for review
-        workplan = await get_github_issue_body(repo_path, issue_number)
+        workplan = await get_github_issue_body(repo_path, issue_number, github_command_func)
         diff = await get_git_diff(repo_path, base_ref, head_ref, codebase_reasoning)
 
         # Check if diff is empty or only contains the header for file_structure mode
@@ -2263,6 +2305,7 @@ This judgement will be updated here once complete.
             placeholder_title,
             placeholder_body,
             ["yellhorn-judgement-subissue"],
+            github_command_func,
         )
 
         # Extract subissue number from URL
@@ -2287,7 +2330,7 @@ This judgement will be updated here once complete.
 
         # Format and post the submission comment to the sub-issue
         submission_comment = format_submission_comment(submission_metadata)
-        await add_github_issue_comment(repo_path, subissue_number, submission_comment)
+        await add_github_issue_comment(repo_path, subissue_number, submission_comment, github_command_func)
 
         await ctx.log(
             level="info",
@@ -2306,8 +2349,6 @@ This judgement will be updated here once complete.
         asyncio.create_task(
             process_judgement_async(
                 repo_path,
-                gemini_client,
-                openai_client,
                 ctx.request_context.lifespan_context.get("llm_manager"),
                 model,
                 workplan,

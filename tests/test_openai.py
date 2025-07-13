@@ -23,7 +23,9 @@ def mock_request_context():
         "gemini_client": None,
         "openai_client": MagicMock(),
         "model": "gpt-4o",
+        "github_command_func": AsyncMock(),
     }
+    mock_ctx.log = AsyncMock()
     return mock_ctx
 
 
@@ -148,8 +150,6 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
         
         await process_workplan_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            mock_openai_client,
             mock_llm_manager,  # Mock LLM manager
             "gpt-4o",
             "Feature Implementation Plan",
@@ -191,6 +191,7 @@ async def test_openai_client_required():
         "gemini_client": None,
         "openai_client": None,  # No OpenAI client
         "model": "gpt-4o",  # An OpenAI model
+        "github_command_func": AsyncMock(),
     }
     mock_ctx.log = AsyncMock()
 
@@ -206,8 +207,6 @@ async def test_openai_client_required():
         # Test workplan generation should handle OpenAI client error gracefully
         await process_workplan_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            None,  # No OpenAI client
             None,  # No LLM manager
             "gpt-4o",  # OpenAI model name
             "Feature Implementation Plan",
@@ -262,8 +261,6 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         # Test without issue number (direct output)
         await process_judgement_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            mock_openai_client,
             mock_llm_manager,  # Mock LLM manager
             "gpt-4o",
             workplan,
@@ -325,8 +322,6 @@ async def test_process_workplan_async_deep_research_model(mock_request_context, 
         
         await process_workplan_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            mock_openai_client,
             mock_llm_manager,  # Mock LLM manager
             "o3-deep-research",
             "Deep Research Feature Plan",
@@ -384,8 +379,6 @@ async def test_process_judgement_async_deep_research_model(
         
         await process_judgement_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            mock_openai_client,
             mock_llm_manager,  # Mock LLM manager
             "o4-mini-deep-research",
             workplan,
@@ -443,8 +436,6 @@ async def test_process_workplan_async_list_output(mock_request_context):
         
         await process_workplan_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            client,
             mock_llm_manager,  # Mock LLM manager
             "o3-deep-research",
             "Feature with List Output",
@@ -498,8 +489,6 @@ async def test_process_judgement_async_list_output(mock_request_context):
         
         await process_judgement_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            client,
             mock_llm_manager,  # Mock LLM manager
             "o4-mini-deep-research",
             workplan,

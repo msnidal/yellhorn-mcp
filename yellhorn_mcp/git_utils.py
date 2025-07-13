@@ -8,6 +8,7 @@ and GitHub, used by the Yellhorn MCP server.
 import asyncio
 import json
 from pathlib import Path
+from typing import Callable, Awaitable
 
 from mcp import Resource
 from mcp.server.fastmcp import Context
@@ -67,13 +68,19 @@ async def run_github_command(repo_path: Path, command: list[str]) -> str:
     Raises:
         YellhornMCPError: If the command fails.
     """
+    import os
+    
     try:
+        # Inherit the current environment to ensure GitHub CLI authentication works
+        env = os.environ.copy()
+        
         proc = await asyncio.create_subprocess_exec(
             "gh",
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=repo_path,
+            env=env,  # Pass the environment variables
         )
         stdout, stderr = await proc.communicate()
 
@@ -86,7 +93,7 @@ async def run_github_command(repo_path: Path, command: list[str]) -> str:
         raise YellhornMCPError("GitHub CLI not found. Please ensure GitHub CLI is installed.")
 
 
-async def ensure_label_exists(repo_path: Path, label: str, description: str = "") -> None:
+async def ensure_label_exists(repo_path: Path, label: str, description: str = "", github_command_func=None) -> None:
     """
     Ensure that a label exists in the GitHub repository.
 
@@ -94,13 +101,17 @@ async def ensure_label_exists(repo_path: Path, label: str, description: str = ""
         repo_path: Path to the repository.
         label: The label name.
         description: Optional description for the label.
+        github_command_func: Function to use for GitHub CLI commands (defaults to run_github_command).
 
     Raises:
         YellhornMCPError: If the command fails.
     """
+    if github_command_func is None:
+        github_command_func = run_github_command
+        
     try:
         # Check if label exists
-        result = await run_github_command(
+        result = await github_command_func(
             repo_path, ["label", "list", "--json", "name", f"--search={label}"]
         )
         labels = json.loads(result)
@@ -108,7 +119,7 @@ async def ensure_label_exists(repo_path: Path, label: str, description: str = ""
         # If label doesn't exist, create it
         if not labels:
             color = "5fa46c"  # A nice green color
-            await run_github_command(
+            await github_command_func(
                 repo_path,
                 [
                     "label",
@@ -124,7 +135,7 @@ async def ensure_label_exists(repo_path: Path, label: str, description: str = ""
         print(f"Warning: Unable to create label '{label}': {str(e)}")
 
 
-async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str) -> None:
+async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str, github_command_func=None) -> None:
     """
     Add a comment to a GitHub issue.
 
@@ -132,14 +143,23 @@ async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str
         repo_path: Path to the repository.
         issue_number: The issue number.
         body: The comment body.
+        github_command_func: Function to use for GitHub CLI commands (defaults to run_github_command).
 
     Raises:
         YellhornMCPError: If the command fails.
     """
-    await run_github_command(repo_path, ["issue", "comment", issue_number, "--body", body])
+    if github_command_func is None:
+        github_command_func = run_github_command
+        
+    await github_command_func(repo_path, ["issue", "comment", issue_number, "--body", body])
 
 
-async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> None:
+async def update_github_issue(
+    repo_path: Path, 
+    issue_number: str, 
+    body: str,
+    github_command_func: Callable[[Path, list[str]], Awaitable[str]] = run_github_command,
+) -> None:
     """
     Update a GitHub issue body.
 
@@ -147,6 +167,7 @@ async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> 
         repo_path: Path to the repository.
         issue_number: The issue number.
         body: The new issue body.
+        github_command_func: Function to run GitHub CLI commands (default: run_github_command).
 
     Raises:
         YellhornMCPError: If the command fails.
@@ -161,7 +182,7 @@ async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> 
             tmp_path = tmp.name
 
         try:
-            await run_github_command(
+            await github_command_func(
                 repo_path, ["issue", "edit", issue_number, "--body-file", tmp_path]
             )
         finally:
@@ -173,13 +194,18 @@ async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> 
         raise YellhornMCPError(f"Failed to update GitHub issue: {str(e)}")
 
 
-async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
+async def get_github_issue_body(
+    repo_path: Path, 
+    issue_identifier: str,
+    github_command_func: Callable[[Path, list[str]], Awaitable[str]] = run_github_command,
+) -> str:
     """
     Get the body of a GitHub issue.
 
     Args:
         repo_path: Path to the repository.
         issue_identifier: The issue number or URL.
+        github_command_func: Function to run GitHub CLI commands (default: run_github_command).
 
     Returns:
         The issue body as a string.
@@ -199,7 +225,7 @@ async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
             raise YellhornMCPError(f"Invalid GitHub issue URL: {issue_identifier}")
 
     # Get issue body
-    result = await run_github_command(
+    result = await github_command_func(
         repo_path, ["issue", "view", issue_identifier, "--json", "body"]
     )
     try:
@@ -240,13 +266,18 @@ async def get_git_diff(repo_path: Path, base_ref: str = "main", head_ref: str = 
         raise YellhornMCPError(f"Failed to get git diff: {str(e)}")
 
 
-async def get_github_pr_diff(repo_path: Path, pr_url: str) -> str:
+async def get_github_pr_diff(
+    repo_path: Path, 
+    pr_url: str,
+    github_command_func: Callable[[Path, list[str]], Awaitable[str]] = run_github_command,
+) -> str:
     """
     Get the diff for a GitHub pull request.
 
     Args:
         repo_path: Path to the repository.
         pr_url: The pull request URL.
+        github_command_func: Function to run GitHub CLI commands (default: run_github_command).
 
     Returns:
         The diff as a string.
@@ -263,7 +294,7 @@ async def get_github_pr_diff(repo_path: Path, pr_url: str) -> str:
             raise YellhornMCPError(f"Invalid GitHub PR URL: {pr_url}")
 
         pr_number = pr_match.group(1)
-        return await run_github_command(repo_path, ["pr", "diff", pr_number])
+        return await github_command_func(repo_path, ["pr", "diff", pr_number])
     except Exception as e:
         raise YellhornMCPError(f"Failed to fetch GitHub PR diff: {str(e)}")
 
@@ -274,6 +305,7 @@ async def create_github_subissue(
     title: str,
     body: str,
     labels: list[str] | str = "yellhorn-mcp",
+    github_command_func: Callable[[Path, list[str]], Awaitable[str]] = run_github_command,
 ) -> str:
     """
     Create a GitHub sub-issue linked to a parent issue.
@@ -284,6 +316,7 @@ async def create_github_subissue(
         title: The title for the new issue.
         body: The body for the new issue.
         labels: Optional labels for the new issue (default: "yellhorn-mcp").
+        github_command_func: Function to run GitHub CLI commands (default: run_github_command).
 
     Returns:
         The URL of the created issue.
@@ -300,7 +333,7 @@ async def create_github_subissue(
 
         # Ensure all labels exist
         for label in labels_list:
-            await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP")
+            await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP", github_command_func)
 
         # Create temporary file for issue body
         import tempfile
@@ -325,7 +358,7 @@ async def create_github_subissue(
                 command.extend(["--label", label])
 
             # Create the issue
-            result = await run_github_command(repo_path, command)
+            result = await github_command_func(repo_path, command)
 
             # Extract issue URL from result
             import re
@@ -338,7 +371,7 @@ async def create_github_subissue(
 
             # Link the issue to the parent
             await add_github_issue_comment(
-                repo_path, parent_issue, f"Sub-issue created: {issue_url}"
+                repo_path, parent_issue, f"Sub-issue created: {issue_url}", github_command_func
             )
 
             return issue_url
@@ -351,7 +384,12 @@ async def create_github_subissue(
         raise YellhornMCPError(f"Failed to create GitHub sub-issue: {str(e)}")
 
 
-async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: str) -> str:
+async def post_github_pr_review(
+    repo_path: Path, 
+    pr_url: str, 
+    review_content: str,
+    github_command_func: Callable[[Path, list[str]], Awaitable[str]] = run_github_command,
+) -> str:
     """
     Post a review comment on a GitHub pull request.
 
@@ -359,6 +397,7 @@ async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: st
         repo_path: Path to the repository.
         pr_url: The pull request URL.
         review_content: The review content.
+        github_command_func: Function to run GitHub CLI commands (default: run_github_command).
 
     Returns:
         The URL of the review.
@@ -385,7 +424,7 @@ async def post_github_pr_review(repo_path: Path, pr_url: str, review_content: st
 
         try:
             # Post the review
-            result = await run_github_command(
+            result = await github_command_func(
                 repo_path,
                 [
                     "pr",
@@ -477,13 +516,18 @@ def is_git_repository(path: Path) -> bool:
     return False
 
 
-async def list_resources(ctx: Context, resource_type: str | None = None) -> list[Resource]:
+async def list_resources(
+    ctx: Context, 
+    resource_type: str | None = None,
+    github_command_func: Callable[[Path, list[str]], Awaitable[str]] = run_github_command,
+) -> list[Resource]:
     """
     List resources (GitHub issues created by this tool).
 
     Args:
         ctx: Server context.
         resource_type: Optional resource type to filter by.
+        github_command_func: Function to run GitHub CLI commands (default: run_github_command).
 
     Returns:
         List of resources (GitHub issues with yellhorn-mcp or yellhorn-review-subissue label).
@@ -495,7 +539,7 @@ async def list_resources(ctx: Context, resource_type: str | None = None) -> list
         # Handle workplan resources
         if resource_type is None or resource_type == "yellhorn_workplan":
             # Get all issues with the yellhorn-mcp label
-            json_output = await run_github_command(
+            json_output = await github_command_func(
                 repo_path,
                 ["issue", "list", "--label", "yellhorn-mcp", "--json", "number,title,url"],
             )
@@ -517,7 +561,7 @@ async def list_resources(ctx: Context, resource_type: str | None = None) -> list
         # Handle judgement sub-issue resources
         if resource_type is None or resource_type == "yellhorn_judgement_subissue":
             # Get all issues with the yellhorn-judgement-subissue label
-            json_output = await run_github_command(
+            json_output = await github_command_func(
                 repo_path,
                 [
                     "issue",

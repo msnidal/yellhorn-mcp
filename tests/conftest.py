@@ -20,6 +20,7 @@ def mock_request_context():
         "gemini_client": MagicMock(spec=genai.Client),
         "openai_client": None,
         "model": "gemini-2.5-pro",
+        "github_command_func": AsyncMock(),
     }
     return mock_ctx
 

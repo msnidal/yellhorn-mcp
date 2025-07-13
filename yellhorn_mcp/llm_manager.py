@@ -399,6 +399,12 @@ class LLMManager:
         """Check if model is a Gemini model."""
         return model.startswith("gemini-")
     
+    def _is_deep_research_model(self, model: str) -> bool:
+        """Check if model is a deep research model that supports web search and code interpreter tools."""
+        # Deep research models typically include o3, o4, and other reasoning models
+        deep_research_prefixes = ["o3", "o4-"]
+        return any(model.startswith(prefix) for prefix in deep_research_prefixes)
+    
     async def call_llm(
         self,
         prompt: str,
@@ -483,27 +489,43 @@ class LLMManager:
         """
         if not self.openai_client:
             raise ValueError("OpenAI client not initialized")
-        
-        messages = []
-        if system_message:
-            messages.append({"role": "system", "content": system_message})
-        messages.append({"role": "user", "content": prompt})
-        
+    
+        # Build params for Responses API
         params = {
             "model": model,
-            "messages": messages,
+            "input": prompt,  # User prompt goes to input
             "temperature": 1.0 if model.startswith("o") else temperature,
+            # store: false can be set to not persist the conversation state
             **kwargs
         }
+        
+        # System message goes to instructions
+        if system_message:
+            params["instructions"] = system_message
+        
+        # Enable Deep Research tools for supported models
+        if self._is_deep_research_model(model):
+            logger.info(f"Enabling Deep Research tools for model {model}")
+            params["tools"] = [
+                {"type": "web_search_preview"},
+                {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}},
+            ]
         
         if response_format == "json":
             params["response_format"] = {"type": "json_object"}
         
         try:
-            response = await self.openai_client.chat.completions.create(**params)
-            content = response.choices[0].message.content
+            # Use the new Responses API endpoint
+            response = await self.openai_client.responses.create(**params)
+            
+            # Extract content from new response structure
+            # Handle case where output might be a list (Deep Research models sometimes return multiple outputs)
+            if hasattr(response, 'output_text'):
+                content = response.output_text
+            else:
+                content = response.output[0].content[0].text
 
-            # Store usage metadata
+            # Store usage metadata (same structure as before)
             if hasattr(response, 'usage'):
                 self._last_usage_metadata = UsageMetadata(response.usage)
 
@@ -562,8 +584,8 @@ class LLMManager:
             # Fallback to dict config
             config_class = dict
         
-        # Extract generation_config if provided (for search grounding)
-        generation_config = kwargs.pop("generation_config", None)
+        # Extract generation_config from kwargs if present (for search grounding)
+        generation_config = kwargs.pop('generation_config', None)
         
         # Build config
         config_dict = {
@@ -571,8 +593,19 @@ class LLMManager:
             "response_mime_type": "application/json" if response_format == "json" else "text/plain",
         }
         
-        # Add any additional kwargs (excluding generation_config)
+        # Add any additional kwargs (excluding generation_config which we already extracted)
         config_dict.update(kwargs)
+        
+        # If we have generation_config (search grounding), merge it with our config
+        if generation_config and config_class == GenerateContentConfig:
+            # Extract tools from generation_config if it has them
+            if hasattr(generation_config, 'tools') and generation_config.tools:
+                config_dict["tools"] = generation_config.tools
+            # Extract any other attributes from generation_config
+            for attr in ['response_schema', 'response_mime_type', 'candidate_count', 'stop_sequences', 'max_output_tokens', 'temperature', 'top_p', 'top_k']:
+                if hasattr(generation_config, attr):
+                    value = getattr(generation_config, attr)
+                    config_dict[attr] = value
         
         # Create config instance
         if config_class == GenerateContentConfig:
@@ -588,10 +621,6 @@ class LLMManager:
                 "config": config
             }
             
-            # Add generation_config if provided (for search grounding)
-            if generation_config:
-                api_params["config"] = generation_config
-            
             # Make the API call
             response = await self.gemini_client.aio.models.generate_content(**api_params)
             
@@ -605,6 +634,8 @@ class LLMManager:
             if hasattr(response, 'usage_metadata'):
                 usage = response.usage_metadata
                 self._last_usage_metadata = UsageMetadata(usage)
+            
+            self._last_gemini_response = response
             
             # Parse JSON if requested
             if response_format == "json":
@@ -620,11 +651,6 @@ class LLMManager:
                         return {"error": "No valid JSON found in response", "content": content}
                 else:
                     return {"error": "No JSON content found in response"}
-            
-            # Store the response object for potential citation processing
-            if hasattr(response, 'grounding_metadata'):
-                # Store metadata in a thread-local or instance variable for retrieval
-                self._last_gemini_response = response
             
             return content
             
@@ -792,8 +818,16 @@ class LLMManager:
         # Check if we have grounding metadata from Gemini
         if self._is_gemini_model(model) and hasattr(self, '_last_gemini_response'):
             response = getattr(self, '_last_gemini_response', None)
-            if response and hasattr(response, 'grounding_metadata'):
-                result["grounding_metadata"] = response.grounding_metadata
+            if response:
+                # Check for grounding metadata in response directly
+                if hasattr(response, 'grounding_metadata') and response.grounding_metadata:
+                    result["grounding_metadata"] = response.grounding_metadata
+                # Check for grounding metadata in candidates[0] (most common location)
+                elif (hasattr(response, 'candidates') and response.candidates and 
+                      len(response.candidates) > 0 and 
+                      hasattr(response.candidates[0], 'grounding_metadata') and 
+                      response.candidates[0].grounding_metadata):
+                    result["grounding_metadata"] = response.candidates[0].grounding_metadata
                 
         return result
     

@@ -4,6 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock as UnitTestAsyncMock
 
 import pytest
 
@@ -29,17 +30,18 @@ async def test_yellhornignore_file_reading():
         )
 
         # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.return_value = "\n".join(
-                [
-                    "file1.py",
-                    "file2.js",
-                    "file3.log",
-                    "node_modules/package.json",
-                    "dist/bundle.js",
-                    "src/components/Button.js",
-                ]
-            )
+        mock_git = UnitTestAsyncMock(return_value="\n".join(
+            [
+                "file1.py",
+                "file2.js",
+                "file3.log",
+                "node_modules/package.json",
+                "dist/bundle.js",
+                "src/components/Button.js",
+            ]
+        ))
+        
+        with patch("yellhorn_mcp.server.run_git_command", mock_git):
 
             # Create a test file that can be read
             (tmp_path / "file1.py").write_text("# Test file 1")
@@ -83,8 +85,9 @@ async def test_yellhornignore_file_error_handling():
         yellhornignore_path.write_text("*.log\nnode_modules/")
 
         # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.return_value = "file1.py\nfile2.js\nfile3.log"
+        mock_git = UnitTestAsyncMock(return_value="file1.py\nfile2.js\nfile3.log")
+        
+        with patch("yellhorn_mcp.server.run_git_command", mock_git):
 
             # Mock open to raise an exception when reading .yellhornignore
             with patch("builtins.open") as mock_open:
@@ -124,7 +127,8 @@ async def test_get_codebase_snapshot_directory_handling():
         os.makedirs(tmp_path / "src")
 
         # Mock run_git_command to return file paths including a directory
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+        mock_git = UnitTestAsyncMock()
+        with patch("yellhorn_mcp.server.run_git_command", mock_git):
             mock_git.return_value = "file1.py\nsrc"
 
             # Create test file
@@ -172,7 +176,8 @@ async def test_get_codebase_snapshot_binary_file_handling():
             f.write(b"\x89PNG\r\n\x1a\n")  # PNG file header
 
         # Mock run_git_command to return our test files
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
+        mock_git = UnitTestAsyncMock()
+        with patch("yellhorn_mcp.server.run_git_command", mock_git):
             mock_git.return_value = "file1.py\nfile2.jpg"
 
             # Make sure Path.is_dir returns False for our paths
@@ -223,20 +228,20 @@ async def test_yellhornignore_whitelist_functionality():
         )
 
         # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.server.run_git_command") as mock_git:
-            mock_git.return_value = "\n".join(
-                [
-                    "file1.py",
-                    "file2.js",
-                    "regular.log",
-                    "important.log",
-                    "node_modules/package.json",
-                    "node_modules/important-package.json",
-                    "dist/bundle.js",
-                    "src/components/Button.js",
-                ]
-            )
-
+        mock_git = UnitTestAsyncMock(return_value="\n".join(
+            [
+                "file1.py",
+                "file2.js",
+                "regular.log",
+                "important.log",
+                "node_modules/package.json",
+                "node_modules/important-package.json",
+                "dist/bundle.js",
+                "src/components/Button.js",
+            ]
+        ))
+        
+        with patch("yellhorn_mcp.server.run_git_command", mock_git):
             # Create files for testing
             (tmp_path / "file1.py").write_text("# Test file 1")
             (tmp_path / "file2.js").write_text("// Test file 2")
@@ -279,16 +284,7 @@ async def test_yellhornignore_whitelist_functionality():
             assert "dist/bundle.js" not in file_contents
 
 
-# Helper class for creating async mocks
-class AsyncMock(MagicMock):
-    """MagicMock subclass that supports async with syntax and awaitable returns."""
-
-    async def __call__(self, *args, **kwargs):
-        return super().__call__(*args, **kwargs)
-
-    def __await__(self):
-        yield from []
-        return self().__await__()
+# AsyncMock is now imported from unittest.mock
 
 
 @pytest.mark.asyncio
@@ -299,7 +295,7 @@ async def test_curate_context():
 
     # Create a mock context with async log method
     mock_ctx = MagicMock()
-    mock_ctx.log = AsyncMock()
+    mock_ctx.log = UnitTestAsyncMock()
     # Create mock clients
     gemini_client_mock = MagicMock()
     openai_client_mock = MagicMock()
@@ -311,6 +307,7 @@ async def test_curate_context():
         "model": "gemini-2.5-pro-preview-05-06",
         "gemini_client": gemini_client_mock,
         "llm_manager": llm_manager,
+        "github_command_func": UnitTestAsyncMock(),
     }
 
     # Sample user task
@@ -358,10 +355,10 @@ tests
 tests/test_data
 ```"""
                 # Set up both API patterns for backward compatibility
-                gemini_client_mock.aio.models.generate_content = AsyncMock(
+                gemini_client_mock.aio.models.generate_content = UnitTestAsyncMock(
                     return_value=mock_response
                 )
-                gemini_client_mock.aio.generate_content = AsyncMock(return_value=mock_response)
+                gemini_client_mock.aio.generate_content = UnitTestAsyncMock(return_value=mock_response)
 
                 # Call curate_context
                 result = await curate_context(mock_ctx, user_task)
@@ -447,7 +444,7 @@ tests
 tests/test_data
 docs
 ```"""
-                gemini_client_mock.aio.models.generate_content = AsyncMock(
+                gemini_client_mock.aio.models.generate_content = UnitTestAsyncMock(
                     return_value=mock_response
                 )
 
@@ -495,7 +492,7 @@ docs
                 mock_response.text = """```context
 first_level
 ```"""
-                gemini_client_mock.aio.models.generate_content = AsyncMock(
+                gemini_client_mock.aio.models.generate_content = UnitTestAsyncMock(
                     return_value=mock_response
                 )
 
@@ -525,7 +522,7 @@ first_level
                 gemini_client_mock = mock_ctx.request_context.lifespan_context["gemini_client"]
                 gemini_client_mock.aio = MagicMock()
                 gemini_client_mock.aio.models = MagicMock()
-                gemini_client_mock.aio.models.generate_content = AsyncMock(
+                gemini_client_mock.aio.models.generate_content = UnitTestAsyncMock(
                     side_effect=Exception("API Error")
                 )
 
@@ -548,6 +545,7 @@ first_level
         "model": "gpt-4o",  # Use an OpenAI model
         "openai_client": openai_client_mock,
         "llm_manager": llm_manager,
+        "github_command_func": UnitTestAsyncMock(),
     }
 
     with patch("yellhorn_mcp.server.get_codebase_snapshot") as mock_snapshot:
@@ -574,7 +572,7 @@ src
 ```"""
 
                 # Mock the create function
-                openai_client_mock.chat.completions.create = AsyncMock(return_value=mock_response)
+                openai_client_mock.chat.completions.create = UnitTestAsyncMock(return_value=mock_response)
 
                 # Call curate_context with OpenAI model
                 result = await curate_context(mock_ctx, user_task)

@@ -18,7 +18,7 @@ async def test_list_resources_exception_handling():
     # Setup mock context
     mock_ctx = DummyContext()
     mock_ctx.request_context = MagicMock()
-    mock_ctx.request_context.lifespan_context = {"repo_path": Path("/mock/repo")}
+    mock_ctx.request_context.lifespan_context = {"repo_path": Path("/mock/repo"), "github_command_func": AsyncMock()}
     mock_ctx.log = AsyncMock()
 
     # Test with exception during GitHub command
@@ -40,7 +40,7 @@ async def test_list_resources_malformed_json():
     # Setup mock context
     mock_ctx = DummyContext()
     mock_ctx.request_context = MagicMock()
-    mock_ctx.request_context.lifespan_context = {"repo_path": Path("/mock/repo")}
+    mock_ctx.request_context.lifespan_context = {"repo_path": Path("/mock/repo"), "github_command_func": AsyncMock()}
     mock_ctx.log = AsyncMock()
 
     # Test with malformed JSON response
@@ -63,7 +63,7 @@ async def test_read_resource_failure():
     # Setup mock context
     mock_ctx = DummyContext()
     mock_ctx.request_context = MagicMock()
-    mock_ctx.request_context.lifespan_context = {"repo_path": Path("/mock/repo")}
+    mock_ctx.request_context.lifespan_context = {"repo_path": Path("/mock/repo"), "github_command_func": AsyncMock()}
 
     # Test with get_github_issue_body failure
     with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
@@ -80,7 +80,7 @@ async def test_read_resource_nonexistent():
     # Setup mock context
     mock_ctx = DummyContext()
     mock_ctx.request_context = MagicMock()
-    mock_ctx.request_context.lifespan_context = {"repo_path": Path("/mock/repo")}
+    mock_ctx.request_context.lifespan_context = {"repo_path": Path("/mock/repo"), "github_command_func": AsyncMock()}
 
     # Test with nonexistent issue
     with patch("yellhorn_mcp.git_utils.get_github_issue_body") as mock_get_issue:
