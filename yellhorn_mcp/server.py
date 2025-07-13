@@ -108,13 +108,12 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         raise ValueError(f"Path {repo_path} is not a Git repository")
 
     try:
-        await server.set_logging_level("info")
-        await server.log(level="info", message=f"Initialized with model: {model}")
-        await server.log(level="info", message=f"Repository path: {repo_path}")
-        await server.log(
-            level="info",
-            message=f"Search grounding: {'enabled' if use_search_grounding else 'disabled'}",
-        )
+        # Logging happens outside lifespan context via print statements since
+        # the server context is not available here
+        print(f"Starting Yellhorn MCP server at http://127.0.0.1:8000")
+        print(f"Repository path: {repo_path}")
+        print(f"Using model: {model}")
+        print(f"Google Search Grounding: {'enabled' if use_search_grounding else 'disabled'}")
 
         yield {
             "repo_path": repo_path,
