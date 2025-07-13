@@ -41,11 +41,7 @@ from yellhorn_mcp.git_utils import (
     read_resource,
     run_git_command,
 )
-from yellhorn_mcp.github_integration import (
-    add_issue_comment,
-    create_github_issue,
-    get_issue_body,
-)
+from yellhorn_mcp.github_integration import add_issue_comment, create_github_issue, get_issue_body
 from yellhorn_mcp.judgement_processor import get_git_diff, process_judgement_async
 from yellhorn_mcp.metadata_models import SubmissionMetadata
 from yellhorn_mcp.openai_integration import generate_curate_context_with_openai
@@ -360,6 +356,7 @@ async def curate_context(
     Raises:
         YellhornMCPError: If context curation fails.
     """
+    original_search_grounding = True
     try:
         # Get repository path from context
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
@@ -699,6 +696,7 @@ async def judge_workplan(
     Raises:
         YellhornMCPError: If judgement creation fails.
     """
+    original_search_grounding = True
     try:
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
         model = ctx.request_context.lifespan_context["model"]
@@ -866,10 +864,7 @@ async def judge_workplan(
 from yellhorn_mcp.comment_utils import format_completion_comment, format_submission_comment
 
 # Re-export for backward compatibility with tests
-from yellhorn_mcp.cost_tracker import (
-    calculate_cost,
-    format_metrics_section,
-)
+from yellhorn_mcp.cost_tracker import calculate_cost, format_metrics_section
 from yellhorn_mcp.gemini_integration import async_generate_content_with_config
 from yellhorn_mcp.git_utils import (
     add_github_issue_comment as add_github_issue_comment_from_git_utils,
