@@ -56,17 +56,27 @@ async def create_github_issue(
     for label in labels_list:
         command.extend(["--label", label])
 
-    # Create the issue and capture JSON output
-    command.extend(["--json", "number,url"])
+    # Create the issue - gh issue create outputs the URL directly
     result = await run_github_command(repo_path, command)
 
+    # Parse the URL to extract issue number
+    # Expected format: https://github.com/owner/repo/issues/123
+    url = result.strip()
+    if not url.startswith("https://github.com/"):
+        raise YellhornMCPError(f"Unexpected issue URL format: {url}")
+
     try:
-        issue_data = json.loads(result)
-        return {
-            "number": str(issue_data["number"]),
-            "url": issue_data["url"],
-        }
-    except (json.JSONDecodeError, KeyError) as e:
+        # Extract issue number from URL
+        parts = url.split("/")
+        if len(parts) >= 7 and parts[-2] == "issues":
+            issue_number = parts[-1]
+            return {
+                "number": issue_number,
+                "url": url,
+            }
+        else:
+            raise YellhornMCPError(f"Could not parse issue number from URL: {url}")
+    except Exception as e:
         raise YellhornMCPError(f"Failed to parse issue creation result: {str(e)}")
 
 
