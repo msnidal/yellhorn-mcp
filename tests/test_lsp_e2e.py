@@ -13,13 +13,13 @@ from unittest.mock import mock_open, patch
 
 import pytest
 
-from yellhorn_mcp.lsp_utils import (
+from yellhorn_mcp.server import format_codebase_for_prompt
+from yellhorn_mcp.utils.lsp_utils import (
     extract_go_api,
     extract_python_api,
     get_lsp_snapshot,
     update_snapshot_with_full_diff_files,
 )
-from yellhorn_mcp.server import format_codebase_for_prompt
 
 # Rich sample sources for testing
 SAMPLE_PY_SOURCE = """
@@ -148,11 +148,11 @@ async def test_e2e_python_snapshot(tmp_git_repo):
     file.write_text(SAMPLE_PY_SOURCE)
 
     # Mock the run_git_command to return our file path
-    with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
         mock_git.return_value = "pkg/rich_sample.py"
 
         # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.git_utils.is_git_repository", return_value=True):
+        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
             file_paths, file_contents = await get_lsp_snapshot(repo)
 
     # Assert paths were captured correctly
@@ -180,11 +180,11 @@ async def test_e2e_go_snapshot(tmp_git_repo):
     file.write_text(SAMPLE_GO_SOURCE)
 
     # Mock the run_git_command to return our file path
-    with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
         mock_git.return_value = "pkg/rich_sample.go"
 
         # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.git_utils.is_git_repository", return_value=True):
+        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
             file_paths, file_contents = await get_lsp_snapshot(repo)
 
     # Assert paths were captured correctly
@@ -218,11 +218,11 @@ async def test_e2e_syntax_error_fallback(tmp_git_repo):
     )
 
     # Mock the git operations
-    with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
         mock_git.return_value = "pkg/broken.py"
 
         # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.git_utils.is_git_repository", return_value=True):
+        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
             # Extract LSP snapshot
             file_paths, file_contents = await get_lsp_snapshot(repo)
 
@@ -253,11 +253,11 @@ async def test_e2e_unreadable_file(tmp_git_repo):
         f.write(b"\x00\x01\x02\x03")
 
     # Mock the git operations
-    with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
         mock_git.return_value = "pkg/readable.py\npkg/binary.bin"
 
         # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.git_utils.is_git_repository", return_value=True):
+        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
             # Extract LSP snapshot
             file_paths, file_contents = await get_lsp_snapshot(repo)
 
@@ -279,11 +279,11 @@ async def test_e2e_prompt_formatting(tmp_git_repo):
     file.write_text("def hello(): pass")
 
     # Mock the git operations
-    with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
         mock_git.return_value = "pkg/sample.py"
 
         # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.git_utils.is_git_repository", return_value=True):
+        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
             # Get LSP snapshot
             file_paths, file_contents = await get_lsp_snapshot(repo)
 
@@ -310,17 +310,17 @@ async def test_e2e_update_snapshot_with_diff(tmp_git_repo):
     file.write_text("def initial(): pass")
 
     # Mock the git operations for initial snapshot
-    with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git_1:
+    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git_1:
         # get_codebase_snapshot calls run_git_command twice: for tracked and untracked files
         mock_git_1.side_effect = ["pkg/sample.py", ""]  # tracked files, untracked files
 
         # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.git_utils.is_git_repository", return_value=True):
+        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
             # Get initial snapshot
             file_paths, file_contents = await get_lsp_snapshot(repo)
 
     # Patch git diff to simulate a file change
-    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git_2:
+    with patch("yellhorn_mcp.utils.git_utils.run_git_command") as mock_git_2:
         # First call is for the diff, second might be for other git operations
         mock_git_2.side_effect = [
             "+++ b/pkg/sample.py\n@@ -1 +1,2 @@\n def initial(): pass\n+def added(): pass",

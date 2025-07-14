@@ -11,8 +11,8 @@ from typing import Any
 from openai import AsyncOpenAI
 from openai.types.responses import Response
 
-from yellhorn_mcp.git_utils import YellhornMCPError
-from yellhorn_mcp.metadata_models import CompletionMetadata
+from yellhorn_mcp.models.metadata_models import CompletionMetadata
+from yellhorn_mcp.utils.git_utils import YellhornMCPError
 
 
 def is_deep_research_model(model_name: str) -> bool:

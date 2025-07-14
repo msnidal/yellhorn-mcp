@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from yellhorn_mcp.lsp_utils import (
+from yellhorn_mcp.utils.lsp_utils import (
     _sig_from_ast,
     extract_python_api,
     get_lsp_diff,
@@ -154,7 +154,7 @@ def broken_function(
 
         with patch("pathlib.Path.is_file", return_value=True):
             # We need to patch the import itself to handle the SyntaxError fallback
-            with patch("yellhorn_mcp.lsp_utils.ast.parse") as mock_ast_parse:
+            with patch("yellhorn_mcp.utils.lsp_utils.ast.parse") as mock_ast_parse:
                 # Simulate that ast.parse raises a SyntaxError
                 mock_ast_parse.side_effect = SyntaxError("Mock syntax error")
 
@@ -181,10 +181,10 @@ def broken_function(
 @pytest.mark.asyncio
 async def test_get_lsp_snapshot():
     """Test getting an LSP-style snapshot of the codebase."""
-    with patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot") as mock_snapshot:
         mock_snapshot.return_value = (["file1.py", "file2.py", "file3.go", "other.txt"], {})
 
-        with patch("yellhorn_mcp.lsp_utils.extract_python_api") as mock_extract_py:
+        with patch("yellhorn_mcp.utils.lsp_utils.extract_python_api") as mock_extract_py:
             # Mock Python signature extraction
             mock_extract_py.side_effect = [
                 [
@@ -197,7 +197,7 @@ async def test_get_lsp_snapshot():
                 ["def func2()"],  # signatures for file2.py
             ]
 
-            with patch("yellhorn_mcp.lsp_utils.extract_go_api") as mock_extract_go:
+            with patch("yellhorn_mcp.utils.lsp_utils.extract_go_api") as mock_extract_go:
                 # Mock Go signature extraction
                 mock_extract_go.return_value = [
                     "func Handler",
@@ -254,7 +254,7 @@ async def test_update_snapshot_with_full_diff_files():
     }
 
     # Test simplified version - just check that it doesn't crash
-    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.utils.git_utils.run_git_command") as mock_git:
         # Return a diff mentioning file1.py and file2.py
         mock_git.return_value = "--- a/file1.py\n+++ b/file1.py\n--- a/file2.py\n+++ b/file2.py"
 
@@ -306,7 +306,7 @@ async def test_update_snapshot_with_full_diff_files():
 @pytest.mark.asyncio
 async def test_integration_process_workplan_lsp_mode():
     """Test the integration of LSP mode with process_workplan_async."""
-    from yellhorn_mcp.workplan_processor import process_workplan_async
+    from yellhorn_mcp.processors.workplan_processor import process_workplan_async
 
     # Mock dependencies
     repo_path = Path("/mock/repo")
@@ -344,21 +344,21 @@ async def test_integration_process_workplan_lsp_mode():
 
     # Patch necessary functions
     with patch(
-        "yellhorn_mcp.lsp_utils.get_lsp_snapshot", new_callable=AsyncMock
+        "yellhorn_mcp.utils.lsp_utils.get_lsp_snapshot", new_callable=AsyncMock
     ) as mock_lsp_snapshot:
         mock_lsp_snapshot.return_value = (["file1.py"], {"file1.py": "```py\ndef function1()\n```"})
 
         with patch(
-            "yellhorn_mcp.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
         ) as mock_format:
             mock_format.return_value = "<formatted LSP snapshot>"
 
-            with patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_metrics:
+            with patch("yellhorn_mcp.utils.cost_tracker_utils.format_metrics_section") as mock_metrics:
                 mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
                 # Patch run_github_command which is what actually gets called
                 with patch(
-                    "yellhorn_mcp.git_utils.run_github_command", new_callable=AsyncMock
+                    "yellhorn_mcp.utils.git_utils.run_github_command", new_callable=AsyncMock
                 ) as mock_gh_command:
                     mock_gh_command.return_value = ""  # Empty response means success
 
@@ -409,7 +409,7 @@ async def test_integration_process_workplan_lsp_mode():
 @pytest.mark.asyncio
 async def test_integration_process_judgement_lsp_mode():
     """Test the integration of LSP mode with process_judgement_async."""
-    from yellhorn_mcp.judgement_processor import process_judgement_async
+    from yellhorn_mcp.processors.judgement_processor import process_judgement_async
 
     # Mock dependencies
     repo_path = Path("/mock/repo")
@@ -450,32 +450,32 @@ async def test_integration_process_judgement_lsp_mode():
 
     # Patch necessary functions
     with patch(
-        "yellhorn_mcp.lsp_utils.get_lsp_snapshot", new_callable=AsyncMock
+        "yellhorn_mcp.utils.lsp_utils.get_lsp_snapshot", new_callable=AsyncMock
     ) as mock_lsp_snapshot:
         mock_lsp_snapshot.return_value = (["file1.py"], {"file1.py": "```py\ndef function1()\n```"})
 
         with patch(
-            "yellhorn_mcp.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
         ) as mock_format:
             mock_format.return_value = "<formatted LSP+diff snapshot>"
 
-            with patch("yellhorn_mcp.cost_tracker.format_metrics_section") as mock_metrics:
+            with patch("yellhorn_mcp.utils.cost_tracker_utils.format_metrics_section") as mock_metrics:
                 mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
                 with patch(
-                    "yellhorn_mcp.github_integration.create_github_subissue", new_callable=AsyncMock
+                    "yellhorn_mcp.integrations.github_integration.create_github_subissue", new_callable=AsyncMock
                 ) as mock_create_subissue:
                     mock_create_subissue.return_value = "https://github.com/mock/repo/issues/456"
 
                     with patch(
-                        "yellhorn_mcp.git_utils.update_github_issue", new_callable=AsyncMock
+                        "yellhorn_mcp.utils.git_utils.update_github_issue", new_callable=AsyncMock
                     ) as mock_update_issue:
                         with patch(
-                            "yellhorn_mcp.github_integration.add_issue_comment",
+                            "yellhorn_mcp.integrations.github_integration.add_issue_comment",
                             new_callable=AsyncMock,
                         ) as mock_add_comment:
                             with patch(
-                                "yellhorn_mcp.judgement_processor.run_git_command",
+                                "yellhorn_mcp.processors.judgement_processor.run_git_command",
                                 new_callable=AsyncMock,
                             ) as mock_run_git:
                                 # Mock getting the remote URL
@@ -526,7 +526,7 @@ async def test_get_lsp_diff():
     changed_files = ["file1.py", "file2.py", "file3.go", "file4.md"]
 
     # Mock the necessary functions
-    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.utils.git_utils.run_git_command") as mock_git:
         # Set up the mock to return different file contents
         def mock_git_side_effect(*args, **kwargs):
             cmd = args[1]
@@ -570,8 +570,8 @@ async def test_get_lsp_diff():
 
         # Mock the extract_python_api and extract_go_api functions
         with (
-            patch("yellhorn_mcp.lsp_utils.extract_python_api") as mock_python_api,
-            patch("yellhorn_mcp.lsp_utils.extract_go_api") as mock_go_api,
+            patch("yellhorn_mcp.utils.lsp_utils.extract_python_api") as mock_python_api,
+            patch("yellhorn_mcp.utils.lsp_utils.extract_go_api") as mock_go_api,
         ):
             # Setup API extraction mocks
             # Base ref
@@ -659,7 +659,7 @@ async def test_get_lsp_diff_no_api_changes():
     changed_files = ["implementation.py"]
 
     # Mock the necessary functions
-    with patch("yellhorn_mcp.git_utils.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.utils.git_utils.run_git_command") as mock_git:
         # Set up the mock to return similar API but different implementation
         def mock_git_side_effect(*args, **kwargs):
             cmd = args[1]
@@ -682,7 +682,7 @@ async def test_get_lsp_diff_no_api_changes():
         mock_git.side_effect = mock_git_side_effect
 
         # Mock the extract_python_api function to return same signatures
-        with patch("yellhorn_mcp.lsp_utils.extract_python_api") as mock_python_api:
+        with patch("yellhorn_mcp.utils.lsp_utils.extract_python_api") as mock_python_api:
             # Same API signatures for both versions
             api_signatures = ["def func()", "class Demo", "def Demo.method(self)"]
             mock_python_api.return_value = api_signatures

@@ -2,6 +2,6 @@
 
 __version__ = "0.5.1"
 
-from .lsp_utils import *
-from .search_grounding import *
 from .server import *
+from .utils.lsp_utils import *
+from .utils.search_grounding_utils import *

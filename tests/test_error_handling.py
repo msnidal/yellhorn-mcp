@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tests.helpers import DummyContext
-from yellhorn_mcp.git_utils import YellhornMCPError, run_git_command, run_github_command
+from yellhorn_mcp.utils.git_utils import YellhornMCPError, run_git_command, run_github_command
 
 
 @pytest.mark.asyncio
@@ -32,10 +32,10 @@ async def test_run_github_command_file_not_found():
 @pytest.mark.asyncio
 async def test_update_github_issue_error():
     """Test update_github_issue with error during GitHub CLI execution."""
-    from yellhorn_mcp.git_utils import update_github_issue
+    from yellhorn_mcp.utils.git_utils import update_github_issue
 
     # Mock run_github_command to raise an error
-    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_run:
+    with patch("yellhorn_mcp.utils.git_utils.run_github_command") as mock_run:
         mock_run.side_effect = YellhornMCPError("GitHub CLI command failed: error")
 
         with pytest.raises(YellhornMCPError, match="Failed to update GitHub issue"):
@@ -46,28 +46,28 @@ async def test_update_github_issue_error():
 @pytest.mark.asyncio
 async def test_openai_gemini_errors():
     """Test error handling for OpenAI and Gemini API errors."""
-    from yellhorn_mcp.judgement_processor import process_judgement_async
-    from yellhorn_mcp.workplan_processor import process_workplan_async
+    from yellhorn_mcp.processors.judgement_processor import process_judgement_async
+    from yellhorn_mcp.processors.workplan_processor import process_workplan_async
 
     # Create mock context
     mock_ctx = DummyContext()
     mock_ctx.log = AsyncMock()
 
     # Test OpenAI API error in process_judgement_async
-    with patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot") as mock_snapshot:
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
 
         with patch(
-            "yellhorn_mcp.workplan_processor.format_codebase_for_prompt", return_value="formatted"
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", return_value="formatted"
         ):
             # Create a mock OpenAI client that raises an error
             mock_openai = MagicMock()
             mock_openai.responses.create = AsyncMock(side_effect=Exception("OpenAI API error"))
 
             # Mock add_issue_comment to check error handling
-            with patch("yellhorn_mcp.github_integration.add_issue_comment") as mock_comment:
+            with patch("yellhorn_mcp.integrations.github_integration.add_issue_comment") as mock_comment:
                 # Also need to mock generate_git_diff
-                with patch("yellhorn_mcp.judgement_processor.generate_git_diff") as mock_diff:
+                with patch("yellhorn_mcp.processors.judgement_processor.generate_git_diff") as mock_diff:
                     mock_diff.return_value = "mock diff"
 
                     await process_judgement_async(
@@ -97,9 +97,9 @@ async def test_openai_gemini_errors():
 @pytest.mark.asyncio
 async def test_get_github_pr_diff_error():
     """Test get_github_pr_diff with error."""
-    from yellhorn_mcp.git_utils import get_github_pr_diff
+    from yellhorn_mcp.utils.git_utils import get_github_pr_diff
 
-    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_gh:
+    with patch("yellhorn_mcp.utils.git_utils.run_github_command") as mock_gh:
         mock_gh.side_effect = YellhornMCPError("Failed to fetch PR diff")
 
         with pytest.raises(YellhornMCPError, match="Failed to fetch GitHub PR diff"):
@@ -109,10 +109,10 @@ async def test_get_github_pr_diff_error():
 @pytest.mark.asyncio
 async def test_post_github_pr_review_error():
     """Test post_github_pr_review with error."""
-    from yellhorn_mcp.git_utils import post_github_pr_review
+    from yellhorn_mcp.utils.git_utils import post_github_pr_review
 
     # Mock run_github_command to raise an error
-    with patch("yellhorn_mcp.git_utils.run_github_command") as mock_run:
+    with patch("yellhorn_mcp.utils.git_utils.run_github_command") as mock_run:
         mock_run.side_effect = YellhornMCPError("GitHub CLI command failed: error")
 
         with pytest.raises(YellhornMCPError, match="Failed to post GitHub PR review"):
@@ -124,10 +124,10 @@ async def test_post_github_pr_review_error():
 @pytest.mark.asyncio
 async def test_create_github_subissue_error():
     """Test create_github_subissue with error."""
-    from yellhorn_mcp.git_utils import create_github_subissue
+    from yellhorn_mcp.utils.git_utils import create_github_subissue
 
     # Test error when creating sub-issue
-    with patch("yellhorn_mcp.git_utils.ensure_label_exists"):
+    with patch("yellhorn_mcp.utils.git_utils.ensure_label_exists"):
         with patch("builtins.open", side_effect=PermissionError("Permission denied")):
             with pytest.raises(YellhornMCPError, match="Failed to create GitHub sub-issue"):
                 await create_github_subissue(

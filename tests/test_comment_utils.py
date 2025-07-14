@@ -4,12 +4,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from yellhorn_mcp.comment_utils import (
+from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
+from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
     format_submission_comment,
 )
-from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
 
 
 class TestFormatSubmissionComment:

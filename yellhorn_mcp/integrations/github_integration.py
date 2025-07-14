@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from yellhorn_mcp.git_utils import (
+from yellhorn_mcp.utils.git_utils import (
     YellhornMCPError,
     add_github_issue_comment,
     create_github_subissue,

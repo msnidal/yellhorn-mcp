@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from yellhorn_mcp.workplan_processor import get_codebase_snapshot
+from yellhorn_mcp.processors.workplan_processor import get_codebase_snapshot
 
 
 @pytest.mark.asyncio
@@ -28,7 +28,7 @@ async def test_yellhornignore_file_reading():
         )
 
         # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
             # First call is for tracked files, second is for untracked files
             mock_git.side_effect = [
                 # First call: tracked files
@@ -91,7 +91,7 @@ async def test_yellhornignore_file_error_handling():
         yellhornignore_path.write_text("*.log\nnode_modules/")
 
         # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
             # First call is for tracked files, second is for untracked files
             mock_git.side_effect = [
                 "file1.py\nfile2.js",  # tracked files
@@ -129,7 +129,7 @@ async def test_get_codebase_snapshot_directory_handling():
         os.makedirs(tmp_path / "src")
 
         # Mock run_git_command to return file paths including a directory
-        with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
             # First call is for tracked files, second is for untracked files
             mock_git.side_effect = [
                 "file1.py",  # tracked files
@@ -181,7 +181,7 @@ async def test_get_codebase_snapshot_binary_file_handling():
             f.write(b"\x89PNG\r\n\x1a\n")  # PNG file header
 
         # Mock run_git_command to return our test files
-        with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
             # First call is for tracked files, second is for untracked files
             mock_git.side_effect = [
                 "file1.py",  # tracked files
@@ -239,7 +239,7 @@ async def test_yellhornignore_whitelist_functionality():
         )
 
         # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
             # First call is for tracked files, second is for untracked files
             mock_git.side_effect = [
                 # First call: tracked files
@@ -320,8 +320,8 @@ class AsyncMock(MagicMock):
 @pytest.mark.asyncio
 async def test_curate_context():
     """Test the curate_context tool functionality with .yellhornignore integration."""
-    from yellhorn_mcp.git_utils import YellhornMCPError
     from yellhorn_mcp.server import curate_context
+    from yellhorn_mcp.utils.git_utils import YellhornMCPError
 
     # Create a mock context with async log method
     mock_ctx = MagicMock()

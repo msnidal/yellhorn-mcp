@@ -11,9 +11,9 @@ from typing import Any
 from google import genai
 from google.genai import types as genai_types
 
-from yellhorn_mcp.git_utils import YellhornMCPError
-from yellhorn_mcp.metadata_models import CompletionMetadata
-from yellhorn_mcp.search_grounding import _get_gemini_search_tools, add_citations
+from yellhorn_mcp.models.metadata_models import CompletionMetadata
+from yellhorn_mcp.utils.git_utils import YellhornMCPError
+from yellhorn_mcp.utils.search_grounding_utils import _get_gemini_search_tools, add_citations
 
 
 async def async_generate_content_with_config(

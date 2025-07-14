@@ -15,22 +15,25 @@ from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
 from yellhorn_mcp import __version__
-from yellhorn_mcp.comment_utils import (
-    extract_urls,
-    format_completion_comment,
-    format_submission_comment,
+from yellhorn_mcp.integrations.gemini_integration import generate_judgement_with_gemini
+from yellhorn_mcp.integrations.github_integration import (
+    add_issue_comment,
+    create_judgement_subissue,
 )
-from yellhorn_mcp.cost_tracker import calculate_cost, format_metrics_section
-from yellhorn_mcp.gemini_integration import generate_judgement_with_gemini
-from yellhorn_mcp.git_utils import YellhornMCPError, run_git_command
-from yellhorn_mcp.github_integration import add_issue_comment, create_judgement_subissue
-from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
-from yellhorn_mcp.openai_integration import generate_judgement_with_openai
-from yellhorn_mcp.workplan_processor import (
+from yellhorn_mcp.integrations.openai_integration import generate_judgement_with_openai
+from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
+from yellhorn_mcp.processors.workplan_processor import (
     build_file_structure_context,
     format_codebase_for_prompt,
     get_codebase_snapshot,
 )
+from yellhorn_mcp.utils.comment_utils import (
+    extract_urls,
+    format_completion_comment,
+    format_submission_comment,
+)
+from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
+from yellhorn_mcp.utils.git_utils import YellhornMCPError, run_git_command
 
 
 async def get_git_diff(
@@ -63,7 +66,7 @@ async def get_git_diff(
 
         elif codebase_reasoning == "lsp":
             # Import LSP utilities
-            from yellhorn_mcp.lsp_utils import get_lsp_diff
+            from yellhorn_mcp.utils.lsp_utils import get_lsp_diff
 
             # For lsp mode, get changed files and create LSP diff
             changed_files_output = await run_git_command(
@@ -138,7 +141,7 @@ async def process_judgement_async(
 
         if codebase_reasoning == "lsp":
             # Import LSP utilities
-            from yellhorn_mcp.lsp_utils import get_lsp_snapshot
+            from yellhorn_mcp.utils.lsp_utils import get_lsp_snapshot
 
             file_paths, file_contents = await get_lsp_snapshot(repo_path)
             codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
@@ -275,7 +278,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Create or update the sub-issue
         if subissue_to_update:
             # Update existing issue
-            from yellhorn_mcp.git_utils import update_github_issue
+            from yellhorn_mcp.utils.git_utils import update_github_issue
 
             await update_github_issue(
                 repo_path=repo_path,

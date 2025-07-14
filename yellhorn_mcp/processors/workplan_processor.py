@@ -15,17 +15,20 @@ from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
 from yellhorn_mcp import __version__
-from yellhorn_mcp.comment_utils import (
+from yellhorn_mcp.integrations.gemini_integration import generate_workplan_with_gemini
+from yellhorn_mcp.integrations.github_integration import (
+    add_issue_comment,
+    update_issue_with_workplan,
+)
+from yellhorn_mcp.integrations.openai_integration import generate_workplan_with_openai
+from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
+from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
     format_submission_comment,
 )
-from yellhorn_mcp.cost_tracker import calculate_cost, format_metrics_section
-from yellhorn_mcp.gemini_integration import generate_workplan_with_gemini
-from yellhorn_mcp.git_utils import YellhornMCPError, run_git_command
-from yellhorn_mcp.github_integration import add_issue_comment, update_issue_with_workplan
-from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
-from yellhorn_mcp.openai_integration import generate_workplan_with_openai
+from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
+from yellhorn_mcp.utils.git_utils import YellhornMCPError, run_git_command
 
 
 async def get_codebase_snapshot(
@@ -301,7 +304,7 @@ async def process_workplan_async(
 
         if codebase_reasoning == "lsp":
             # Import LSP utilities
-            from yellhorn_mcp.lsp_utils import get_lsp_snapshot
+            from yellhorn_mcp.utils.lsp_utils import get_lsp_snapshot
 
             file_paths, file_contents = await get_lsp_snapshot(repo_path)
             # For lsp mode, format with tree and LSP file contents

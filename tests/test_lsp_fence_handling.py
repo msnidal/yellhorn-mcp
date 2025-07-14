@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from yellhorn_mcp.lsp_utils import _fence, get_lsp_snapshot
 from yellhorn_mcp.server import format_codebase_for_prompt
+from yellhorn_mcp.utils.lsp_utils import _fence, get_lsp_snapshot
 
 
 @pytest.mark.asyncio
@@ -27,14 +27,14 @@ async def test_fence_function():
 @pytest.mark.asyncio
 async def test_lsp_snapshot_returns_plain_text():
     """Test that get_lsp_snapshot returns plain text without code fences."""
-    with patch("yellhorn_mcp.workplan_processor.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot") as mock_snapshot:
         mock_snapshot.return_value = (["file1.py", "file2.go"], {})
 
-        with patch("yellhorn_mcp.lsp_utils.extract_python_api") as mock_extract_py:
+        with patch("yellhorn_mcp.utils.lsp_utils.extract_python_api") as mock_extract_py:
             # Mock Python signature extraction
             mock_extract_py.return_value = ["def func1()", "class User"]
 
-            with patch("yellhorn_mcp.lsp_utils.extract_go_api") as mock_extract_go:
+            with patch("yellhorn_mcp.utils.lsp_utils.extract_go_api") as mock_extract_go:
                 # Mock Go signature extraction
                 mock_extract_go.return_value = ["func Handler()", "struct Person"]
 

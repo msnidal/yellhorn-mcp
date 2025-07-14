@@ -30,9 +30,22 @@ from mcp.server.fastmcp import Context, FastMCP
 from openai import AsyncOpenAI
 
 from yellhorn_mcp import __version__
-from yellhorn_mcp.comment_utils import extract_urls, format_submission_comment
-from yellhorn_mcp.gemini_integration import generate_curate_context_with_gemini
-from yellhorn_mcp.git_utils import (
+from yellhorn_mcp.integrations.gemini_integration import generate_curate_context_with_gemini
+from yellhorn_mcp.integrations.github_integration import (
+    add_issue_comment,
+    create_github_issue,
+    get_issue_body,
+)
+from yellhorn_mcp.integrations.openai_integration import generate_curate_context_with_openai
+from yellhorn_mcp.models.metadata_models import SubmissionMetadata
+from yellhorn_mcp.processors.judgement_processor import get_git_diff, process_judgement_async
+from yellhorn_mcp.processors.workplan_processor import (
+    build_file_structure_context,
+    get_codebase_snapshot,
+    process_workplan_async,
+)
+from yellhorn_mcp.utils.comment_utils import extract_urls, format_submission_comment
+from yellhorn_mcp.utils.git_utils import (
     YellhornMCPError,
     get_default_branch,
     get_github_pr_diff,
@@ -40,15 +53,6 @@ from yellhorn_mcp.git_utils import (
     list_resources,
     read_resource,
     run_git_command,
-)
-from yellhorn_mcp.github_integration import add_issue_comment, create_github_issue, get_issue_body
-from yellhorn_mcp.judgement_processor import get_git_diff, process_judgement_async
-from yellhorn_mcp.metadata_models import SubmissionMetadata
-from yellhorn_mcp.openai_integration import generate_curate_context_with_openai
-from yellhorn_mcp.workplan_processor import (
-    build_file_structure_context,
-    get_codebase_snapshot,
-    process_workplan_async,
 )
 
 
@@ -790,7 +794,7 @@ async def judge_workplan(
         judgement_title = f"Judgement for #{issue_number}: {head_ref} vs {base_ref}"
 
         # Create the sub-issue
-        from yellhorn_mcp.github_integration import create_judgement_subissue
+        from yellhorn_mcp.integrations.github_integration import create_judgement_subissue
 
         subissue_url = await create_judgement_subissue(
             repo_path, issue_number, judgement_title, placeholder_body
@@ -861,15 +865,24 @@ async def judge_workplan(
         raise YellhornMCPError(f"Failed to create judgement: {str(e)}")
 
 
-from yellhorn_mcp.comment_utils import format_completion_comment, format_submission_comment
+from yellhorn_mcp.integrations.gemini_integration import async_generate_content_with_config
+from yellhorn_mcp.integrations.github_integration import (
+    add_issue_comment as add_github_issue_comment,
+)
+from yellhorn_mcp.processors.judgement_processor import get_git_diff
+from yellhorn_mcp.processors.workplan_processor import (
+    build_file_structure_context,
+    format_codebase_for_prompt,
+    get_codebase_snapshot,
+)
+from yellhorn_mcp.utils.comment_utils import format_completion_comment, format_submission_comment
 
 # Re-export for backward compatibility with tests
-from yellhorn_mcp.cost_tracker import calculate_cost, format_metrics_section
-from yellhorn_mcp.gemini_integration import async_generate_content_with_config
-from yellhorn_mcp.git_utils import (
+from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
+from yellhorn_mcp.utils.git_utils import (
     add_github_issue_comment as add_github_issue_comment_from_git_utils,
 )
-from yellhorn_mcp.git_utils import (
+from yellhorn_mcp.utils.git_utils import (
     create_github_subissue,
     ensure_label_exists,
     get_default_branch,
@@ -880,15 +893,8 @@ from yellhorn_mcp.git_utils import (
     run_github_command,
     update_github_issue,
 )
-from yellhorn_mcp.github_integration import add_issue_comment as add_github_issue_comment
-from yellhorn_mcp.judgement_processor import get_git_diff
-from yellhorn_mcp.lsp_utils import get_lsp_diff, get_lsp_snapshot
-from yellhorn_mcp.search_grounding import _get_gemini_search_tools
-from yellhorn_mcp.workplan_processor import (
-    build_file_structure_context,
-    format_codebase_for_prompt,
-    get_codebase_snapshot,
-)
+from yellhorn_mcp.utils.lsp_utils import get_lsp_diff, get_lsp_snapshot
+from yellhorn_mcp.utils.search_grounding_utils import _get_gemini_search_tools
 
 # Export for use by the CLI
 __all__ = [

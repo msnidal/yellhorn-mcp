@@ -2,7 +2,7 @@
 
 import pytest
 
-from yellhorn_mcp.cost_tracker import calculate_cost
+from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost
 
 
 def test_calculate_cost_unknown_model():

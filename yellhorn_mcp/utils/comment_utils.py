@@ -3,7 +3,7 @@
 import re
 from datetime import datetime
 
-from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
+from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
 
 
 def format_submission_comment(metadata: SubmissionMetadata) -> str:

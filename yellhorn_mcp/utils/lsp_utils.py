@@ -465,7 +465,7 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
         Tuple of (file list, file contents dictionary), where contents contain
         API signatures, class attributes, and docstrings as plain text (no code fences)
     """
-    from yellhorn_mcp.workplan_processor import get_codebase_snapshot
+    from yellhorn_mcp.processors.workplan_processor import get_codebase_snapshot
 
     # Reuse logic to get paths while respecting ignores
     # The "_mode" parameter is internal and not documented, but used to
@@ -522,7 +522,7 @@ async def get_lsp_diff(
     Returns:
         A formatted string containing the LSP-style diff focusing on API changes
     """
-    from yellhorn_mcp.git_utils import run_git_command
+    from yellhorn_mcp.utils.git_utils import run_git_command
 
     # Initialize result
     diff_parts = []
@@ -667,7 +667,7 @@ async def update_snapshot_with_full_diff_files(
     Returns:
         Updated tuple of (file paths, file contents)
     """
-    from yellhorn_mcp.git_utils import run_git_command
+    from yellhorn_mcp.utils.git_utils import run_git_command
 
     try:
         # Get the diff to identify affected files

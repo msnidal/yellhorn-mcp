@@ -115,9 +115,9 @@ async def patch_gh_commands(monkeypatch):
         return ""
 
     monkeypatch.setattr(
-        "yellhorn_mcp.git_utils.run_github_command", AsyncMock(side_effect=fake_run_github_command)
+        "yellhorn_mcp.utils.git_utils.run_github_command", AsyncMock(side_effect=fake_run_github_command)
     )
     monkeypatch.setattr(
-        "yellhorn_mcp.git_utils.run_git_command", AsyncMock(side_effect=fake_run_git_command)
+        "yellhorn_mcp.utils.git_utils.run_git_command", AsyncMock(side_effect=fake_run_git_command)
     )
     yield

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
-from yellhorn_mcp.lsp_utils import extract_go_api
+from yellhorn_mcp.utils.lsp_utils import extract_go_api
 
 
 @pytest.fixture
