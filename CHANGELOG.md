@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2025-07-14
+
+### Added
+
+- **Enhanced Test Coverage**: Added comprehensive unit tests for previously untested functionality:
+  - `UsageMetadata` class: Full test coverage for initialization from various formats (OpenAI, Gemini, dict), properties, and methods
+  - `ChunkingStrategy` class: Tests for split point finding, sentence/paragraph splitting with various edge cases
+  - Retry mechanism functions: Tests for `log_retry_attempt` and `is_retryable_error` with various error types
+  - `LLMManager` methods: Tests for `call_llm_with_usage`, `get_last_usage_metadata`, temperature handling for "o" models
+  - `TokenCounter` configuration: Tests for custom model limits, encodings, and config priority handling
+  - `search_grounding` functions: Full test coverage for `add_citations` and `add_citations_from_metadata`
+- **GPT-4.1 Support**: Added support for GPT-4.1 model with 1M token limit and cl100k_base encoding
+- **Enhanced Token Counter Configuration**: TokenCounter now supports custom configuration via constructor:
+  - Override model token limits
+  - Override model encodings
+  - Set default encoding for unknown models
+  - Set default token limit for unknown models
+
+### Changed
+
+- **Improved Error Handling**: Enhanced JSON parsing error handling for both OpenAI and Gemini models
+- **Temperature Handling**: OpenAI "o" models (o3, o4-mini) now always use temperature 1.0 as required by the API
+- **Rate Limit Retry**: Improved retry logic with exponential backoff and better error detection:
+  - Detects rate limit errors by type, code (429), and message content
+  - Supports retrying on connection errors and timeouts
+  - Logs retry attempts with timing information
+
+### Fixed
+
+- **Version Synchronization**: Fixed version mismatch between pyproject.toml and __init__.py
+
 ## [0.5.2] - 2025-07-06
 
 ### Changed

@@ -36,8 +36,9 @@ The server requires the following environment variables:
 - `REPO_PATH`: Path to your repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL`: Model to use (defaults to "gemini-2.5-pro"). Available options:
   - Gemini models: "gemini-2.5-pro", "gemini-2.5-flash"
-  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "o3-deep-research", "o4-mini-deep-research"
+  - OpenAI models: "gpt-4o", "gpt-4o-mini", "gpt-4.1", "o4-mini", "o3", "o3-deep-research", "o4-mini-deep-research"
   - Note: Deep Research models use `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
+  - Note: GPT-4.1 supports up to 1M tokens
 - `YELLHORN_MCP_SEARCH`: Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models
@@ -51,10 +52,23 @@ Yellhorn MCP includes intelligent token management to handle large codebases:
 - **Automatic Token Counting**: Uses OpenAI's tiktoken library to accurately count tokens for each model
 - **Smart Chunking**: When prompts exceed model limits, automatically splits them into overlapping chunks:
   - Sentence-based chunking for better coherence
-  - Configurable overlap to maintain context between chunks
+  - Paragraph-based chunking for maintaining document structure
+  - Configurable overlap to maintain context between chunks (default 10%)
   - Safety margins reserved for system prompts and responses
+  - Binary search optimization for finding optimal split points
 - **Response Aggregation**: Intelligently combines responses from multiple chunks
-- **Model-Specific Limits**: Respects each model's token limits (from 65K to 1M+ tokens)
+- **Model-Specific Limits**: Respects each model's token limits (from 65K to 2M+ tokens)
+- **Custom Configuration**: TokenCounter supports custom model limits and encodings via configuration
+
+### LLM Manager
+
+The unified LLM Manager provides:
+
+- **Automatic Retry Logic**: Exponential backoff with configurable retry attempts for rate limits
+- **Error Handling**: Graceful handling of rate limits, quota exhaustion, and connection errors
+- **Usage Tracking**: Unified interface for tracking token usage across OpenAI and Gemini models
+- **Temperature Control**: Automatic temperature adjustment for models that require specific settings (e.g., o3/o4 models)
+- **JSON Response Handling**: Robust JSON extraction and error handling for structured outputs
 
 ## Usage
 

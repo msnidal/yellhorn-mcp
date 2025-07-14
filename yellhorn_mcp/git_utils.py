@@ -21,6 +21,66 @@ class YellhornMCPError(Exception):
     pass
 
 
+def chunk_github_content(content: str, max_length: int = 65000) -> list[str]:
+    """
+    Split content into chunks to fit within GitHub's character limits.
+    
+    GitHub has a 65536 character limit for comments and issue bodies.
+    This function splits content into multiple chunks (65000 chars by default)
+    with proper headers and continuation notices.
+    
+    Args:
+        content: The content to potentially chunk.
+        max_length: Maximum allowed length per chunk (default: 65000).
+        
+    Returns:
+        List of content chunks. Single item if content fits in one chunk.
+    """
+    if len(content) <= max_length:
+        return [content]
+    
+    chunks = []
+    remaining_content = content
+    chunk_number = 1
+    
+    while remaining_content:
+        # Calculate space for headers
+        header = f"\n\n---\n**Part {chunk_number} of content (continued below)**\n\n"
+        footer = "\n\n---\n**Continued in next comment...**"
+        
+        if chunk_number == 1:
+            header = ""  # No header for first chunk
+        
+        available_length = max_length - len(header) - len(footer)
+        
+        if len(remaining_content) <= available_length:
+            # Last chunk - no footer needed
+            chunk_content = remaining_content
+            if chunk_number > 1:
+                chunk_content = f"\n\n---\n**Part {chunk_number} of content (continued from above)**\n\n" + chunk_content
+            chunks.append(chunk_content)
+            break
+        
+        # Find a good breaking point (prefer end of line)
+        break_point = available_length
+        last_newline = remaining_content[:available_length].rfind('\n')
+        
+        if last_newline > available_length * 0.8:  # If we can find a newline in the last 20%
+            break_point = last_newline + 1  # Include the newline
+        
+        chunk_content = remaining_content[:break_point]
+        if chunk_number > 1:
+            chunk_content = f"\n\n---\n**Part {chunk_number} of content (continued from above)**\n\n" + chunk_content
+        
+        chunk_content += footer
+        chunks.append(chunk_content)
+        
+        remaining_content = remaining_content[break_point:]
+        chunk_number += 1
+    
+    return chunks
+
+
 async def run_git_command(repo_path: Path, command: list[str]) -> str:
     """
     Run a Git command in the repository.
@@ -138,6 +198,9 @@ async def ensure_label_exists(repo_path: Path, label: str, description: str = ""
 async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str, github_command_func=None) -> None:
     """
     Add a comment to a GitHub issue.
+    
+    If the body is too long, it will be split into multiple comments to ensure
+    all content is preserved.
 
     Args:
         repo_path: Path to the repository.
@@ -150,8 +213,13 @@ async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str
     """
     if github_command_func is None:
         github_command_func = run_github_command
-        
-    await github_command_func(repo_path, ["issue", "comment", issue_number, "--body", body])
+    
+    # Split body into chunks to avoid GitHub's character limit
+    chunks = chunk_github_content(body)
+    
+    # Post each chunk as a separate comment
+    for chunk in chunks:
+        await github_command_func(repo_path, ["issue", "comment", issue_number, "--body", chunk])
 
 
 async def update_github_issue(
@@ -162,6 +230,9 @@ async def update_github_issue(
 ) -> None:
     """
     Update a GitHub issue body.
+    
+    If the body is too long, it will be split into chunks. The first chunk becomes
+    the issue body, and subsequent chunks are added as comments.
 
     Args:
         repo_path: Path to the repository.
@@ -173,12 +244,18 @@ async def update_github_issue(
         YellhornMCPError: If the command fails.
     """
     try:
+        # Split body into chunks to avoid GitHub's character limit
+        chunks = chunk_github_content(body)
+        
+        # Update the issue body with the first chunk
+        first_chunk = chunks[0]
+        
         # GitHub CLI doesn't have a direct command to update issue body,
         # so we create a temporary file with the new body
         import tempfile
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
-            tmp.write(body)
+            tmp.write(first_chunk)
             tmp_path = tmp.name
 
         try:
@@ -188,8 +265,12 @@ async def update_github_issue(
         finally:
             # Clean up the temporary file
             import os
-
             os.unlink(tmp_path)
+            
+        # Add remaining chunks as comments
+        for chunk in chunks[1:]:
+            await add_github_issue_comment(repo_path, issue_number, chunk, github_command_func)
+            
     except Exception as e:
         raise YellhornMCPError(f"Failed to update GitHub issue: {str(e)}")
 
@@ -335,11 +416,15 @@ async def create_github_subissue(
         for label in labels_list:
             await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP", github_command_func)
 
+        # Split body into chunks to avoid GitHub's character limit
+        chunks = chunk_github_content(body)
+        first_chunk = chunks[0]
+        
         # Create temporary file for issue body
         import tempfile
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
-            tmp.write(body)
+            tmp.write(first_chunk)
             tmp_path = tmp.name
 
         try:
@@ -368,6 +453,15 @@ async def create_github_subissue(
                 raise YellhornMCPError(f"Failed to extract issue URL from result: {result}")
 
             issue_url = url_match.group(1)
+            
+            # Extract issue number from URL for adding remaining chunks
+            issue_number_match = re.search(r"/issues/(\d+)", issue_url)
+            if issue_number_match:
+                issue_number = issue_number_match.group(1)
+                
+                # Add remaining chunks as comments
+                for chunk in chunks[1:]:
+                    await add_github_issue_comment(repo_path, issue_number, chunk, github_command_func)
 
             # Link the issue to the parent
             await add_github_issue_comment(
@@ -415,11 +509,15 @@ async def post_github_pr_review(
 
         pr_number = pr_match.group(1)
 
+        # Split review content into chunks to avoid GitHub's character limit
+        chunks = chunk_github_content(review_content)
+        first_chunk = chunks[0]
+        
         # Create temporary file for review content
         import tempfile
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
-            tmp.write(review_content)
+            tmp.write(first_chunk)
             tmp_path = tmp.name
 
         try:
@@ -435,6 +533,21 @@ async def post_github_pr_review(
                     "--comment",  # Just a comment, not approve/request changes
                 ],
             )
+            
+            # Post remaining chunks as additional review comments
+            for chunk in chunks[1:]:
+                await github_command_func(
+                    repo_path,
+                    [
+                        "pr",
+                        "review",
+                        pr_number,
+                        "--body",
+                        chunk,
+                        "--comment",
+                    ],
+                )
+            
             return f"{pr_url}#pullrequestreview-{result}"
         finally:
             # Clean up the temporary file

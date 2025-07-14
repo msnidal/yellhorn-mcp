@@ -3,6 +3,11 @@
 ## Testing
 
 - **Unit Tests**: All code must be covered by unit tests. Use `pytest` for writing and running tests.
+- **Test Coverage**: Aim for comprehensive test coverage including:
+  - All public methods and functions
+  - Edge cases and error conditions
+  - Integration between components
+  - Mock external dependencies (API calls, file I/O)
 
 ## Code Style Guidelines
 

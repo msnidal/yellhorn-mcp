@@ -30,8 +30,9 @@ The server requires the following environment variables:
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro"). Available options:
   - Gemini models: "gemini-2.5-pro", "gemini-2.5-flash"
-  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "o3-deep-research", "o4-mini-deep-research"
+  - OpenAI models: "gpt-4o", "gpt-4o-mini", "gpt-4.1", "o4-mini", "o3", "o3-deep-research", "o4-mini-deep-research"
   - Note: Deep Research models use `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
+  - Note: GPT-4.1 supports up to 1M tokens
 - `YELLHORN_MCP_SEARCH` (optional): Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models
@@ -42,12 +43,17 @@ Yellhorn MCP automatically manages token limits for all supported models to prev
 
 #### Token Limits by Model
 
-- **Gemini models**: 1M+ tokens (1,048,576 tokens)
-  - `gemini-2.5-pro-preview-05-06`
-  - `gemini-2.5-flash-preview-05-20`
+- **Gemini models**: 1M-2M tokens
+  - `gemini-2.5-pro-preview-05-06`: 1,048,576 tokens
+  - `gemini-2.5-flash-preview-05-20`: 1,048,576 tokens
+  - `gemini-1.5-pro`: 2,097,152 tokens
 - **OpenAI GPT-4o models**: 128K tokens (128,000 tokens)
   - `gpt-4o`
   - `gpt-4o-mini`
+- **OpenAI GPT-4 models**:
+  - `gpt-4.1`: 1,000,000 tokens
+  - `gpt-4`: 8,192 tokens
+  - `gpt-4-32k`: 32,768 tokens
 - **OpenAI O-series models**: 65K tokens (65,536 tokens)
   - `o4-mini`
   - `o3`
@@ -63,10 +69,15 @@ When your codebase and prompt exceed model limits, Yellhorn MCP automatically:
 
 #### Chunking Strategy
 
-- **Sentence-based splitting**: Chunks are split at sentence boundaries to maintain coherence
-- **Safety margins**: Reserves tokens for system prompts and responses (default: 4K tokens)
-- **Configurable overlap**: Maintains context between chunks (default: 200 tokens)
-- **Smart aggregation**: Combines responses intelligently, removing duplicate content
+- **Smart splitting**: Two strategies available:
+  - **Sentence-based**: Splits at sentence boundaries to maintain coherence (default)
+  - **Paragraph-based**: Splits at paragraph boundaries to preserve document structure
+- **Safety margins**: Reserves tokens for system prompts and responses (configurable, default: 1000 tokens)
+- **Configurable overlap**: Maintains context between chunks (default: 10% overlap ratio)
+- **Smart aggregation**: Combines responses intelligently, with support for:
+  - Text concatenation with separator
+  - JSON merging for structured outputs
+- **Binary search optimization**: Efficiently finds optimal split points within token limits
 
 #### Best Practices
 
@@ -77,6 +88,33 @@ To optimize token usage:
 3. For very large codebases, consider using `file_structure` mode which only includes directory structure
 
 The token management system ensures that even very large codebases can be processed successfully without manual intervention.
+
+### LLM Manager Features
+
+The unified LLM Manager provides advanced capabilities:
+
+#### Automatic Retry with Exponential Backoff
+- Automatically retries on rate limit errors (HTTP 429)
+- Supports retrying on quota exhaustion and connection errors
+- Exponential backoff from 4-60 seconds
+- Maximum 5 retry attempts
+- Detailed logging of retry attempts
+
+#### Enhanced Error Handling
+- Detects retryable errors by type, code, and message content
+- Graceful handling of API-specific errors
+- JSON parsing error recovery for malformed responses
+
+#### Usage Tracking
+- Unified `UsageMetadata` class for both OpenAI and Gemini
+- Tracks prompt tokens, completion tokens, and total tokens
+- Supports both dictionary and API object formats
+- Compatible with Gemini-style property names
+
+#### Model-Specific Features
+- **Temperature Control**: O-series models (o3, o4-mini) automatically use temperature 1.0
+- **Deep Research Tools**: Automatic enablement of web search and code interpreter for research models
+- **Custom Configuration**: Support for overriding model limits and encodings
 
 ### File Filtering with .yellhorncontext and .yellhornignore
 
