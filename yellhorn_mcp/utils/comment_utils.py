@@ -3,7 +3,7 @@
 import re
 from datetime import datetime
 
-from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
+from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
 
 
 def format_submission_comment(metadata: SubmissionMetadata) -> str:
@@ -59,11 +59,13 @@ def format_completion_comment(metadata: CompletionMetadata) -> str:
         "",
         "### Generation Details",
         f"**Time**: {metadata.generation_time_seconds:.1f} seconds  ",
-        f"**Completed**: {metadata.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}  ",
+        f"**Completed**: {metadata.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') if metadata.timestamp else 'N/A'}  ",
     ]
 
-    if metadata.model_version_used:
-        lines.append(f"**Model Version**: `{metadata.model_version_used}`  ")
+    # Show model version if available, otherwise show model name
+    model_info = metadata.model_version_used or metadata.model_name
+    if model_info:
+        lines.append(f"**Model Used**: `{model_info}`  ")
 
     if metadata.system_fingerprint:
         lines.append(f"**System Fingerprint**: `{metadata.system_fingerprint}`  ")

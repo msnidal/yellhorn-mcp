@@ -4,12 +4,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from yellhorn_mcp.comment_utils import (
+from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
+from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
     format_submission_comment,
 )
-from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
 
 
 class TestFormatSubmissionComment:
@@ -65,6 +65,7 @@ class TestFormatCompletionComment:
     def test_successful_completion_comment(self):
         """Test formatting a successful completion comment with all fields."""
         metadata = CompletionMetadata(
+            model_name="gemini-1.5-pro-latest",
             status="✅ Workplan generated successfully",
             generation_time_seconds=42.5,
             input_tokens=10000,
@@ -89,7 +90,9 @@ class TestFormatCompletionComment:
         assert "### Generation Details" in result
         assert "**Time**: 42.5 seconds" in result
         assert "**Completed**: 2025-01-06 12:00:42 UTC" in result
-        assert "**Model Version**: `gemini-2.5-pro`" in result
+        assert (
+            "**Model Used**: `gemini-2.5-pro`" in result
+        )  # Uses model_version_used when available
         assert "### Token Usage" in result
         assert "**Input Tokens**: 10,000" in result
         assert "**Output Tokens**: 2,000" in result
@@ -104,6 +107,7 @@ class TestFormatCompletionComment:
     def test_failed_completion_comment(self):
         """Test formatting a failed completion comment."""
         metadata = CompletionMetadata(
+            model_name="gemini-1.5-pro-latest",
             status="⚠️ Workplan generation failed",
             generation_time_seconds=10.2,
             input_tokens=None,
@@ -134,6 +138,7 @@ class TestFormatCompletionComment:
     def test_openai_completion_comment(self):
         """Test formatting an OpenAI completion comment with system fingerprint."""
         metadata = CompletionMetadata(
+            model_name="gpt-4o",
             status="✅ Judgement generated successfully",
             generation_time_seconds=35.8,
             input_tokens=8000,
@@ -155,6 +160,33 @@ class TestFormatCompletionComment:
         assert "**System Fingerprint**: `fp_abc123def456`" in result
         assert "**Search Results Used**:" not in result  # Should not show if None
         assert "### Safety Ratings" not in result  # Should not show if None
+
+    def test_model_name_fallback(self):
+        """Test that model_name is used when model_version_used is None."""
+        metadata = CompletionMetadata(
+            model_name="gemini-1.5-pro-latest",
+            status="✅ Workplan generated successfully",
+            generation_time_seconds=30.0,
+            input_tokens=5000,
+            output_tokens=1000,
+            total_tokens=6000,
+            estimated_cost=0.06,
+            model_version_used=None,  # No model version available
+            system_fingerprint=None,
+            search_results_used=None,
+            finish_reason="stop",
+            safety_ratings=None,
+            context_size_chars=25000,
+            warnings=None,
+            timestamp=datetime(2025, 1, 6, 12, 0, 30, tzinfo=timezone.utc),
+        )
+
+        result = format_completion_comment(metadata)
+
+        # Should show model_name as fallback
+        assert "**Model Used**: `gemini-1.5-pro-latest`" in result
+        # Should not show "gemini-2.5-pro" or similar
+        assert "gemini-2.5-pro" not in result
 
 
 class TestExtractUrls:

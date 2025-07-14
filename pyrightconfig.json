@@ -1,0 +1,18 @@
+{
+  "pythonVersion": "3.10",
+  "pythonPlatform": "All",
+  "typeCheckingMode": "standard",
+  "reportMissingTypeStubs": false,
+  "reportUnusedVariable": false,
+  "reportUnusedImport": false,
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "venv"
+  ],
+  "venvPath": ".",
+  "venv": ".venv"
+}

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
-from yellhorn_mcp.lsp_utils import _class_attributes_from_ast, extract_python_api
+from yellhorn_mcp.utils.lsp_utils import _class_attributes_from_ast, extract_python_api
 
 
 def test_class_attributes_from_ast():

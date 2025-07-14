@@ -1,10 +1,8 @@
 """Tests for cost and metrics functions – created in workplan #40."""
 
-from unittest.mock import MagicMock
-
 import pytest
 
-from yellhorn_mcp.server import calculate_cost, format_metrics_section
+from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost
 
 
 def test_calculate_cost_unknown_model():
@@ -59,35 +57,3 @@ def test_calculate_cost_mixed_openai_tiers():
     # Expected: (100_000 / 1M) * 10.0 + (50_000 / 1M) * 40.0
     # = 1.0 + 2.0 = 3.0
     assert cost == 3.0
-
-
-def test_format_metrics_section_null_metadata():
-    """Test format_metrics_section with null metadata."""
-    result = format_metrics_section("gemini-model", None)
-    assert "N/A" in result
-    assert "**Model Used**: N/A" in result
-    assert "**Input Tokens**: N/A" in result
-    assert "**Output Tokens**: N/A" in result
-    assert "**Total Tokens**: N/A" in result
-    assert "**Estimated Cost**: N/A" in result
-
-
-def test_format_metrics_section_none_token_values():
-    """Test format_metrics_section with None token values."""
-    # Gemini model with None token counts
-    metadata = MagicMock()
-    metadata.prompt_token_count = None
-    metadata.candidates_token_count = None
-    metadata.total_token_count = None
-
-    result = format_metrics_section("gemini-model", metadata)
-    assert "N/A" in result
-
-    # OpenAI model with None token counts
-    metadata = MagicMock()
-    metadata.prompt_tokens = None
-    metadata.completion_tokens = None
-    metadata.total_tokens = None
-
-    result = format_metrics_section("gpt-4o", metadata)
-    assert "N/A" in result

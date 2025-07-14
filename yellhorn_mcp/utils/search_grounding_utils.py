@@ -23,12 +23,8 @@ def _get_gemini_search_tools(model_name: str) -> genai_types.ToolListUnion | Non
         return None
 
     try:
-        # Gemini 1.5 models use GoogleSearchRetrieval
-        if "1.5" in model_name:
-            return [genai_types.Tool(google_search_retrieval=genai_types.GoogleSearchRetrieval())]
-        # Gemini 2.0+ models use GoogleSearch
-        else:
-            return [genai_types.Tool(google_search=genai_types.GoogleSearch())]
+        # All supported Gemini models (2.0+) use GoogleSearch
+        return [genai_types.Tool(google_search=genai_types.GoogleSearch())]
     except Exception:
         # If tool creation fails, return None
         return None
