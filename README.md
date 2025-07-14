@@ -128,6 +128,28 @@ Retrieves the workplan content (GitHub issue body) associated with a workplan.
 
 - The content of the workplan issue as a string
 
+### revise_workplan
+
+Updates an existing workplan based on revision instructions. The tool fetches the current workplan from the specified GitHub issue and uses AI to revise it according to your instructions.
+
+**Input**:
+
+- `issue_number`: The GitHub issue number containing the workplan to revise
+- `revision_instructions`: Instructions describing how to revise the workplan
+- `codebase_reasoning`: (optional) Control whether AI enhancement is performed:
+  - `"full"`: (default) Use AI to revise with full codebase context
+  - `"lsp"`: Use AI with lightweight codebase context (function/method signatures only)
+  - `"file_structure"`: Use AI with directory structure only (fastest)
+  - `"none"`: Minimal codebase context
+- `debug`: (optional) If set to `true`, adds a comment to the issue with the full prompt used for generation
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
+
+**Output**:
+
+- JSON string containing:
+  - `issue_url`: URL to the updated GitHub issue
+  - `issue_number`: The GitHub issue number
+
 ### judge_workplan
 
 Triggers an asynchronous code judgement comparing two git refs (branches or commits) against a workplan described in a GitHub issue. Creates a placeholder GitHub sub-issue immediately and then processes the AI judgement asynchronously, updating the sub-issue with results.

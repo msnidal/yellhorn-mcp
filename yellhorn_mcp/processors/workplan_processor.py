@@ -263,6 +263,160 @@ async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[
     return codebase_info
 
 
+async def _get_codebase_context(repo_path: Path, reasoning_mode: str, log_function) -> str:
+    """Fetches and formats the codebase context based on the reasoning mode.
+
+    Args:
+        repo_path: Path to the repository.
+        reasoning_mode: Mode for codebase analysis ("full", "lsp", "file_structure", "none").
+        log_function: Function to use for logging.
+
+    Returns:
+        Formatted codebase context string.
+    """
+    if reasoning_mode == "lsp":
+        from yellhorn_mcp.utils.lsp_utils import get_lsp_snapshot
+
+        file_paths, file_contents = await get_lsp_snapshot(repo_path)
+        return await format_codebase_for_prompt(file_paths, file_contents)
+    elif reasoning_mode == "file_structure":
+        file_paths, _ = await get_codebase_snapshot(
+            repo_path, _mode="paths", log_function=log_function
+        )
+        return build_file_structure_context(file_paths)
+    elif reasoning_mode == "full":
+        file_paths, file_contents = await get_codebase_snapshot(
+            repo_path, log_function=log_function
+        )
+        return await format_codebase_for_prompt(file_paths, file_contents)
+    return ""  # For 'none' mode
+
+
+async def _generate_and_update_issue(
+    repo_path: Path,
+    gemini_client: genai.Client | None,
+    openai_client: AsyncOpenAI | None,
+    model: str,
+    prompt: str,
+    issue_number: str,
+    title: str,
+    content_prefix: str,
+    disable_search_grounding: bool,
+    debug: bool,
+    codebase_reasoning: str,
+    _meta: dict[str, Any] | None,
+    ctx: Context | None,
+) -> None:
+    """Generate content with AI and update the GitHub issue.
+
+    Args:
+        repo_path: Path to the repository.
+        gemini_client: Gemini API client (None for OpenAI models).
+        openai_client: OpenAI API client (None for Gemini models).
+        model: Model name to use.
+        prompt: Prompt to send to AI.
+        issue_number: GitHub issue number to update.
+        title: Title for the issue.
+        content_prefix: Prefix to add before the generated content.
+        disable_search_grounding: If True, disables search grounding.
+        debug: If True, add debug comment with full prompt.
+        codebase_reasoning: Codebase reasoning mode used.
+        _meta: Optional metadata from caller.
+        ctx: Optional context for logging.
+    """
+    is_openai_model = model.startswith("gpt-") or model.startswith("o")
+
+    # Call the appropriate API based on the model type
+    if is_openai_model:
+        if not openai_client:
+            if ctx:
+                await ctx.log(level="error", message="OpenAI client not initialized")
+            await add_issue_comment(
+                repo_path,
+                issue_number,
+                "❌ **Error generating workplan** – OpenAI client not initialized",
+            )
+            return
+
+        workplan_content, completion_metadata = await generate_workplan_with_openai(
+            openai_client, model, prompt, ctx
+        )
+    else:
+        if gemini_client is None:
+            if ctx:
+                await ctx.log(level="error", message="Gemini client not initialized")
+            await add_issue_comment(
+                repo_path,
+                issue_number,
+                "❌ **Error generating workplan** – Gemini client not initialized",
+            )
+            return
+
+        # Get search grounding setting
+        use_search = not disable_search_grounding
+        if _meta and "original_search_grounding" in _meta:
+            use_search = _meta["original_search_grounding"] and not disable_search_grounding
+
+        workplan_content, completion_metadata = await generate_workplan_with_gemini(
+            gemini_client, model, prompt, use_search, ctx
+        )
+
+    if not workplan_content:
+        api_name = "OpenAI" if is_openai_model else "Gemini"
+        error_message = (
+            f"Failed to generate workplan: Received an empty response from {api_name} API."
+        )
+        if ctx:
+            await ctx.log(level="error", message=error_message)
+        # Add comment instead of overwriting
+        error_message_comment = (
+            f"⚠️ AI workplan enhancement failed: Received an empty response from {api_name} API."
+        )
+        await add_issue_comment(repo_path, issue_number, error_message_comment)
+        return
+
+    # Calculate generation time if we have metadata
+    if completion_metadata and _meta and "start_time" in _meta:
+        generation_time = (datetime.now(timezone.utc) - _meta["start_time"]).total_seconds()
+        completion_metadata.generation_time_seconds = generation_time
+        completion_metadata.timestamp = datetime.now(timezone.utc)
+
+    # Calculate cost if we have token counts
+    if (
+        completion_metadata
+        and completion_metadata.input_tokens
+        and completion_metadata.output_tokens
+    ):
+        completion_metadata.estimated_cost = calculate_cost(
+            model, completion_metadata.input_tokens, completion_metadata.output_tokens
+        )
+
+    # Add context size
+    if completion_metadata:
+        completion_metadata.context_size_chars = len(prompt)
+
+    # Add the prefix to the workplan content
+    full_body = f"{content_prefix}{workplan_content}"
+
+    # Update the GitHub issue with the generated workplan
+    await update_issue_with_workplan(repo_path, issue_number, full_body, completion_metadata, title)
+    if ctx:
+        await ctx.log(
+            level="info",
+            message=f"Successfully updated GitHub issue #{issue_number} with generated workplan and metrics",
+        )
+
+    # Add debug comment if requested
+    if debug:
+        debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
+        await add_issue_comment(repo_path, issue_number, debug_comment)
+
+    # Add completion comment if we have submission metadata
+    if completion_metadata and _meta:
+        completion_comment = format_completion_comment(completion_metadata)
+        await add_issue_comment(repo_path, issue_number, completion_comment)
+
+
 async def process_workplan_async(
     repo_path: Path,
     gemini_client: genai.Client | None,
@@ -294,43 +448,13 @@ async def process_workplan_async(
         ctx: Optional context for logging.
     """
     try:
-        # Get codebase info based on reasoning mode
-        codebase_info = ""
-
         # Create a simple logging function that uses ctx if available
         def context_log(msg: str):
             if ctx:
                 asyncio.create_task(ctx.log(level="info", message=msg))
 
-        if codebase_reasoning == "lsp":
-            # Import LSP utilities
-            from yellhorn_mcp.utils.lsp_utils import get_lsp_snapshot
-
-            file_paths, file_contents = await get_lsp_snapshot(repo_path)
-            # For lsp mode, format with tree and LSP file contents
-            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
-
-        elif codebase_reasoning == "file_structure":
-            # For file_structure mode, we only need the file paths, not the contents
-            file_paths, _ = await get_codebase_snapshot(
-                repo_path, _mode="paths", log_function=context_log
-            )
-
-            # Use the build_file_structure_context function to create the codebase info
-            codebase_info = build_file_structure_context(file_paths)
-
-        else:
-            # Default full mode - get all file paths and contents
-            if ctx:
-                await ctx.log(
-                    level="info",
-                    message="Using full mode with content retrieval for workplan generation",
-                )
-            file_paths, file_contents = await get_codebase_snapshot(
-                repo_path, log_function=context_log
-            )
-            # Format with tree and full file contents
-            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
+        # Get codebase info based on reasoning mode
+        codebase_info = await _get_codebase_context(repo_path, codebase_reasoning, context_log)
 
         # Construct prompt
         prompt = f"""You are an expert software developer tasked with creating a detailed workplan that will be published as a GitHub issue.
@@ -392,109 +516,26 @@ The workplan should be comprehensive enough that a developer or AI assistant cou
 
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
-        is_openai_model = model.startswith("gpt-") or model.startswith("o")
 
-        # Call the appropriate API based on the model type
-        if is_openai_model:
-            if not openai_client:
-                if ctx:
-                    await ctx.log(level="error", message="OpenAI client not initialized")
-                await add_issue_comment(
-                    repo_path,
-                    issue_number,
-                    "❌ **Error generating workplan** – OpenAI client not initialized",
-                )
-                return  # Don't raise, function ends after commenting
+        # Add the title as header prefix
+        content_prefix = f"# {title}\n\n"
 
-            workplan_content, completion_metadata = await generate_workplan_with_openai(
-                openai_client, model, prompt, ctx
-            )
-        else:
-            if gemini_client is None:
-                if ctx:
-                    await ctx.log(level="error", message="Gemini client not initialized")
-                await add_issue_comment(
-                    repo_path,
-                    issue_number,
-                    "❌ **Error generating workplan** – Gemini client not initialized",
-                )
-                return  # Don't raise, function ends after commenting
-
-            # Get search grounding setting
-            use_search = not disable_search_grounding
-            if _meta and "original_search_grounding" in _meta:
-                use_search = _meta["original_search_grounding"] and not disable_search_grounding
-
-            workplan_content, completion_metadata = await generate_workplan_with_gemini(
-                gemini_client, model, prompt, use_search, ctx
-            )
-
-        if not workplan_content:
-            api_name = "OpenAI" if is_openai_model else "Gemini"
-            error_message = (
-                f"Failed to generate workplan: Received an empty response from {api_name} API."
-            )
-            if ctx:
-                await ctx.log(level="error", message=error_message)
-            # Add comment instead of overwriting
-            error_message_comment = (
-                f"⚠️ AI workplan enhancement failed: Received an empty response from {api_name} API."
-            )
-            await add_issue_comment(repo_path, issue_number, error_message_comment)
-            return
-
-        # Calculate generation time if we have metadata
-        if completion_metadata and _meta and "start_time" in _meta:
-            generation_time = (datetime.now(timezone.utc) - _meta["start_time"]).total_seconds()
-            completion_metadata.generation_time_seconds = generation_time
-            completion_metadata.timestamp = datetime.now(timezone.utc)
-
-        # Calculate cost if we have token counts
-        if (
-            completion_metadata
-            and completion_metadata.input_tokens
-            and completion_metadata.output_tokens
-        ):
-            completion_metadata.estimated_cost = calculate_cost(
-                model, completion_metadata.input_tokens, completion_metadata.output_tokens
-            )
-
-        # Add context size
-        if completion_metadata:
-            completion_metadata.context_size_chars = len(prompt)
-
-        # Add the title as header to the workplan content (no metrics in body)
-        full_body = f"# {title}\n\n{workplan_content}"
-
-        # Update the GitHub issue with the generated workplan (no metrics in body)
-        await update_issue_with_workplan(
-            repo_path, issue_number, full_body, completion_metadata, title
+        # Generate and update issue using the helper
+        await _generate_and_update_issue(
+            repo_path,
+            gemini_client,
+            openai_client,
+            model,
+            prompt,
+            issue_number,
+            title,
+            content_prefix,
+            disable_search_grounding,
+            debug,
+            codebase_reasoning,
+            _meta,
+            ctx,
         )
-        if ctx:
-            await ctx.log(
-                level="info",
-                message=f"Successfully updated GitHub issue #{issue_number} with generated workplan and metrics",
-            )
-
-        # Add debug comment if requested
-        if debug:
-            debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
-            await add_issue_comment(repo_path, issue_number, debug_comment)
-
-        # Add completion comment if we have submission metadata
-        if completion_metadata and _meta:
-            submission_metadata = SubmissionMetadata(
-                status="Generating workplan...",
-                model_name=model,
-                search_grounding_enabled=not disable_search_grounding,
-                yellhorn_version=__version__,
-                submitted_urls=_meta.get("submitted_urls"),
-                codebase_reasoning_mode=codebase_reasoning,
-                timestamp=_meta.get("start_time", datetime.now(timezone.utc)),
-            )
-
-            completion_comment = format_completion_comment(completion_metadata)
-            await add_issue_comment(repo_path, issue_number, completion_comment)
 
     except Exception as e:
         error_msg = f"Error processing workplan: {str(e)}"
@@ -504,6 +545,116 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         # Try to add error comment to issue
         try:
             error_comment = f"❌ **Error generating workplan**\n\n{str(e)}"
+            await add_issue_comment(repo_path, issue_number, error_comment)
+        except Exception:
+            # If we can't even add a comment, just log
+            if ctx:
+                await ctx.log(
+                    level="error", message=f"Failed to add error comment to issue: {str(e)}"
+                )
+
+
+async def process_revision_async(
+    repo_path: Path,
+    gemini_client: genai.Client | None,
+    openai_client: AsyncOpenAI | None,
+    model: str,
+    issue_number: str,
+    original_workplan: str,
+    revision_instructions: str,
+    codebase_reasoning: str,
+    debug: bool = False,
+    disable_search_grounding: bool = False,
+    _meta: dict[str, Any] | None = None,
+    ctx: Context | None = None,
+) -> None:
+    """Revise an existing workplan asynchronously and update the GitHub issue.
+
+    Args:
+        repo_path: Path to the repository.
+        gemini_client: Gemini API client (None for OpenAI models).
+        openai_client: OpenAI API client (None for Gemini models).
+        model: Model name to use.
+        issue_number: GitHub issue number to update.
+        original_workplan: The current workplan content.
+        revision_instructions: Instructions for how to revise the workplan.
+        codebase_reasoning: Reasoning mode to use for codebase analysis.
+        debug: If True, add a comment with the full prompt used for generation.
+        disable_search_grounding: If True, disables search grounding for this request.
+        _meta: Optional metadata from the caller.
+        ctx: Optional context for logging.
+    """
+    try:
+        # Create a simple logging function that uses ctx if available
+        def context_log(msg: str):
+            if ctx:
+                asyncio.create_task(ctx.log(level="info", message=msg))
+
+        # Get codebase info based on reasoning mode
+        codebase_info = await _get_codebase_context(repo_path, codebase_reasoning, context_log)
+
+        # Extract title from original workplan (assumes first line is # Title)
+        title_line = original_workplan.split("\n")[0] if original_workplan else ""
+        title = (
+            title_line.replace("# ", "").strip()
+            if title_line.startswith("# ")
+            else "Workplan Revision"
+        )
+
+        # Construct revision prompt
+        prompt = f"""You are an expert software developer tasked with revising an existing workplan based on revision instructions.
+
+# Original Workplan
+{original_workplan}
+
+# Revision Instructions
+{revision_instructions}
+
+# Codebase Context
+{codebase_info}
+
+# Instructions
+Revise the "Original Workplan" based on the "Revision Instructions" and the provided "Codebase Context".
+Your output should be the complete, revised workplan in the same format as the original.
+
+The revised workplan should:
+1. Incorporate all changes requested in the revision instructions
+2. Maintain the same overall structure and formatting as the original
+3. Update any implementation details that are affected by the changes
+4. Ensure all sections remain comprehensive and implementable
+
+Respond directly with the complete revised workplan in Markdown format.
+IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
+"""
+
+        # Add the title as header prefix
+        content_prefix = f"# {title}\n\n"
+
+        # Generate and update issue using the helper
+        await _generate_and_update_issue(
+            repo_path,
+            gemini_client,
+            openai_client,
+            model,
+            prompt,
+            issue_number,
+            title,
+            content_prefix,
+            disable_search_grounding,
+            debug,
+            codebase_reasoning,
+            _meta,
+            ctx,
+        )
+
+    except Exception as e:
+        error_msg = f"Error processing revision: {str(e)}"
+        if ctx:
+            await ctx.log(level="error", message=error_msg)
+
+        # Try to add error comment to issue
+        try:
+            error_comment = f"❌ **Error revising workplan**\n\n{str(e)}"
             await add_issue_comment(repo_path, issue_number, error_comment)
         except Exception:
             # If we can't even add a comment, just log

@@ -290,6 +290,41 @@ Retrieves the workplan content (GitHub issue body) associated with a specified G
 
 - The content of the workplan issue as a string
 
+### revise_workplan
+
+Updates an existing workplan based on revision instructions. The tool fetches the current workplan from the specified GitHub issue and uses AI to revise it according to your instructions.
+
+**Input**:
+
+- `issue_number`: The GitHub issue number containing the workplan to revise
+- `revision_instructions`: Instructions describing how to revise the workplan (e.g., "Add more detail about testing", "Include database migration steps", "Update to use React instead of Vue")
+- `codebase_reasoning`: (optional) Control whether AI enhancement is performed:
+  - `"full"`: (default) Use AI to revise with full codebase context
+  - `"lsp"`: Use AI with lightweight codebase context (function/method signatures only)
+  - `"file_structure"`: Use AI with directory structure only (fastest)
+  - `"none"`: Minimal codebase context
+- `debug`: (optional) If set to `true`, adds a comment to the issue with the full prompt used for generation
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
+
+**Output**:
+
+- JSON string containing:
+  - `issue_url`: URL to the updated GitHub issue
+  - `issue_number`: The GitHub issue number
+
+**Example Usage**:
+
+```
+Please revise workplan #123 to include more detail about error handling and recovery mechanisms.
+```
+
+This will:
+1. Fetch the existing workplan from issue #123
+2. Add a submission comment indicating the revision is in progress
+3. Launch a background task to revise the workplan based on your instructions
+4. Update the issue with the revised workplan once complete
+5. Add a completion comment with metrics
+
 ### curate_context
 
 Analyzes the codebase structure to build a .yellhorncontext file with optimized directory filtering rules customized for your specific task. This tool creates a comprehensive context file that includes both blacklist/whitelist patterns to ensure the AI has access to the most relevant directories.
@@ -456,6 +491,11 @@ curl -X POST http://127.0.0.1:8000/tools/create_workplan \
 curl -X POST http://127.0.0.1:8000/tools/get_workplan \
   -H "Content-Type: application/json" \
   -d '{"issue_number": "123"}'
+
+# Call a tool (revise_workplan)
+curl -X POST http://127.0.0.1:8000/tools/revise_workplan \
+  -H "Content-Type: application/json" \
+  -d '{"issue_number": "123", "revision_instructions": "Add more detail about error handling and recovery mechanisms", "codebase_reasoning": "full"}'
 
 # Call a tool (curate_context)
 curl -X POST http://127.0.0.1:8000/tools/curate_context \
