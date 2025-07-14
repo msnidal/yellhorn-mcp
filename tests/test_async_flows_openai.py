@@ -7,6 +7,7 @@ import pytest
 from mcp.server.fastmcp import Context
 
 from tests.helpers import DummyContext
+from yellhorn_mcp.processors.workplan_processor import process_revision_async
 from yellhorn_mcp.server import (
     YellhornMCPError,
     add_github_issue_comment,
@@ -324,3 +325,103 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
                 None,  # subissue_to_update
                 ctx=mock_ctx,
             )
+
+
+@pytest.mark.asyncio
+async def test_process_revision_async_openai(mock_openai_client):
+    """Test process_revision_async with OpenAI models."""
+    mock_ctx = DummyContext()
+    mock_ctx.log = AsyncMock()
+
+    # Just test that the function runs without error and calls the API
+    with (
+        patch(
+            "yellhorn_mcp.processors.workplan_processor._get_codebase_context",
+            new_callable=AsyncMock,
+        ) as mock_get_context,
+        patch(
+            "yellhorn_mcp.utils.git_utils.run_github_command", new_callable=AsyncMock
+        ) as mock_gh_command,
+    ):
+        mock_get_context.return_value = "Formatted codebase context"
+        mock_gh_command.return_value = ""  # Mock empty response for git commands
+
+        # Since this uses _generate_and_update_issue internally, we just need to make sure
+        # the function doesn't raise an exception and calls the OpenAI API
+        await process_revision_async(
+            Path("/mock/repo"),
+            None,  # No Gemini client
+            mock_openai_client,
+            "gpt-4o",
+            "123",
+            "# Original Workplan\n## Summary\nOriginal content",
+            "Add more detail about testing",
+            "full",
+            ctx=mock_ctx,
+            _meta={"start_time": MagicMock()},
+        )
+
+        # Verify _get_codebase_context was called
+        mock_get_context.assert_called_once()
+
+        # Verify OpenAI API was called
+        mock_openai_client.responses.create.assert_called_once()
+        call_args = mock_openai_client.responses.create.call_args
+        prompt = call_args[1]["input"]  # OpenAI Responses API uses 'input' not 'messages'
+
+        # Verify prompt contains the original workplan and revision instructions
+        assert "# Original Workplan" in prompt
+        assert "Original content" in prompt
+        assert "Add more detail about testing" in prompt
+        assert "Formatted codebase context" in prompt
+
+
+@pytest.mark.asyncio
+async def test_process_revision_async_error_handling():
+    """Test error handling in process_revision_async."""
+    mock_ctx = DummyContext()
+    mock_ctx.log = AsyncMock()
+
+    with (
+        patch(
+            "yellhorn_mcp.processors.workplan_processor._get_codebase_context",
+            new_callable=AsyncMock,
+        ) as mock_get_context,
+        patch(
+            "yellhorn_mcp.integrations.github_integration.add_issue_comment", new_callable=AsyncMock
+        ) as mock_add_comment,
+        patch(
+            "yellhorn_mcp.utils.git_utils.run_github_command", new_callable=AsyncMock
+        ) as mock_gh_command,
+    ):
+        # Simulate an error in getting codebase context
+        mock_get_context.side_effect = Exception("Failed to get codebase")
+        mock_gh_command.return_value = ""  # Mock empty response
+
+        # Process should catch exception and add error comment
+        await process_revision_async(
+            Path("/mock/repo"),
+            None,
+            None,  # No OpenAI client
+            "gpt-4o",
+            "123",
+            "# Original Workplan",
+            "Revision instructions",
+            "full",
+            ctx=mock_ctx,
+        )
+
+        # Verify error comment was added via gh command
+        mock_gh_command.assert_called()
+        # Find the call that adds the error comment
+        error_comment_call = None
+        for call in mock_gh_command.call_args_list:
+            if call[0][1][0] == "issue" and call[0][1][1] == "comment" and "123" in call[0][1]:
+                error_comment_call = call
+                break
+
+        assert error_comment_call is not None, "No error comment call found"
+        # The error comment should contain the error message
+        comment_body = error_comment_call[0][1][4]  # --body parameter
+        assert "❌ **Error revising workplan**" in comment_body
+        assert "Failed to get codebase" in comment_body

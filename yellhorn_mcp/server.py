@@ -42,6 +42,7 @@ from yellhorn_mcp.processors.judgement_processor import get_git_diff, process_ju
 from yellhorn_mcp.processors.workplan_processor import (
     build_file_structure_context,
     get_codebase_snapshot,
+    process_revision_async,
     process_workplan_async,
 )
 from yellhorn_mcp.utils.comment_utils import extract_urls, format_submission_comment
@@ -309,6 +310,132 @@ async def get_workplan(ctx: Context, issue_number: str) -> str:
         return await get_issue_body(repo_path, issue_number)
     except Exception as e:
         raise YellhornMCPError(f"Failed to retrieve workplan: {str(e)}")
+
+
+@mcp.tool(
+    name="revise_workplan",
+    description="""Updates an existing workplan based on revision instructions.
+
+This tool will:
+1. Fetch the existing workplan from the specified GitHub issue
+2. Launch a background AI process to revise the workplan based on your instructions
+3. Update the issue with the revised workplan once complete
+
+The AI will use the same codebase analysis mode and model as the original workplan.
+
+Returns the issue URL and number immediately.""",
+)
+async def revise_workplan(
+    ctx: Context,
+    issue_number: str,
+    revision_instructions: str,
+    codebase_reasoning: str = "full",
+    debug: bool = False,
+    disable_search_grounding: bool = False,
+) -> str:
+    """Revises an existing workplan based on revision instructions.
+
+    Args:
+        ctx: Server context.
+        issue_number: The GitHub issue number containing the workplan to revise.
+        revision_instructions: Instructions describing how to revise the workplan.
+        codebase_reasoning: Reasoning mode for codebase analysis (same options as create_workplan).
+        debug: If True, adds a comment to the issue with the full prompt used for generation.
+        disable_search_grounding: If True, disables Google Search Grounding for this request.
+
+    Returns:
+        JSON string containing the issue URL and number.
+
+    Raises:
+        YellhornMCPError: If revision fails.
+    """
+    try:
+        repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
+
+        # Fetch original workplan
+        original_workplan = await get_issue_body(repo_path, issue_number)
+        if not original_workplan:
+            raise YellhornMCPError(f"Could not retrieve workplan for issue #{issue_number}")
+
+        # Handle search grounding override if specified
+        original_search_grounding = ctx.request_context.lifespan_context.get(
+            "use_search_grounding", True
+        )
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = False
+            await ctx.log(
+                level="info",
+                message="Search grounding temporarily disabled for this request",
+            )
+
+        # Extract URLs from the revision instructions
+        submitted_urls = extract_urls(revision_instructions)
+
+        # Add submission comment
+        submission_metadata = SubmissionMetadata(
+            status="Revising workplan...",
+            model_name=ctx.request_context.lifespan_context["model"],
+            search_grounding_enabled=ctx.request_context.lifespan_context.get(
+                "use_search_grounding", False
+            ),
+            yellhorn_version=__version__,
+            submitted_urls=submitted_urls if submitted_urls else None,
+            codebase_reasoning_mode=codebase_reasoning,
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        submission_comment = format_submission_comment(submission_metadata)
+        await add_issue_comment(repo_path, issue_number, submission_comment)
+
+        # Get clients from context
+        gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
+        openai_client = ctx.request_context.lifespan_context.get("openai_client")
+        model = ctx.request_context.lifespan_context["model"]
+
+        # Launch background task to process the revision
+        await ctx.log(
+            level="info",
+            message=f"Launching background task to revise workplan with AI model {model}",
+        )
+        start_time = datetime.now(timezone.utc)
+
+        asyncio.create_task(
+            process_revision_async(
+                repo_path,
+                gemini_client,
+                openai_client,
+                model,
+                issue_number,
+                original_workplan,
+                revision_instructions,
+                codebase_reasoning,
+                debug=debug,
+                disable_search_grounding=disable_search_grounding,
+                _meta={
+                    "original_search_grounding": original_search_grounding,
+                    "start_time": start_time,
+                    "submitted_urls": submitted_urls,
+                },
+                ctx=ctx,
+            )
+        )
+
+        # Restore original search grounding setting if modified
+        if disable_search_grounding:
+            ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
+
+        # Get issue URL
+        get_issue_url_cmd = await run_github_command(
+            repo_path, ["issue", "view", issue_number, "--json", "url"]
+        )
+        issue_data = json.loads(get_issue_url_cmd)
+        issue_url = issue_data["url"]
+
+        # Return the issue URL and number as JSON
+        return json.dumps({"issue_url": issue_url, "issue_number": issue_number})
+
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to revise workplan: {str(e)}")
 
 
 @mcp.tool(

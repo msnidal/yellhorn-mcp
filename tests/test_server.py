@@ -205,6 +205,7 @@ from yellhorn_mcp.server import (
     get_workplan,
     judge_workplan,
     process_workplan_async,
+    revise_workplan,
 )
 from yellhorn_mcp.utils.git_utils import (
     YellhornMCPError,
@@ -1941,3 +1942,82 @@ async def test_process_judgement_async_search_grounding_enabled(
         body = call_args.kwargs["body"]
         assert "## Citations" in body
         assert "Example citation" in body
+
+
+@pytest.mark.asyncio
+async def test_revise_workplan(mock_request_context, mock_genai_client):
+    """Test revising an existing workplan."""
+    # Set the mock client in the context
+    mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
+
+    with patch("yellhorn_mcp.server.get_issue_body", new_callable=AsyncMock) as mock_get_issue:
+        mock_get_issue.return_value = "# Original Workplan\n## Summary\nOriginal content"
+
+        with patch(
+            "yellhorn_mcp.server.add_issue_comment", new_callable=AsyncMock
+        ) as mock_add_comment:
+            with patch(
+                "yellhorn_mcp.server.run_github_command", new_callable=AsyncMock
+            ) as mock_run_git:
+                # Mock getting issue URL
+                mock_run_git.return_value = json.dumps(
+                    {"url": "https://github.com/user/repo/issues/123"}
+                )
+
+                with patch("asyncio.create_task") as mock_create_task:
+                    # Mock the return value of create_task to avoid actual async processing
+                    mock_task = MagicMock()
+                    mock_create_task.return_value = mock_task
+
+                    # Test revising a workplan
+                    response = await revise_workplan(
+                        ctx=mock_request_context,
+                        issue_number="123",
+                        revision_instructions="Add more detail about testing",
+                        codebase_reasoning="full",
+                    )
+
+                    # Parse response as JSON and check contents
+                    result = json.loads(response)
+                    assert result["issue_url"] == "https://github.com/user/repo/issues/123"
+                    assert result["issue_number"] == "123"
+
+                    # Verify get_issue_body was called to fetch original workplan
+                    mock_get_issue.assert_called_once_with(Path("/mock/repo"), "123")
+
+                    # Verify submission comment was added
+                    mock_add_comment.assert_called_once()
+                    comment_args = mock_add_comment.call_args
+                    assert comment_args[0][0] == Path("/mock/repo")  # repo_path
+                    assert comment_args[0][1] == "123"  # issue_number
+                    submission_comment = comment_args[0][2]  # comment content
+
+                    # Verify the submission comment contains expected metadata
+                    assert "## 🚀 Revising workplan..." in submission_comment
+                    assert "**Model**: `gemini-2.5-pro`" in submission_comment
+                    assert "**Codebase Reasoning**: `full`" in submission_comment
+
+                    # Check that the process_revision_async task is created
+                    args, kwargs = mock_create_task.call_args
+                    coroutine = args[0]
+                    assert coroutine.__name__ == "process_revision_async"
+                    # Close the coroutine to prevent RuntimeWarning
+                    coroutine.close()
+
+                    # Reset mocks for next test
+                    mock_get_issue.reset_mock()
+                    mock_add_comment.reset_mock()
+                    mock_run_git.reset_mock()
+                    mock_create_task.reset_mock()
+
+                    # Test with non-existent issue
+                    mock_get_issue.return_value = None
+
+                    with pytest.raises(Exception) as exc_info:
+                        await revise_workplan(
+                            ctx=mock_request_context,
+                            issue_number="999",
+                            revision_instructions="Update something",
+                        )
+
+                    assert "Could not retrieve workplan for issue #999" in str(exc_info.value)
