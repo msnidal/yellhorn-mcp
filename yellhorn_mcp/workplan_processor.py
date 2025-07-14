@@ -460,13 +460,10 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         if completion_metadata:
             completion_metadata.context_size_chars = len(prompt)
 
-        # Format metrics section
-        metrics_section = format_metrics_section(model, completion_metadata)
+        # Add the title as header to the workplan content (no metrics in body)
+        full_body = f"# {title}\n\n{workplan_content}"
 
-        # Add the title as header and append metrics to the final body
-        full_body = f"# {title}\n\n{workplan_content}{metrics_section}"
-
-        # Update the GitHub issue with the generated workplan and metrics
+        # Update the GitHub issue with the generated workplan (no metrics in body)
         await update_issue_with_workplan(
             repo_path, issue_number, full_body, completion_metadata, title
         )

@@ -139,36 +139,52 @@ async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str
     await run_github_command(repo_path, ["issue", "comment", issue_number, "--body", body])
 
 
-async def update_github_issue(repo_path: Path, issue_number: str, body: str) -> None:
+async def update_github_issue(
+    repo_path: Path, issue_number: str, title: str | None = None, body: str | None = None
+) -> None:
     """
-    Update a GitHub issue body.
+    Update a GitHub issue title and/or body.
 
     Args:
         repo_path: Path to the repository.
         issue_number: The issue number.
-        body: The new issue body.
+        title: Optional new issue title.
+        body: Optional new issue body.
 
     Raises:
         YellhornMCPError: If the command fails.
     """
+    if not title and not body:
+        raise YellhornMCPError("At least one of title or body must be provided")
+
     try:
-        # GitHub CLI doesn't have a direct command to update issue body,
-        # so we create a temporary file with the new body
-        import tempfile
+        command = ["issue", "edit", issue_number]
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
-            tmp.write(body)
-            tmp_path = tmp.name
+        # Add title if provided
+        if title:
+            command.extend(["--title", title])
 
-        try:
-            await run_github_command(
-                repo_path, ["issue", "edit", issue_number, "--body-file", tmp_path]
-            )
-        finally:
-            # Clean up the temporary file
-            import os
+        # Add body if provided
+        if body:
+            # GitHub CLI doesn't have a direct command to update issue body,
+            # so we create a temporary file with the new body
+            import tempfile
 
-            os.unlink(tmp_path)
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+                tmp.write(body)
+                tmp_path = tmp.name
+
+            try:
+                command.extend(["--body-file", tmp_path])
+                await run_github_command(repo_path, command)
+            finally:
+                # Clean up the temporary file
+                import os
+
+                os.unlink(tmp_path)
+        else:
+            # If only title is provided, run the command without body
+            await run_github_command(repo_path, command)
     except Exception as e:
         raise YellhornMCPError(f"Failed to update GitHub issue: {str(e)}")
 

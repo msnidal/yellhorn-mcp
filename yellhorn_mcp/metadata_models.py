@@ -31,6 +31,7 @@ class SubmissionMetadata(BaseModel):
 class CompletionMetadata(BaseModel):
     """Metadata for the completion comment after LLM processing finishes."""
 
+    model_name: str = Field(description="Model name requested (e.g., 'gemini-1.5-pro-latest')")
     status: str = Field(
         description="Completion status (e.g., '✅ Workplan generated successfully')"
     )

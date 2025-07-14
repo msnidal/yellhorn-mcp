@@ -77,6 +77,7 @@ async def generate_workplan_with_openai(
     completion_metadata = None
     if usage_metadata:
         completion_metadata = CompletionMetadata(
+            model_name=model,
             status="✅ Workplan generated successfully",
             generation_time_seconds=0.0,  # Will be calculated by caller
             input_tokens=getattr(usage_metadata, "prompt_tokens", None),
@@ -144,6 +145,7 @@ async def generate_judgement_with_openai(
     completion_metadata = None
     if usage_metadata:
         completion_metadata = CompletionMetadata(
+            model_name=model,
             status="✅ Judgement generated successfully",
             generation_time_seconds=0.0,  # Will be calculated by caller
             input_tokens=getattr(usage_metadata, "prompt_tokens", None),

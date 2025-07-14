@@ -821,6 +821,7 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         from yellhorn_mcp.metadata_models import CompletionMetadata
 
         mock_completion_metadata = CompletionMetadata(
+            model_name="gemini-2.5-pro",
             status="✅ Generated successfully",
             generation_time_seconds=0.0,
             input_tokens=1000,
@@ -871,11 +872,8 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         assert "## Files to Modify" in prompt_content
         assert "## Example Code Changes" in prompt_content
 
-        # Check that format_metrics_section was called
-        mock_format_metrics.assert_called_once()
-        call_args = mock_format_metrics.call_args
-        assert call_args[0][0] == "gemini-2.5-pro"
-        assert call_args[0][1] == mock_completion_metadata
+        # Check that format_metrics_section was NOT called (metrics no longer in body)
+        mock_format_metrics.assert_not_called()
 
         # Check that the issue was updated with the workplan
         mock_update.assert_called_once()
@@ -887,8 +885,8 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         update_content = args[2]
         assert "# Feature Implementation Plan" in update_content
         assert "Mock workplan content" in update_content
-        assert "## Completion Metrics" in update_content
-        assert "**Model Used**: `gemini-2.5-pro`" in update_content
+        # Should NOT have metrics in body
+        assert "## Completion Metrics" not in update_content
 
         # Verify that add_github_issue_comment was called with the completion metadata
         mock_add_comment.assert_called_once()
@@ -1318,88 +1316,103 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                     "yellhorn_mcp.judgement_processor.create_judgement_subissue"
                 ) as mock_create_subissue:
                     mock_create_subissue.return_value = "https://github.com/user/repo/issues/789"
-                    with patch(
-                        "yellhorn_mcp.search_grounding._get_gemini_search_tools"
-                    ) as mock_get_tools:
+                    with patch("yellhorn_mcp.judgement_processor.run_git_command") as mock_run_git:
+                        # Mock getting the remote URL
+                        mock_run_git.return_value = "https://github.com/user/repo"
                         with patch(
-                            "yellhorn_mcp.judgement_processor.get_codebase_snapshot",
-                            new_callable=AsyncMock,
-                        ) as mock_snapshot:
+                            "yellhorn_mcp.search_grounding._get_gemini_search_tools"
+                        ) as mock_get_tools:
                             with patch(
-                                "yellhorn_mcp.judgement_processor.format_codebase_for_prompt",
+                                "yellhorn_mcp.judgement_processor.get_codebase_snapshot",
                                 new_callable=AsyncMock,
-                            ) as mock_format:
-                                mock_get_tools.return_value = [MagicMock()]
-                                mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
-                                mock_format.return_value = "Formatted codebase"
+                            ) as mock_snapshot:
+                                with patch(
+                                    "yellhorn_mcp.judgement_processor.format_codebase_for_prompt",
+                                    new_callable=AsyncMock,
+                                ) as mock_format:
+                                    mock_get_tools.return_value = [MagicMock()]
+                                    mock_snapshot.return_value = (
+                                        ["file1.py"],
+                                        {"file1.py": "content"},
+                                    )
+                                    mock_format.return_value = "Formatted codebase"
 
-                                # Set context for search grounding
-                                mock_request_context.request_context.lifespan_context[
-                                    "use_search_grounding"
-                                ] = True
+                                    # Set context for search grounding
+                                    mock_request_context.request_context.lifespan_context[
+                                        "use_search_grounding"
+                                    ] = True
 
-                                # Call process_judgement_async with new signature
-                                from datetime import datetime, timezone
+                                    # Call process_judgement_async with new signature
+                                    from datetime import datetime, timezone
 
-                                await process_judgement_async(
-                                    repo_path=Path("/test/repo"),
-                                    gemini_client=mock_genai_client,
-                                    openai_client=None,
-                                    model="gemini-2.5-pro",
-                                    workplan_content="# Workplan\n1. Do something",
-                                    diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
-                                    base_ref="main",
-                                    head_ref="HEAD",
-                                    subissue_to_update="789",
-                                    parent_workplan_issue_number="123",
-                                    ctx=mock_request_context,
-                                    base_commit_hash="abc1234",
-                                    head_commit_hash="def5678",
-                                    debug=False,
-                                    codebase_reasoning="full",
-                                    _meta={
-                                        "start_time": datetime.now(timezone.utc),
-                                        "submitted_urls": [],
-                                    },
-                                )
+                                    await process_judgement_async(
+                                        repo_path=Path("/test/repo"),
+                                        gemini_client=mock_genai_client,
+                                        openai_client=None,
+                                        model="gemini-2.5-pro",
+                                        workplan_content="# Workplan\n1. Do something",
+                                        diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
+                                        base_ref="main",
+                                        head_ref="HEAD",
+                                        subissue_to_update="789",
+                                        parent_workplan_issue_number="123",
+                                        ctx=mock_request_context,
+                                        base_commit_hash="abc1234",
+                                        head_commit_hash="def5678",
+                                        debug=False,
+                                        codebase_reasoning="full",
+                                        _meta={
+                                            "start_time": datetime.now(timezone.utc),
+                                            "submitted_urls": [],
+                                        },
+                                    )
 
-                                # Verify create_github_subissue was called (update is not implemented yet)
-                                mock_create_subissue.assert_called_once()
-                                # Verify update_github_issue was NOT called
-                                mock_update_issue.assert_not_called()
+                                    # Verify update_github_issue was called instead of create_github_subissue
+                                    mock_update_issue.assert_called_once()
+                                    # Verify create_github_subissue was NOT called
+                                    mock_create_subissue.assert_not_called()
 
-                                # Verify the body passed to create_github_subissue contains expected metadata
-                                call_args = mock_create_subissue.call_args
-                                body = call_args[0][3]  # 4th argument is body
-                                assert "## Comparison Metadata" in body
-                                assert "**Workplan Issue**: `#123`" in body
-                                assert "**Base Ref**: `main` (Commit: `abc1234`)" in body
-                                assert "**Head Ref**: `HEAD` (Commit: `def5678`)" in body
-                                assert "**Codebase Reasoning Mode**: `full`" in body
-                                assert "**AI Model**: `gemini-2.5-pro`" in body
-                                assert "## Judgement Summary" in body
-                                assert "Implementation looks good." in body
-                                assert "## Completion Metrics" in body
+                                    # Verify the arguments passed to update_github_issue
+                                    call_args = mock_update_issue.call_args
+                                    assert call_args.kwargs["repo_path"] == Path("/test/repo")
+                                    assert call_args.kwargs["issue_number"] == "789"
+                                    assert (
+                                        "Judgement for #123: HEAD vs main"
+                                        in call_args.kwargs["title"]
+                                    )
+                                    body = call_args.kwargs["body"]
+                                    assert "## Comparison Metadata" in body
+                                    assert "**Workplan Issue**: `#123`" in body
+                                    assert "**Base Ref**: `main` (Commit: `abc1234`)" in body
+                                    assert "**Head Ref**: `HEAD` (Commit: `def5678`)" in body
+                                    assert "**Codebase Reasoning Mode**: `full`" in body
+                                    assert "**AI Model**: `gemini-2.5-pro`" in body
+                                    assert "## Judgement Summary" in body
+                                    assert "Implementation looks good." in body
+                                    # Should NOT have metrics in body
+                                    assert "## Completion Metrics" not in body
 
-                                # Verify completion metadata comment was added
-                                mock_add_comment.assert_called_once()
-                                comment_args = mock_add_comment.call_args
-                                assert comment_args[0][0] == Path("/test/repo")  # repo_path
-                                assert comment_args[0][1] == "789"  # subissue_to_update
-                                completion_comment = comment_args[0][2]  # comment content
+                                    # Verify completion metadata comment was added to parent issue
+                                    mock_add_comment.assert_called_once()
+                                    comment_args = mock_add_comment.call_args
+                                    assert comment_args[0][0] == Path("/test/repo")  # repo_path
+                                    assert (
+                                        comment_args[0][1] == "123"
+                                    )  # parent issue number, not sub-issue
+                                    completion_comment = comment_args[0][2]  # comment content
 
-                                # Verify the completion comment contains expected metadata
-                                assert "## ✅ Generated successfully" in completion_comment
-                                assert "### Generation Details" in completion_comment
-                                assert "**Time**: " in completion_comment
-                                assert "### Token Usage" in completion_comment
-                                assert "**Input Tokens**: 1,000" in completion_comment
-                                assert "**Total Tokens**: 1,500" in completion_comment
-                                assert "**Context Size**: " in completion_comment
-                                assert "**Finish Reason**: `STOP`" in completion_comment
+                                    # Verify the completion comment contains expected metadata
+                                    assert "## ✅ Generated successfully" in completion_comment
+                                    assert "### Generation Details" in completion_comment
+                                    assert "**Time**: " in completion_comment
+                                    assert "### Token Usage" in completion_comment
+                                    assert "**Input Tokens**: 1,000" in completion_comment
+                                    assert "**Total Tokens**: 1,500" in completion_comment
+                                    assert "**Context Size**: " in completion_comment
+                                    assert "**Finish Reason**: `STOP`" in completion_comment
 
-                                # Test with debug=True
-                                mock_update_issue.reset_mock()
+                                    # Test with debug=True
+                                    mock_update_issue.reset_mock()
                                 mock_add_comment.reset_mock()
 
                                 await process_judgement_async(
@@ -1603,8 +1616,8 @@ This workplan implements feature X.
         assert "## Citations" in update_content
         assert "https://docs.python.org/3/library/json.html" in update_content
         assert "https://github.com/user/repo/issues/123" in update_content
-        assert "## Completion Metrics" in update_content
-        assert "**Model Used**: `gemini-2.5-pro`" in update_content
+        # Should NOT have metrics in body
+        assert "## Completion Metrics" not in update_content
 
 
 # Integration tests for new search grounding flow

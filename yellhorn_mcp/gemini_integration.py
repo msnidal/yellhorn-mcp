@@ -125,7 +125,7 @@ async def generate_workplan_with_gemini(
         workplan_content = add_citations(response)
 
     # Parse usage metadata into CompletionMetadata
-    completion_metadata = _parse_gemini_usage(response, usage_metadata)
+    completion_metadata = _parse_gemini_usage(response, usage_metadata, model)
 
     return workplan_content, completion_metadata
 
@@ -202,7 +202,7 @@ async def generate_judgement_with_gemini(
         judgement_content = add_citations(response)
 
     # Parse usage metadata into CompletionMetadata
-    completion_metadata = _parse_gemini_usage(response, usage_metadata)
+    completion_metadata = _parse_gemini_usage(response, usage_metadata, model)
 
     return judgement_content, completion_metadata
 
@@ -251,13 +251,14 @@ async def generate_curate_context_with_gemini(
 
 
 def _parse_gemini_usage(
-    response: genai_types.GenerateContentResponse, usage_metadata: Any
+    response: genai_types.GenerateContentResponse, usage_metadata: Any, model: str
 ) -> CompletionMetadata | None:
     """Parse Gemini response into CompletionMetadata.
 
     Args:
         response: The Gemini API response.
         usage_metadata: Usage metadata from response.
+        model: The model name requested.
 
     Returns:
         CompletionMetadata instance or None.
@@ -278,9 +279,16 @@ def _parse_gemini_usage(
     # Check for search results in grounding metadata
     search_results_used: set[str] = set()
     for candidate in response.candidates or []:
-        if candidate.grounding_metadata is not None and candidate.grounding_metadata.grounding_chunks:
+        if (
+            candidate.grounding_metadata is not None
+            and candidate.grounding_metadata.grounding_chunks
+        ):
             search_results_used.update(
-                [grounding_chunk.web.uri for grounding_chunk in candidate.grounding_metadata.grounding_chunks if grounding_chunk.web and grounding_chunk.web.uri]
+                [
+                    grounding_chunk.web.uri
+                    for grounding_chunk in candidate.grounding_metadata.grounding_chunks
+                    if grounding_chunk.web and grounding_chunk.web.uri
+                ]
             )
 
     # Extract safety ratings if available
@@ -290,16 +298,8 @@ def _parse_gemini_usage(
         if hasattr(candidate, "safety_ratings") and candidate.safety_ratings:
             safety_ratings = [
                 {
-                    "category": (
-                        rating.category.name
-                        if rating.category
-                        else "N/A"
-                    ),
-                    "probability": (
-                        rating.probability.name
-                        if rating.probability
-                        else "N/A"
-                    ),
+                    "category": (rating.category.name if rating.category else "N/A"),
+                    "probability": (rating.probability.name if rating.probability else "N/A"),
                 }
                 for rating in candidate.safety_ratings
             ]
@@ -311,6 +311,7 @@ def _parse_gemini_usage(
         finish_reason = None
 
     return CompletionMetadata(
+        model_name=model,
         status="✅ Generated successfully",
         generation_time_seconds=0.0,  # Will be calculated by caller
         input_tokens=input_tokens,

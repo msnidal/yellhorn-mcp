@@ -191,7 +191,8 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
         assert args[1] == "123"
         assert "# Feature Implementation Plan" in args[2]
         assert "Mock OpenAI response text" in args[2]
-        assert "## Completion Metrics" in args[2]
+        # Should NOT have metrics in body
+        assert "## Completion Metrics" not in args[2]
 
 
 @pytest.mark.asyncio
@@ -308,7 +309,8 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         assert "Judgement for #123" in create_args[2]  # title
         issue_body = create_args[3]  # Fourth argument is the issue body
         assert "Mock OpenAI response text" in issue_body
-        assert "## Completion Metrics" in issue_body
+        # Should NOT have metrics in body
+        assert "## Completion Metrics" not in issue_body
 
 
 @pytest.mark.asyncio

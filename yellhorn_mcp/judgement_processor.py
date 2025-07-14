@@ -252,9 +252,6 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         if completion_metadata:
             completion_metadata.context_size_chars = len(prompt)
 
-        # Format metrics section
-        metrics_section = format_metrics_section(model, completion_metadata)
-
         # Construct metadata section for the final body
         metadata_section = f"""## Comparison Metadata
 - **Workplan Issue**: `#{parent_workplan_issue_number}`
@@ -268,23 +265,33 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Add parent issue link at the top
         parent_link = f"Parent workplan: #{parent_workplan_issue_number}\n\n"
 
-        # Construct the full body
-        full_body = f"{parent_link}{metadata_section}{judgement_content}{metrics_section}"
+        # Construct the full body (no metrics in body)
+        full_body = f"{parent_link}{metadata_section}{judgement_content}"
 
         # Construct title
         judgement_title = f"Judgement for #{parent_workplan_issue_number}: {head_ref} vs {base_ref}"
 
         # Create or update the sub-issue
         if subissue_to_update:
-            # Update existing issue (not implemented in GitHub integration yet)
-            if ctx:
-                await ctx.log(
-                    level="warning",
-                    message=f"Sub-issue update not yet implemented, creating new issue instead",
-                )
-            subissue_url = await create_judgement_subissue(
-                repo_path, parent_workplan_issue_number, judgement_title, full_body
+            # Update existing issue
+            from yellhorn_mcp.git_utils import update_github_issue
+
+            await update_github_issue(
+                repo_path=repo_path,
+                issue_number=subissue_to_update,
+                title=judgement_title,
+                body=full_body,
             )
+
+            # Construct the URL for the updated issue
+            repo_info = await run_git_command(repo_path, ["remote", "get-url", "origin"])
+            # Clean up the repo URL to get the proper format
+            if repo_info.endswith(".git"):
+                repo_info = repo_info[:-4]
+            if repo_info.startswith("git@github.com:"):
+                repo_info = repo_info.replace("git@github.com:", "https://github.com/")
+
+            subissue_url = f"{repo_info}/issues/{subissue_to_update}"
         else:
             subissue_url = await create_judgement_subissue(
                 repo_path, parent_workplan_issue_number, judgement_title, full_body
@@ -307,7 +314,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
                 await add_issue_comment(repo_path, sub_issue_number, debug_comment)
 
-        # Add completion comment if we have submission metadata
+        # Add completion comment to the PARENT issue, not the sub-issue
         if completion_metadata and _meta:
             submission_metadata = SubmissionMetadata(
                 status="Generating judgement...",
@@ -319,14 +326,9 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 timestamp=_meta.get("start_time", datetime.now(timezone.utc)),
             )
 
-            # Extract issue number for comment
-            import re
-
-            issue_match = re.search(r"/issues/(\d+)", subissue_url)
-            if issue_match:
-                sub_issue_number = issue_match.group(1)
-                completion_comment = format_completion_comment(completion_metadata)
-                await add_issue_comment(repo_path, sub_issue_number, completion_comment)
+            # Post completion comment to the parent issue
+            completion_comment = format_completion_comment(completion_metadata)
+            await add_issue_comment(repo_path, parent_workplan_issue_number, completion_comment)
 
     except Exception as e:
         error_msg = f"Error processing judgement: {str(e)}"
