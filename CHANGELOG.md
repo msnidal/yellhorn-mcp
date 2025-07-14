@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2025-07-14
+
+### Changed
+
+- Major refactoring of codebase architecture (#95):
+  - Split monolithic `server.py` into focused modules for better organization
+  - Added comprehensive type annotations using modern Python 3.10+ syntax
+  - Removed legacy Gemini 1.5 model support
+  - Improved code modularity with clear interfaces between components
+
+### Fixed
+
+- Fixed failing tests and resolved type annotation issues (#96):
+  - Corrected type hints in `cost_tracker.py` for flexible usage metadata handling
+  - Improved exception handling in asynchronous flows
+  - Fixed LSP context output to exclude code fences
+  - Enhanced test reliability with proper GitHub CLI command mocks
+  - Aligned OpenAI Deep Research tool configuration with expected values
+
+- Fixed typing issues in cost_tracker.py using type-safe approaches (#97):
+  - Introduced explicit Protocol classes for OpenAI and Gemini usage metadata
+  - Refactored `format_metrics_section_raw` to use type-safe branches
+  - Eliminated unchecked attribute access and `getattr` usage on untyped objects
+  - Resolved all Pyright type checking errors in cost tracking module
+
+- Fixed workplan judgment sub-issue creation and completion metrics (#104):
+  - Corrected judgment process to update existing placeholder issue instead of creating duplicate
+  - Removed redundant completion metrics from issue bodies (now only in comments)
+  - Ensured model name is always displayed in completion comments as fallback when version is unavailable
+
 ## [0.5.2] - 2025-07-06
 
 ### Changed
