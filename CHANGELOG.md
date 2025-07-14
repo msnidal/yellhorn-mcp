@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2025-07-14
+
+### Added
+
+- Added `revise_workplan` tool to update existing workplans based on revision instructions
+  - Fetches existing workplan from GitHub issue
+  - Launches background AI process to revise based on instructions
+  - Updates issue with revised workplan once complete
+  - Uses same codebase analysis mode and model as original workplan
+
 ## [0.6.0] - 2025-07-14
 
 ### Changed
