@@ -313,11 +313,12 @@ async def test_integration_process_workplan_lsp_mode():
     gemini_client = MagicMock()
     response = MagicMock()
     response.text = "Mock workplan content"
-    response.usage_metadata = {
-        "prompt_token_count": 1000,
-        "completion_token_count": 500,
-        "total_token_count": 1500,
-    }
+    # Mock usage_metadata as an object with attributes, not a dict
+    usage_metadata = MagicMock()
+    usage_metadata.prompt_token_count = 1000
+    usage_metadata.candidates_token_count = 500
+    usage_metadata.total_token_count = 1500
+    response.usage_metadata = usage_metadata
     # Mock the candidates structure to avoid errors in add_citations
     response.candidates = [MagicMock()]
     response.candidates[0].grounding_metadata = MagicMock()
@@ -396,7 +397,10 @@ async def test_integration_process_workplan_lsp_mode():
                     update_calls = [
                         call
                         for call in gh_calls
-                        if "issue" in call.args[1] and "edit" in call.args[1]
+                        if len(call.args) > 1
+                        and isinstance(call.args[1], list)
+                        and "issue" in call.args[1]
+                        and "edit" in call.args[1]
                     ]
                     assert len(update_calls) > 0, "No issue update calls found"
 
@@ -419,11 +423,12 @@ async def test_integration_process_judgement_lsp_mode():
     gemini_client = MagicMock()
     response = MagicMock()
     response.text = "Mock judgement content"
-    response.usage_metadata = {
-        "prompt_token_count": 1000,
-        "completion_token_count": 500,
-        "total_token_count": 1500,
-    }
+    # Mock usage_metadata as an object with attributes, not a dict
+    usage_metadata = MagicMock()
+    usage_metadata.prompt_token_count = 1000
+    usage_metadata.candidates_token_count = 500
+    usage_metadata.total_token_count = 1500
+    response.usage_metadata = usage_metadata
     # Mock the candidates structure for Gemini models to avoid validation errors
     response.candidates = [MagicMock()]
     response.candidates[0].grounding_metadata = MagicMock()

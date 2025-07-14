@@ -224,38 +224,6 @@ async def get_github_issue_body(repo_path: Path, issue_identifier: str) -> str:
         raise YellhornMCPError(f"Failed to parse GitHub issue body: {str(e)}")
 
 
-async def get_git_diff(repo_path: Path, base_ref: str = "main", head_ref: str = "HEAD") -> str:
-    """
-    Get the git diff between two references.
-
-    Args:
-        repo_path: Path to the repository.
-        base_ref: The base reference (default: "main").
-        head_ref: The head reference (default: "HEAD").
-
-    Returns:
-        The diff as a string.
-
-    Raises:
-        YellhornMCPError: If the command fails.
-    """
-    # Get the diff
-    try:
-        # First try using git diff
-        diff = await run_git_command(repo_path, ["diff", "--patch", f"{base_ref}...{head_ref}"])
-        if diff:
-            return diff
-    except Exception as e:
-        # Log the error but continue to try other methods
-        print(f"Git diff failed: {str(e)}")
-
-    # Fall back to git show if diff fails or is empty
-    try:
-        return await run_git_command(repo_path, ["show", f"{head_ref}"])
-    except Exception as e:
-        raise YellhornMCPError(f"Failed to get git diff: {str(e)}")
-
-
 async def get_github_pr_diff(repo_path: Path, pr_url: str) -> str:
     """
     Get the diff for a GitHub pull request.

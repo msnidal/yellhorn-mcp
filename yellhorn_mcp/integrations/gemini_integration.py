@@ -33,21 +33,18 @@ async def async_generate_content_with_config(
     Raises:
         YellhornMCPError: If the client doesn't support the required API.
     """
-    # Ensure client and its attributes are valid
-    if not (
-        hasattr(client, "aio")
-        and hasattr(client.aio, "models")
-        and hasattr(client.aio.models, "generate_content")
-    ):
-        raise YellhornMCPError("Gemini client does not support aio.models.generate_content.")
-
-    # Call Gemini API with optional generation_config
-    if generation_config is not None:
-        return await client.aio.models.generate_content(
-            model=model_name, contents=prompt, config=generation_config
+    try:
+        if generation_config is not None:
+            return await client.aio.models.generate_content(
+                model=model_name, contents=prompt, config=generation_config
+            )
+        else:
+            return await client.aio.models.generate_content(model=model_name, contents=prompt)
+    except AttributeError:
+        raise YellhornMCPError(
+            "Client does not support aio.models.generate_content. "
+            "Please ensure you're using a valid Gemini client."
         )
-    else:
-        return await client.aio.models.generate_content(model=model_name, contents=prompt)
 
 
 async def generate_workplan_with_gemini(
@@ -113,7 +110,7 @@ async def generate_workplan_with_gemini(
     workplan_content = response.text
 
     # Capture usage metadata
-    usage_metadata = getattr(response, "usage_metadata", {})
+    usage_metadata = response.usage_metadata
 
     if not workplan_content:
         raise YellhornMCPError(
@@ -192,7 +189,7 @@ async def generate_judgement_with_gemini(
 
     # Extract judgement and usage metadata
     judgement_content = response.text
-    usage_metadata = getattr(response, "usage_metadata", {})
+    usage_metadata = response.usage_metadata
 
     if not judgement_content:
         raise YellhornMCPError("Received empty response from Gemini API.")
@@ -251,7 +248,9 @@ async def generate_curate_context_with_gemini(
 
 
 def _parse_gemini_usage(
-    response: genai_types.GenerateContentResponse, usage_metadata: Any, model: str
+    response: genai_types.GenerateContentResponse,
+    usage_metadata: genai_types.GenerateContentResponseUsageMetadata | None,
+    model: str,
 ) -> CompletionMetadata | None:
     """Parse Gemini response into CompletionMetadata.
 
@@ -267,14 +266,9 @@ def _parse_gemini_usage(
         return None
 
     # Handle both dict and object forms of usage_metadata
-    if isinstance(usage_metadata, dict):
-        input_tokens = usage_metadata.get("prompt_token_count")
-        output_tokens = usage_metadata.get("completion_token_count")
-        total_tokens = usage_metadata.get("total_token_count")
-    else:
-        input_tokens = getattr(usage_metadata, "prompt_token_count", None)
-        output_tokens = getattr(usage_metadata, "completion_token_count", None)
-        total_tokens = getattr(usage_metadata, "total_token_count", None)
+    input_tokens = usage_metadata.prompt_token_count
+    output_tokens = usage_metadata.candidates_token_count
+    total_tokens = usage_metadata.total_token_count
 
     # Check for search results in grounding metadata
     search_results_used: set[str] = set()
@@ -293,9 +287,9 @@ def _parse_gemini_usage(
 
     # Extract safety ratings if available
     safety_ratings = None
-    if hasattr(response, "candidates") and response.candidates:
+    if response.candidates:
         candidate = response.candidates[0]
-        if hasattr(candidate, "safety_ratings") and candidate.safety_ratings:
+        if candidate.safety_ratings:
             safety_ratings = [
                 {
                     "category": (rating.category.name if rating.category else "N/A"),
@@ -304,8 +298,8 @@ def _parse_gemini_usage(
                 for rating in candidate.safety_ratings
             ]
         # Also check finish reason
-        finish_reason = getattr(candidate, "finish_reason", None)
-        if finish_reason and hasattr(finish_reason, "name"):
+        finish_reason = candidate.finish_reason
+        if finish_reason and finish_reason.name:
             finish_reason = finish_reason.name
     else:
         finish_reason = None

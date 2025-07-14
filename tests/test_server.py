@@ -1312,11 +1312,10 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
     # Mock the Gemini client response
     mock_response = MagicMock()
     mock_response.text = "## Judgement Summary\nImplementation looks good."
-    mock_response.usage_metadata = {
-        "prompt_token_count": 1000,
-        "candidates_token_count": 500,
-        "total_token_count": 1500,
-    }
+    mock_response.usage_metadata = MagicMock()
+    mock_response.usage_metadata.prompt_token_count = 1000
+    mock_response.usage_metadata.candidates_token_count = 500
+    mock_response.usage_metadata.total_token_count = 1500
     mock_response.citations = []
 
     # Mock candidates to avoid finish_reason error
@@ -1602,11 +1601,10 @@ This workplan implements feature X.
 ## Citations
 1. https://docs.python.org/3/library/json.html
 2. https://github.com/user/repo/issues/123"""
-        mock_response.usage_metadata = {
-            "prompt_token_count": 1000,
-            "candidates_token_count": 500,
-            "total_token_count": 1500,
-        }
+        mock_response.usage_metadata = MagicMock()
+        mock_response.usage_metadata.prompt_token_count = 1000
+        mock_response.usage_metadata.candidates_token_count = 500
+        mock_response.usage_metadata.total_token_count = 1500
 
         # Mock candidates to avoid errors in add_citations
         mock_candidate = MagicMock()
@@ -1833,11 +1831,10 @@ async def test_process_judgement_async_search_grounding_enabled(
     # Mock the response with grounding metadata
     mock_response = MagicMock()
     mock_response.text = "## Judgement Summary\nImplementation looks good."
-    mock_response.usage_metadata = {
-        "prompt_token_count": 1000,
-        "candidates_token_count": 500,
-        "total_token_count": 1500,
-    }
+    mock_response.usage_metadata = MagicMock()
+    mock_response.usage_metadata.prompt_token_count = 1000
+    mock_response.usage_metadata.candidates_token_count = 500
+    mock_response.usage_metadata.total_token_count = 1500
     mock_response.grounding_metadata = MagicMock()
 
     # Mock candidates to avoid finish_reason error
