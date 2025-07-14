@@ -276,11 +276,11 @@ def _parse_gemini_usage(
         total_tokens = getattr(usage_metadata, "total_token_count", None)
 
     # Check for search results in grounding metadata
-    search_results_used = None
-    if hasattr(response, "grounding_metadata") and response.grounding_metadata:
-        if hasattr(response.grounding_metadata, "search_entry_point"):
-            search_results_used = len(
-                getattr(response.grounding_metadata.search_entry_point, "sources", [])
+    search_results_used: set[str] = set()
+    for candidate in response.candidates or []:
+        if candidate.grounding_metadata is not None and candidate.grounding_metadata.grounding_chunks:
+            search_results_used.update(
+                [grounding_chunk.web.uri for grounding_chunk in candidate.grounding_metadata.grounding_chunks if grounding_chunk.web and grounding_chunk.web.uri]
             )
 
     # Extract safety ratings if available
@@ -292,13 +292,13 @@ def _parse_gemini_usage(
                 {
                     "category": (
                         rating.category.name
-                        if hasattr(rating.category, "name")
-                        else str(rating.category)
+                        if rating.category
+                        else "N/A"
                     ),
                     "probability": (
                         rating.probability.name
-                        if hasattr(rating.probability, "name")
-                        else str(rating.probability)
+                        if rating.probability
+                        else "N/A"
                     ),
                 }
                 for rating in candidate.safety_ratings
@@ -316,7 +316,7 @@ def _parse_gemini_usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,
-        search_results_used=search_results_used,
+        search_results_used=len(search_results_used),
         safety_ratings=safety_ratings,
         finish_reason=finish_reason,
         timestamp=None,  # Will be set by caller

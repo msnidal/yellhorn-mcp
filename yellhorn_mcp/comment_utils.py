@@ -59,7 +59,7 @@ def format_completion_comment(metadata: CompletionMetadata) -> str:
         "",
         "### Generation Details",
         f"**Time**: {metadata.generation_time_seconds:.1f} seconds  ",
-        f"**Completed**: {metadata.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}  ",
+        f"**Completed**: {metadata.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') if metadata.timestamp else 'N/A'}  ",
     ]
 
     if metadata.model_version_used:
