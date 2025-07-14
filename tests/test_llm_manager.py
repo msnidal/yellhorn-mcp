@@ -3,8 +3,11 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata, ChunkingStrategy, log_retry_attempt, is_retryable_error
 from yellhorn_mcp.token_counter import TokenCounter
+from tenacity import RetryCallState
+from openai import RateLimitError
+from google.api_core import exceptions as google_exceptions
 
 
 class MockGeminiUsage:
@@ -596,3 +599,435 @@ class TestLLMManager:
         call_args = mock_gemini.aio.models.generate_content.call_args[1]
         assert "config" in call_args
         # The config should include both temperature and tools from generation_config
+    
+    @pytest.mark.asyncio
+    async def test_call_llm_with_usage(self):
+        """Test call_llm_with_usage method returns content and usage metadata."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Test response")])]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        # Ensure output_text is not present so it uses the output array structure
+        del mock_response.output_text
+        
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(openai_client=mock_openai)
+        
+        result = await manager.call_llm_with_usage(
+            prompt="Test prompt",
+            model="gpt-4o",
+            temperature=0.7
+        )
+        
+        assert isinstance(result, dict)
+        assert "content" in result
+        assert "usage_metadata" in result
+        assert result["content"] == "Test response"
+        assert result["usage_metadata"].prompt_tokens == 10
+        assert result["usage_metadata"].completion_tokens == 20
+        assert result["usage_metadata"].total_tokens == 30
+    
+    def test_get_last_usage_metadata(self):
+        """Test get_last_usage_metadata method."""
+        manager = LLMManager()
+        
+        # Initially should be None
+        assert manager.get_last_usage_metadata() is None
+        
+        # Set usage metadata
+        manager._last_usage_metadata = UsageMetadata({"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150})
+        
+        usage = manager.get_last_usage_metadata()
+        assert usage is not None
+        assert usage.prompt_tokens == 100
+        assert usage.completion_tokens == 50
+        assert usage.total_tokens == 150
+    
+    @pytest.mark.asyncio
+    async def test_openai_temperature_for_o_models(self):
+        """Test that temperature is always 1.0 for 'o' models."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Test response")])]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        del mock_response.output_text
+        
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(openai_client=mock_openai)
+        
+        # Test with o3 model
+        await manager.call_llm(
+            prompt="Test prompt",
+            model="o3",
+            temperature=0.5  # This should be overridden to 1.0
+        )
+        
+        call_args = mock_openai.responses.create.call_args[1]
+        assert call_args["temperature"] == 1.0
+        
+        # Test with o4-mini model
+        await manager.call_llm(
+            prompt="Test prompt",
+            model="o4-mini",
+            temperature=0.7  # This should be overridden to 1.0
+        )
+        
+        call_args = mock_openai.responses.create.call_args[1]
+        assert call_args["temperature"] == 1.0
+    
+    @pytest.mark.asyncio
+    async def test_gemini_json_parsing_error(self):
+        """Test Gemini JSON response with invalid JSON."""
+        mock_gemini = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "This is not valid JSON"
+        
+        mock_gemini.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(gemini_client=mock_gemini)
+        
+        result = await manager.call_llm(
+            prompt="Test prompt",
+            model="gemini-2.5-pro",
+            response_format="json"
+        )
+        
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert result["error"] == "No JSON content found in response"
+    
+    @pytest.mark.asyncio
+    async def test_gemini_json_extraction(self):
+        """Test Gemini JSON extraction from mixed content."""
+        mock_gemini = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = 'Here is the JSON: {"key": "value", "nested": {"item": 123}}'
+        
+        mock_gemini.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(gemini_client=mock_gemini)
+        
+        result = await manager.call_llm(
+            prompt="Test prompt",
+            model="gemini-2.5-pro",
+            response_format="json"
+        )
+        
+        assert isinstance(result, dict)
+        assert result["key"] == "value"
+        assert result["nested"]["item"] == 123
+    
+    @pytest.mark.asyncio
+    async def test_openai_json_parsing_error(self):
+        """Test OpenAI JSON response with invalid JSON."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Invalid JSON content")])]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        del mock_response.output_text
+        
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+        
+        manager = LLMManager(openai_client=mock_openai)
+        
+        result = await manager.call_llm(
+            prompt="Test prompt",
+            model="gpt-4o",
+            response_format="json"
+        )
+        
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert result["error"] == "Failed to parse JSON"
+        assert result["content"] == "Invalid JSON content"
+
+
+class TestUsageMetadata:
+    """Test suite for UsageMetadata class."""
+    
+    def test_init_with_none(self):
+        """Test UsageMetadata initialization with None."""
+        usage = UsageMetadata(None)
+        assert usage.prompt_tokens == 0
+        assert usage.completion_tokens == 0
+        assert usage.total_tokens == 0
+        assert usage.model is None
+    
+    def test_init_with_dict(self):
+        """Test UsageMetadata initialization with dictionary."""
+        data = {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+            "model": "gpt-4o"
+        }
+        usage = UsageMetadata(data)
+        assert usage.prompt_tokens == 100
+        assert usage.completion_tokens == 50
+        assert usage.total_tokens == 150
+        assert usage.model == "gpt-4o"
+    
+    def test_init_with_openai_format(self):
+        """Test UsageMetadata initialization with OpenAI format."""
+        # Create object with prompt_tokens attribute
+        class MockOpenAIUsage:
+            prompt_tokens = 200
+            completion_tokens = 100
+            total_tokens = 300
+        
+        usage = UsageMetadata(MockOpenAIUsage())
+        assert usage.prompt_tokens == 200
+        assert usage.completion_tokens == 100
+        assert usage.total_tokens == 300
+    
+    def test_init_with_gemini_format(self):
+        """Test UsageMetadata initialization with Gemini format."""
+        # Create object with prompt_token_count attribute
+        class MockGeminiUsage:
+            prompt_token_count = 150
+            candidates_token_count = 75
+            total_token_count = 225
+        
+        usage = UsageMetadata(MockGeminiUsage())
+        assert usage.prompt_tokens == 150
+        assert usage.completion_tokens == 75
+        assert usage.total_tokens == 225
+    
+    def test_gemini_properties(self):
+        """Test Gemini-style properties."""
+        usage = UsageMetadata({
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150
+        })
+        
+        assert usage.prompt_token_count == 100
+        assert usage.candidates_token_count == 50
+        assert usage.total_token_count == 150
+    
+    def test_to_dict(self):
+        """Test to_dict method."""
+        usage = UsageMetadata({
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+            "model": "gpt-4o"
+        })
+        
+        result = usage.to_dict()
+        assert result == {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+            "model": "gpt-4o"
+        }
+    
+    def test_to_dict_without_model(self):
+        """Test to_dict method without model."""
+        usage = UsageMetadata({
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150
+        })
+        
+        result = usage.to_dict()
+        assert result == {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150
+        }
+    
+    def test_bool_with_valid_data(self):
+        """Test __bool__ with valid usage data."""
+        usage = UsageMetadata({"total_tokens": 100})
+        assert bool(usage) is True
+    
+    def test_bool_with_zero_tokens(self):
+        """Test __bool__ with zero tokens."""
+        usage = UsageMetadata({"total_tokens": 0})
+        assert bool(usage) is False
+    
+    def test_bool_with_none_tokens(self):
+        """Test __bool__ with None tokens."""
+        usage = UsageMetadata()
+        usage.total_tokens = None
+        assert bool(usage) is False
+    
+    def test_bool_with_attribute_error(self):
+        """Test __bool__ with attribute error."""
+        usage = UsageMetadata()
+        delattr(usage, 'total_tokens')
+        assert bool(usage) is False
+
+
+class TestChunkingStrategy:
+    """Test suite for ChunkingStrategy class."""
+    
+    def test_find_split_point_paragraph_break(self):
+        """Test _find_split_point prefers paragraph breaks."""
+        text = "First paragraph.\n\nSecond paragraph with more text."
+        # Look for split point before the second paragraph
+        split = ChunkingStrategy._find_split_point(text, 20)
+        assert split == 19  # After first \n, +2 = position 19
+    
+    def test_find_split_point_sentence_break(self):
+        """Test _find_split_point uses sentence break when no paragraph break."""
+        text = "First sentence. Second sentence. Third sentence here."
+        split = ChunkingStrategy._find_split_point(text, 25)
+        assert split == 15  # After "." (position 14) + 1 = 15
+    
+    def test_find_split_point_word_break(self):
+        """Test _find_split_point uses word break when no sentence break."""
+        text = "This is a very long word without punctuation"
+        split = ChunkingStrategy._find_split_point(text, 20)
+        assert split == 19  # After "long" at position 19
+    
+    def test_find_split_point_no_break(self):
+        """Test _find_split_point uses max_length when no good break found."""
+        text = "Verylongwordwithoutanyspaces"
+        split = ChunkingStrategy._find_split_point(text, 10)
+        assert split == 10
+    
+    def test_split_by_sentences_empty_text(self):
+        """Test split_by_sentences with empty text."""
+        counter = TokenCounter()
+        chunks = ChunkingStrategy.split_by_sentences("", 1000, counter, "gpt-4o")
+        assert chunks == []
+    
+    def test_split_by_sentences_small_text(self):
+        """Test split_by_sentences with text that fits in one chunk."""
+        counter = TokenCounter()
+        text = "This is a small text."
+        chunks = ChunkingStrategy.split_by_sentences(text, 1000, counter, "gpt-4o")
+        assert len(chunks) == 1
+        assert chunks[0] == text
+    
+    def test_split_by_sentences_with_overlap(self):
+        """Test split_by_sentences with overlap."""
+        counter = TokenCounter()
+        # Create text that needs multiple chunks
+        text = "First sentence. " * 100 + "Second chunk sentence. " * 100
+        chunks = ChunkingStrategy.split_by_sentences(
+            text, 500, counter, "gpt-4o", overlap_ratio=0.1
+        )
+        assert len(chunks) > 1
+        # Verify chunks have content
+        for chunk in chunks:
+            assert len(chunk) > 0
+    
+    def test_split_by_paragraphs_empty_text(self):
+        """Test split_by_paragraphs with empty text."""
+        counter = TokenCounter()
+        chunks = ChunkingStrategy.split_by_paragraphs("", 1000, counter, "gpt-4o")
+        assert chunks == []
+    
+    def test_split_by_paragraphs_single_paragraph(self):
+        """Test split_by_paragraphs with single paragraph."""
+        counter = TokenCounter()
+        text = "This is a single paragraph without any breaks."
+        chunks = ChunkingStrategy.split_by_paragraphs(text, 1000, counter, "gpt-4o")
+        assert len(chunks) == 1
+        assert chunks[0] == text
+    
+    def test_split_by_paragraphs_multiple_paragraphs(self):
+        """Test split_by_paragraphs with multiple paragraphs."""
+        counter = TokenCounter()
+        text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
+        chunks = ChunkingStrategy.split_by_paragraphs(text, 1000, counter, "gpt-4o")
+        assert len(chunks) == 1  # Should fit in one chunk
+        assert "First paragraph" in chunks[0]
+        assert "Second paragraph" in chunks[0]
+        assert "Third paragraph" in chunks[0]
+    
+    def test_split_by_paragraphs_large_paragraph(self):
+        """Test split_by_paragraphs with paragraph too large for chunk."""
+        counter = TokenCounter()
+        # Create a very large paragraph
+        large_para = "This is a very long sentence. " * 200
+        text = f"Small para.\n\n{large_para}\n\nAnother small para."
+        
+        chunks = ChunkingStrategy.split_by_paragraphs(text, 500, counter, "gpt-4o")
+        assert len(chunks) > 1  # Large paragraph should be split
+
+
+class TestRetryFunctions:
+    """Test suite for retry-related functions."""
+    
+    def test_is_retryable_error_rate_limit(self):
+        """Test is_retryable_error with rate limit errors."""
+        # Test actual RateLimitError instance
+        try:
+            # Create a real RateLimitError if possible
+            from openai import RateLimitError
+            rate_limit_error = RateLimitError("Rate limit exceeded", response=MagicMock(), body={})
+            assert is_retryable_error(rate_limit_error) is True
+        except ImportError:
+            # Fallback to testing with error message
+            rate_limit_error = Exception("rate limit exceeded")
+            assert is_retryable_error(rate_limit_error) is True
+        
+        assert is_retryable_error(google_exceptions.ResourceExhausted("Quota exceeded")) is True
+        assert is_retryable_error(google_exceptions.TooManyRequests("Too many requests")) is True
+    
+    def test_is_retryable_error_connection(self):
+        """Test is_retryable_error with connection errors."""
+        assert is_retryable_error(ConnectionError("Connection failed")) is True
+        assert is_retryable_error(asyncio.TimeoutError("Timeout")) is True
+    
+    def test_is_retryable_error_message_check(self):
+        """Test is_retryable_error with error message checking."""
+        assert is_retryable_error(Exception("resource_exhausted")) is True
+        assert is_retryable_error(Exception("quota exceeded")) is True
+        assert is_retryable_error(Exception("rate limit hit")) is True
+        assert is_retryable_error(Exception("too many requests")) is True
+    
+    def test_is_retryable_error_client_error(self):
+        """Test is_retryable_error with client error having code 429."""
+        error = MagicMock()
+        error.message = "Resource exhausted"
+        error.code = 429
+        assert is_retryable_error(error) is True
+    
+    def test_is_retryable_error_non_retryable(self):
+        """Test is_retryable_error with non-retryable errors."""
+        assert is_retryable_error(ValueError("Invalid value")) is False
+        assert is_retryable_error(TypeError("Type error")) is False
+        assert is_retryable_error(Exception("Random error")) is False
+    
+    @patch('yellhorn_mcp.llm_manager.logger')
+    def test_log_retry_attempt(self, mock_logger):
+        """Test log_retry_attempt function."""
+        # Create mock retry state
+        retry_state = MagicMock(spec=RetryCallState)
+        retry_state.attempt_number = 3
+        retry_state.outcome_timestamp = 10.5
+        retry_state.start_time = 5.0
+        
+        # Create mock function with __name__ attribute
+        mock_fn = MagicMock()
+        mock_fn.__name__ = "test_function"
+        retry_state.fn = mock_fn
+        
+        # Create mock outcome with exception method
+        mock_outcome = MagicMock()
+        mock_outcome.exception.return_value = ValueError("Test error")
+        retry_state.outcome = mock_outcome
+        
+        log_retry_attempt(retry_state)
+        
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args[0][0]
+        assert "Retrying test_function" in call_args
+        assert "5.5 seconds" in call_args
+        assert "attempt 3" in call_args
+        assert "Test error" in call_args
+    
+    def test_log_retry_attempt_no_outcome(self):
+        """Test log_retry_attempt with no outcome."""
+        retry_state = MagicMock(spec=RetryCallState)
+        retry_state.outcome = None
+        
+        # Should return early without logging
+        log_retry_attempt(retry_state)

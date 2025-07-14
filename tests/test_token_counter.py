@@ -228,3 +228,114 @@ class TestTokenCounter:
         assert mock_get_encoding.call_count == 2
         mock_get_encoding.assert_any_call("o200k_base")
         mock_get_encoding.assert_any_call("cl100k_base")
+    
+    def test_init_with_config_model_limits(self):
+        """Test TokenCounter initialization with custom model limits config."""
+        config = {
+            "model_limits": {
+                "custom-model": 50000,
+                "gpt-4o": 200000  # Override default
+            }
+        }
+        
+        counter = TokenCounter(config=config)
+        
+        # Check custom model limit
+        assert counter.get_model_limit("custom-model") == 50000
+        # Check overridden model limit
+        assert counter.get_model_limit("gpt-4o") == 200000
+        # Check non-overridden model still uses default
+        assert counter.get_model_limit("gemini-2.5-pro-preview-05-06") == 1_048_576
+    
+    def test_init_with_config_model_encodings(self):
+        """Test TokenCounter initialization with custom model encodings config."""
+        config = {
+            "model_encodings": {
+                "custom-model": "cl100k_base",
+                "gpt-4o": "cl100k_base"  # Override default o200k_base
+            }
+        }
+        
+        counter = TokenCounter(config=config)
+        
+        # Test that custom encoding is used
+        tokens = counter.count_tokens("Test text", "custom-model")
+        assert tokens > 0
+        assert "cl100k_base" in counter._encoding_cache
+    
+    def test_init_with_config_defaults(self):
+        """Test TokenCounter initialization with default encoding and token limit config."""
+        config = {
+            "default_encoding": "o200k_base",
+            "default_token_limit": 16384
+        }
+        
+        counter = TokenCounter(config=config)
+        
+        # Test default token limit for unknown model
+        assert counter.get_model_limit("unknown-model") == 16384
+        
+        # Test default encoding for unknown model
+        tokens = counter.count_tokens("Test text", "completely-unknown-model")
+        assert tokens > 0
+        assert "o200k_base" in counter._encoding_cache
+    
+    def test_get_model_limit_with_config_priority(self):
+        """Test get_model_limit respects config priority."""
+        config = {
+            "model_limits": {
+                "gpt-4o": 150000  # Override built-in
+            },
+            "default_token_limit": 10000
+        }
+        
+        counter = TokenCounter(config=config)
+        
+        # Config override takes precedence
+        assert counter.get_model_limit("gpt-4o") == 150000
+        # Built-in limit for non-overridden model
+        assert counter.get_model_limit("o3") == 65000
+        # Default for unknown model
+        assert counter.get_model_limit("unknown") == 10000
+    
+    def test_gpt41_model_support(self):
+        """Test GPT-4.1 model is properly supported."""
+        counter = TokenCounter()
+        
+        # Check model limit
+        assert counter.get_model_limit("gpt-4.1") == 1_000_000
+        
+        # Check encoding
+        assert TokenCounter.MODEL_TO_ENCODING["gpt-4.1"] == "cl100k_base"
+        
+        # Test token counting
+        tokens = counter.count_tokens("Test text for GPT-4.1", "gpt-4.1")
+        assert tokens > 0
+        assert "cl100k_base" in counter._encoding_cache
+    
+    def test_get_encoding_with_fallback(self):
+        """Test _get_encoding with fallback behavior."""
+        config = {
+            "model_encodings": {
+                "test-model": "invalid_encoding"
+            },
+            "default_encoding": "cl100k_base"
+        }
+        
+        counter = TokenCounter(config=config)
+        
+        # Should fallback to default encoding when invalid encoding specified
+        with patch('tiktoken.get_encoding') as mock_get_encoding:
+            mock_encoding = MagicMock()
+            mock_encoding.encode.return_value = [1, 2, 3]
+            
+            # First call fails, second succeeds
+            mock_get_encoding.side_effect = [Exception("Invalid encoding"), mock_encoding]
+            
+            tokens = counter.count_tokens("Test", "test-model")
+            assert tokens == 3
+            
+            # Should have tried invalid_encoding first, then cl100k_base
+            assert mock_get_encoding.call_count == 2
+            mock_get_encoding.assert_any_call("invalid_encoding")
+            mock_get_encoding.assert_any_call("cl100k_base")
