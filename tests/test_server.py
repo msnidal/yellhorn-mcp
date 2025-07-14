@@ -776,7 +776,7 @@ async def test_update_github_issue():
         mock_file.name = "/tmp/test_file.md"
         mock_tmp.return_value.__enter__.return_value = mock_file
 
-        await update_github_issue(Path("/mock/repo"), "123", "Updated content")
+        await update_github_issue(Path("/mock/repo"), "123", body="Updated content")
 
         mock_gh.assert_called_once()
         # Verify temp file is cleaned up
@@ -1392,13 +1392,13 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                                     # Should NOT have metrics in body
                                     assert "## Completion Metrics" not in body
 
-                                    # Verify completion metadata comment was added to parent issue
+                                    # Verify completion metadata comment was added to sub-issue
                                     mock_add_comment.assert_called_once()
                                     comment_args = mock_add_comment.call_args
                                     assert comment_args[0][0] == Path("/test/repo")  # repo_path
                                     assert (
-                                        comment_args[0][1] == "123"
-                                    )  # parent issue number, not sub-issue
+                                        comment_args[0][1] == "789"
+                                    )  # sub-issue number, not parent issue
                                     completion_comment = comment_args[0][2]  # comment content
 
                                     # Verify the completion comment contains expected metadata
@@ -1826,8 +1826,12 @@ async def test_process_judgement_async_search_grounding_enabled(
         ) as mock_format,
         patch("yellhorn_mcp.gemini_integration._get_gemini_search_tools") as mock_get_tools,
         patch("yellhorn_mcp.gemini_integration.add_citations") as mock_add_citations,
+        patch("yellhorn_mcp.judgement_processor.run_git_command") as mock_run_git,
     ):
         mock_generate.return_value = mock_response
+
+        # Mock getting the remote URL
+        mock_run_git.return_value = "https://github.com/user/repo"
 
         # Mock codebase snapshot
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -1882,12 +1886,16 @@ async def test_process_judgement_async_search_grounding_enabled(
         # Verify citations processing was called
         mock_add_citations.assert_called_once_with(mock_response)
 
-        # Verify create_github_subissue was called (update is not implemented yet)
-        mock_create_subissue.assert_called_once()
-        call_args = mock_create_subissue.call_args
-        body = call_args[0][3]  # 4th argument is body
+        # Verify update_github_issue was called instead of create_github_subissue
+        mock_update_issue.assert_called_once()
+        # Verify create_github_subissue was NOT called
+        mock_create_subissue.assert_not_called()
+
+        # Verify the arguments passed to update_github_issue
+        call_args = mock_update_issue.call_args
+        assert call_args.kwargs["repo_path"] == Path("/test/repo")
+        assert call_args.kwargs["issue_number"] == "789"
+        assert "Judgement for #123: HEAD vs main" in call_args.kwargs["title"]
+        body = call_args.kwargs["body"]
         assert "## Citations" in body
         assert "Example citation" in body
-
-        # Verify update_github_issue was NOT called
-        mock_update_issue.assert_not_called()

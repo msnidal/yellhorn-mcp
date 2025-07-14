@@ -5,6 +5,7 @@ comparing code changes against workplans.
 """
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -306,8 +307,6 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Add debug comment if requested
         if debug:
             # Extract issue number from URL
-            import re
-
             issue_match = re.search(r"/issues/(\d+)", subissue_url)
             if issue_match:
                 sub_issue_number = issue_match.group(1)
@@ -326,9 +325,21 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 timestamp=_meta.get("start_time", datetime.now(timezone.utc)),
             )
 
-            # Post completion comment to the parent issue
+            # Post completion comment to the sub-issue
             completion_comment = format_completion_comment(completion_metadata)
-            await add_issue_comment(repo_path, parent_workplan_issue_number, completion_comment)
+            # Extract sub-issue number from URL or use the provided one
+            if subissue_to_update:
+                sub_issue_number = subissue_to_update
+            else:
+                # Extract issue number from URL
+                issue_match = re.search(r"/issues/(\d+)", subissue_url)
+                if issue_match:
+                    sub_issue_number = issue_match.group(1)
+                else:
+                    # Fallback to parent if we can't extract sub-issue number
+                    sub_issue_number = parent_workplan_issue_number
+
+            await add_issue_comment(repo_path, sub_issue_number, completion_comment)
 
     except Exception as e:
         error_msg = f"Error processing judgement: {str(e)}"

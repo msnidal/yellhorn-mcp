@@ -474,37 +474,47 @@ async def test_integration_process_judgement_lsp_mode():
                             "yellhorn_mcp.github_integration.add_issue_comment",
                             new_callable=AsyncMock,
                         ) as mock_add_comment:
+                            with patch(
+                                "yellhorn_mcp.judgement_processor.run_git_command",
+                                new_callable=AsyncMock,
+                            ) as mock_run_git:
+                                # Mock getting the remote URL
+                                mock_run_git.return_value = "https://github.com/mock/repo"
 
-                            # Call the function with LSP mode
-                            result = await process_judgement_async(
-                                repo_path,
-                                gemini_client,
-                                None,  # No OpenAI client
-                                model,
-                                workplan,
-                                diff,
-                                base_ref,
-                                head_ref,
-                                "abc123",  # base_commit_hash
-                                "def456",  # head_commit_hash
-                                issue_number,  # parent_workplan_issue_number
-                                subissue_to_update="subissue-123",
-                                debug=False,
-                                codebase_reasoning="lsp",
-                                disable_search_grounding=False,
-                                ctx=ctx,
-                            )
+                                # Call the function with LSP mode
+                                result = await process_judgement_async(
+                                    repo_path,
+                                    gemini_client,
+                                    None,  # No OpenAI client
+                                    model,
+                                    workplan,
+                                    diff,
+                                    base_ref,
+                                    head_ref,
+                                    "abc123",  # base_commit_hash
+                                    "def456",  # head_commit_hash
+                                    issue_number,  # parent_workplan_issue_number
+                                    subissue_to_update="subissue-123",
+                                    debug=False,
+                                    codebase_reasoning="lsp",
+                                    disable_search_grounding=False,
+                                    ctx=ctx,
+                                )
 
-                            # Verify LSP snapshot was used
-                            mock_lsp_snapshot.assert_called_once_with(repo_path)
+                                # Verify LSP snapshot was used
+                                mock_lsp_snapshot.assert_called_once_with(repo_path)
 
-                            # Note: update_snapshot_with_full_diff_files is not actually called
-                            # in the current implementation of process_judgement_async for LSP mode
+                                # Note: update_snapshot_with_full_diff_files is not actually called
+                                # in the current implementation of process_judgement_async for LSP mode
 
-                            # Note: update_github_issue is not called because sub-issue update
-                            # is not yet implemented (see line 279-284 in judgement_processor.py)
-                            # Instead, a new sub-issue is always created
-                            mock_create_subissue.assert_called_once()
+                                # Verify update_github_issue was called instead of create_subissue
+                                mock_update_issue.assert_called_once()
+                                mock_create_subissue.assert_not_called()
+
+                                # Verify the update was called with the correct parameters
+                                call_args = mock_update_issue.call_args
+                                assert call_args.kwargs["issue_number"] == "subissue-123"
+                                assert "Judgement for #123" in call_args.kwargs["title"]
 
 
 @pytest.mark.asyncio

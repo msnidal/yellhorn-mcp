@@ -261,6 +261,12 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
             "yellhorn_mcp.judgement_processor.create_judgement_subissue", new_callable=AsyncMock
         ) as mock_create_subissue,
         patch("yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock),
+        patch(
+            "yellhorn_mcp.git_utils.update_github_issue", new_callable=AsyncMock
+        ) as mock_update_issue,
+        patch(
+            "yellhorn_mcp.judgement_processor.run_git_command", new_callable=AsyncMock
+        ) as mock_run_git,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -269,6 +275,8 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         )
         # Mock the create_judgement_subissue to return a URL
         mock_create_subissue.return_value = "https://github.com/repo/issues/457"
+        # Mock getting the remote URL
+        mock_run_git.return_value = "https://github.com/repo"
 
         workplan = "1. Implement X\n2. Test X"
         diff = "diff --git a/file.py b/file.py\n+def x(): pass"
@@ -301,13 +309,17 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
         input_content = kwargs.get("input", "")
         assert "Original Workplan" in input_content
 
-        # Verify the GitHub sub-issue was created with judgement and metrics
-        mock_create_subissue.assert_called_once()
-        create_args = mock_create_subissue.call_args[0]
-        assert create_args[0] == Path("/mock/repo")
-        assert create_args[1] == "123"  # parent issue number
-        assert "Judgement for #123" in create_args[2]  # title
-        issue_body = create_args[3]  # Fourth argument is the issue body
+        # Verify update_github_issue was called instead of create_github_subissue
+        mock_update_issue.assert_called_once()
+        # Verify create_github_subissue was NOT called
+        mock_create_subissue.assert_not_called()
+
+        # Verify the arguments passed to update_github_issue
+        call_args = mock_update_issue.call_args
+        assert call_args.kwargs["repo_path"] == Path("/mock/repo")
+        assert call_args.kwargs["issue_number"] == "456"
+        assert "Judgement for #123" in call_args.kwargs["title"]
+        issue_body = call_args.kwargs["body"]
         assert "Mock OpenAI response text" in issue_body
         # Should NOT have metrics in body
         assert "## Completion Metrics" not in issue_body
@@ -376,6 +388,12 @@ async def test_process_judgement_async_deep_research_model(
             "yellhorn_mcp.judgement_processor.create_judgement_subissue", new_callable=AsyncMock
         ) as mock_create_subissue,
         patch("yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock),
+        patch(
+            "yellhorn_mcp.git_utils.update_github_issue", new_callable=AsyncMock
+        ) as mock_update_issue,
+        patch(
+            "yellhorn_mcp.judgement_processor.run_git_command", new_callable=AsyncMock
+        ) as mock_run_git,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -384,6 +402,8 @@ async def test_process_judgement_async_deep_research_model(
         )
         # Mock the create_judgement_subissue to return a URL
         mock_create_subissue.return_value = "https://github.com/repo/issues/457"
+        # Mock getting the remote URL
+        mock_run_git.return_value = "https://github.com/repo"
 
         workplan = "1. Implement feature with web research\n2. Test implementation"
         diff = "diff --git a/file.py b/file.py\n+def feature(): pass"
@@ -471,6 +491,7 @@ async def test_process_workplan_async_list_output(mock_request_context):
         from yellhorn_mcp.metadata_models import CompletionMetadata
 
         mock_completion_metadata = CompletionMetadata(
+            model_name="gpt-4o",
             status="✅ Workplan generated successfully",
             generation_time_seconds=2.5,
             input_tokens=1000,
@@ -540,6 +561,12 @@ async def test_process_judgement_async_list_output(mock_request_context):
             "yellhorn_mcp.judgement_processor.create_judgement_subissue", new_callable=AsyncMock
         ) as mock_create_subissue,
         patch("yellhorn_mcp.judgement_processor.add_issue_comment", new_callable=AsyncMock),
+        patch(
+            "yellhorn_mcp.git_utils.update_github_issue", new_callable=AsyncMock
+        ) as mock_update_issue,
+        patch(
+            "yellhorn_mcp.judgement_processor.run_git_command", new_callable=AsyncMock
+        ) as mock_run_git,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -548,6 +575,8 @@ async def test_process_judgement_async_list_output(mock_request_context):
         )
         # Mock the create_judgement_subissue to return a URL
         mock_create_subissue.return_value = "https://github.com/repo/issues/458"
+        # Mock getting the remote URL
+        mock_run_git.return_value = "https://github.com/repo"
 
         workplan = "1. Test list output\n2. Verify handling"
         diff = "diff --git a/file.py b/file.py\n+def test(): pass"
@@ -569,11 +598,15 @@ async def test_process_judgement_async_list_output(mock_request_context):
             ctx=mock_request_context,
         )
 
-        # Verify the GitHub sub-issue was created with judgement from list
-        mock_create_subissue.assert_called_once()
-        create_args = mock_create_subissue.call_args[0]
-        assert create_args[0] == Path("/mock/repo")
-        assert create_args[1] == "125"  # parent issue number
-        assert "Judgement for #125" in create_args[2]  # title
-        issue_body = create_args[3]  # Fourth argument is the issue body
+        # Verify update_github_issue was called instead of create_github_subissue
+        mock_update_issue.assert_called_once()
+        # Verify create_github_subissue was NOT called
+        mock_create_subissue.assert_not_called()
+
+        # Verify the arguments passed to update_github_issue
+        call_args = mock_update_issue.call_args
+        assert call_args.kwargs["repo_path"] == Path("/mock/repo")
+        assert call_args.kwargs["issue_number"] == "457"
+        assert "Judgement for #125" in call_args.kwargs["title"]
+        issue_body = call_args.kwargs["body"]
         assert "Mock judgement from list output" in issue_body

@@ -98,7 +98,7 @@ async def update_issue_with_workplan(
     """
     # Format the full issue body with workplan and metrics
     # (The metrics formatting will be handled by the caller)
-    await update_github_issue(repo_path, issue_number, workplan_text)
+    await update_github_issue(repo_path, issue_number, body=workplan_text)
 
 
 async def create_judgement_subissue(
