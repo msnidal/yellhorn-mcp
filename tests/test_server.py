@@ -793,18 +793,24 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
 
     with (
         patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot",
+            new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
+            new_callable=AsyncMock,
         ) as mock_format,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini",
+            new_callable=AsyncMock,
         ) as mock_generate_gemini,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan",
+            new_callable=AsyncMock,
         ) as mock_update,
-        patch("yellhorn_mcp.processors.workplan_processor.format_metrics_section") as mock_format_metrics,
+        patch(
+            "yellhorn_mcp.processors.workplan_processor.format_metrics_section"
+        ) as mock_format_metrics,
         patch(
             "yellhorn_mcp.processors.workplan_processor.add_issue_comment", new_callable=AsyncMock
         ) as mock_add_comment,
@@ -915,18 +921,23 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
 
     with (
         patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot",
+            new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
+            new_callable=AsyncMock,
         ) as mock_format,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini",
+            new_callable=AsyncMock,
         ) as mock_generate_gemini,
         patch(
             "yellhorn_mcp.processors.workplan_processor.add_issue_comment", new_callable=AsyncMock
         ) as mock_add_comment,
-        patch("yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan") as mock_update,
+        patch(
+            "yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan"
+        ) as mock_update,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -969,18 +980,23 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
 
     with (
         patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot",
+            new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
+            new_callable=AsyncMock,
         ) as mock_format,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini",
+            new_callable=AsyncMock,
         ) as mock_generate_gemini,
         patch(
             "yellhorn_mcp.processors.workplan_processor.add_issue_comment", new_callable=AsyncMock
         ) as mock_add_comment,
-        patch("yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan") as mock_update,
+        patch(
+            "yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan"
+        ) as mock_update,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -1078,7 +1094,9 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
             with patch("yellhorn_mcp.server.get_git_diff", new_callable=AsyncMock) as mock_get_diff:
                 mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-                with patch("yellhorn_mcp.integrations.github_integration.add_issue_comment") as mock_add_comment:
+                with patch(
+                    "yellhorn_mcp.integrations.github_integration.add_issue_comment"
+                ) as mock_add_comment:
                     with patch(
                         "yellhorn_mcp.integrations.github_integration.create_judgement_subissue",
                         new_callable=AsyncMock,
@@ -1143,7 +1161,9 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
             with patch("yellhorn_mcp.server.get_git_diff", new_callable=AsyncMock) as mock_get_diff:
                 mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-                with patch("yellhorn_mcp.integrations.github_integration.add_issue_comment") as mock_add_comment:
+                with patch(
+                    "yellhorn_mcp.integrations.github_integration.add_issue_comment"
+                ) as mock_add_comment:
                     with patch(
                         "yellhorn_mcp.integrations.github_integration.create_judgement_subissue",
                         new_callable=AsyncMock,
@@ -1202,7 +1222,9 @@ async def test_judge_workplan_disable_search_grounding(mock_request_context, moc
             with patch("yellhorn_mcp.server.get_git_diff", new_callable=AsyncMock) as mock_get_diff:
                 mock_get_diff.return_value = "diff --git a/file.py b/file.py\n+def x(): pass"
 
-                with patch("yellhorn_mcp.integrations.github_integration.add_issue_comment") as mock_add_comment:
+                with patch(
+                    "yellhorn_mcp.integrations.github_integration.add_issue_comment"
+                ) as mock_add_comment:
                     with patch(
                         "yellhorn_mcp.integrations.github_integration.create_judgement_subissue",
                         new_callable=AsyncMock,
@@ -1311,12 +1333,16 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
         mock_generate.return_value = mock_response
 
         with patch("yellhorn_mcp.utils.git_utils.update_github_issue") as mock_update_issue:
-            with patch("yellhorn_mcp.processors.judgement_processor.add_issue_comment") as mock_add_comment:
+            with patch(
+                "yellhorn_mcp.processors.judgement_processor.add_issue_comment"
+            ) as mock_add_comment:
                 with patch(
                     "yellhorn_mcp.processors.judgement_processor.create_judgement_subissue"
                 ) as mock_create_subissue:
                     mock_create_subissue.return_value = "https://github.com/user/repo/issues/789"
-                    with patch("yellhorn_mcp.processors.judgement_processor.run_git_command") as mock_run_git:
+                    with patch(
+                        "yellhorn_mcp.processors.judgement_processor.run_git_command"
+                    ) as mock_run_git:
                         # Mock getting the remote URL
                         mock_run_git.return_value = "https://github.com/user/repo"
                         with patch(
@@ -1543,13 +1569,19 @@ async def test_process_workplan_async_with_citations(mock_request_context, mock_
 
     with (
         patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot",
+            new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
+            new_callable=AsyncMock,
         ) as mock_format,
-        patch("yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan") as mock_update,
-        patch("yellhorn_mcp.processors.workplan_processor.format_metrics_section") as mock_format_metrics,
+        patch(
+            "yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan"
+        ) as mock_update,
+        patch(
+            "yellhorn_mcp.processors.workplan_processor.format_metrics_section"
+        ) as mock_format_metrics,
         patch("yellhorn_mcp.processors.workplan_processor.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -1712,22 +1744,30 @@ async def test_process_workplan_async_search_grounding_enabled(
 
     with (
         patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot",
+            new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
+            new_callable=AsyncMock,
         ) as mock_format,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan",
+            new_callable=AsyncMock,
         ) as mock_update,
-        patch("yellhorn_mcp.processors.workplan_processor.format_metrics_section") as mock_format_metrics,
+        patch(
+            "yellhorn_mcp.processors.workplan_processor.format_metrics_section"
+        ) as mock_format_metrics,
         patch(
             "yellhorn_mcp.processors.workplan_processor.add_issue_comment", new_callable=AsyncMock
         ) as mock_add_comment,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini",
+            new_callable=AsyncMock,
         ) as mock_generate_gemini,
-        patch("yellhorn_mcp.integrations.gemini_integration._get_gemini_search_tools") as mock_get_tools,
+        patch(
+            "yellhorn_mcp.integrations.gemini_integration._get_gemini_search_tools"
+        ) as mock_get_tools,
         patch("yellhorn_mcp.integrations.gemini_integration.add_citations") as mock_add_citations,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -1816,15 +1856,20 @@ async def test_process_judgement_async_search_grounding_enabled(
             "yellhorn_mcp.processors.judgement_processor.add_issue_comment", new_callable=AsyncMock
         ) as mock_add_comment,
         patch(
-            "yellhorn_mcp.processors.judgement_processor.create_judgement_subissue", new_callable=AsyncMock
+            "yellhorn_mcp.processors.judgement_processor.create_judgement_subissue",
+            new_callable=AsyncMock,
         ) as mock_create_subissue,
         patch(
-            "yellhorn_mcp.processors.judgement_processor.get_codebase_snapshot", new_callable=AsyncMock
+            "yellhorn_mcp.processors.judgement_processor.get_codebase_snapshot",
+            new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
-            "yellhorn_mcp.processors.judgement_processor.format_codebase_for_prompt", new_callable=AsyncMock
+            "yellhorn_mcp.processors.judgement_processor.format_codebase_for_prompt",
+            new_callable=AsyncMock,
         ) as mock_format,
-        patch("yellhorn_mcp.integrations.gemini_integration._get_gemini_search_tools") as mock_get_tools,
+        patch(
+            "yellhorn_mcp.integrations.gemini_integration._get_gemini_search_tools"
+        ) as mock_get_tools,
         patch("yellhorn_mcp.integrations.gemini_integration.add_citations") as mock_add_citations,
         patch("yellhorn_mcp.processors.judgement_processor.run_git_command") as mock_run_git,
     ):

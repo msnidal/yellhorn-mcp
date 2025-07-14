@@ -51,7 +51,9 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
     # Test missing OpenAI client - should call add_issue_comment with error
     with (
         patch("yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch(
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt"
+        ) as mock_format,
         patch("yellhorn_mcp.utils.git_utils.run_github_command") as mock_gh_command,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -89,7 +91,9 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
     # Test with OpenAI API error
     with (
         patch("yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch(
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt"
+        ) as mock_format,
         patch("yellhorn_mcp.utils.git_utils.run_github_command") as mock_gh_command,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -144,7 +148,9 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
 
     with (
         patch("yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt") as mock_format,
+        patch(
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt"
+        ) as mock_format,
         patch("yellhorn_mcp.utils.git_utils.run_github_command") as mock_gh_command,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -229,7 +235,9 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
     # Test with OpenAI API error
     with (
         patch("yellhorn_mcp.processors.judgement_processor.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.processors.judgement_processor.format_codebase_for_prompt") as mock_format,
+        patch(
+            "yellhorn_mcp.processors.judgement_processor.format_codebase_for_prompt"
+        ) as mock_format,
         patch("yellhorn_mcp.integrations.github_integration.add_issue_comment") as mock_add_comment,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
@@ -274,7 +282,9 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
 
     with (
         patch("yellhorn_mcp.processors.judgement_processor.get_codebase_snapshot") as mock_snapshot,
-        patch("yellhorn_mcp.processors.judgement_processor.format_codebase_for_prompt") as mock_format,
+        patch(
+            "yellhorn_mcp.processors.judgement_processor.format_codebase_for_prompt"
+        ) as mock_format,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"

@@ -349,11 +349,14 @@ async def test_integration_process_workplan_lsp_mode():
         mock_lsp_snapshot.return_value = (["file1.py"], {"file1.py": "```py\ndef function1()\n```"})
 
         with patch(
-            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
+            new_callable=AsyncMock,
         ) as mock_format:
             mock_format.return_value = "<formatted LSP snapshot>"
 
-            with patch("yellhorn_mcp.utils.cost_tracker_utils.format_metrics_section") as mock_metrics:
+            with patch(
+                "yellhorn_mcp.utils.cost_tracker_utils.format_metrics_section"
+            ) as mock_metrics:
                 mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
                 # Patch run_github_command which is what actually gets called
@@ -455,15 +458,19 @@ async def test_integration_process_judgement_lsp_mode():
         mock_lsp_snapshot.return_value = (["file1.py"], {"file1.py": "```py\ndef function1()\n```"})
 
         with patch(
-            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", new_callable=AsyncMock
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
+            new_callable=AsyncMock,
         ) as mock_format:
             mock_format.return_value = "<formatted LSP+diff snapshot>"
 
-            with patch("yellhorn_mcp.utils.cost_tracker_utils.format_metrics_section") as mock_metrics:
+            with patch(
+                "yellhorn_mcp.utils.cost_tracker_utils.format_metrics_section"
+            ) as mock_metrics:
                 mock_metrics.return_value = "\n\n---\n## Metrics\nMock metrics"
 
                 with patch(
-                    "yellhorn_mcp.integrations.github_integration.create_github_subissue", new_callable=AsyncMock
+                    "yellhorn_mcp.integrations.github_integration.create_github_subissue",
+                    new_callable=AsyncMock,
                 ) as mock_create_subissue:
                     mock_create_subissue.return_value = "https://github.com/mock/repo/issues/456"
 

@@ -58,16 +58,21 @@ async def test_openai_gemini_errors():
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
 
         with patch(
-            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt", return_value="formatted"
+            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
+            return_value="formatted",
         ):
             # Create a mock OpenAI client that raises an error
             mock_openai = MagicMock()
             mock_openai.responses.create = AsyncMock(side_effect=Exception("OpenAI API error"))
 
             # Mock add_issue_comment to check error handling
-            with patch("yellhorn_mcp.integrations.github_integration.add_issue_comment") as mock_comment:
+            with patch(
+                "yellhorn_mcp.integrations.github_integration.add_issue_comment"
+            ) as mock_comment:
                 # Also need to mock generate_git_diff
-                with patch("yellhorn_mcp.processors.judgement_processor.generate_git_diff") as mock_diff:
+                with patch(
+                    "yellhorn_mcp.processors.judgement_processor.generate_git_diff"
+                ) as mock_diff:
                     mock_diff.return_value = "mock diff"
 
                     await process_judgement_async(
