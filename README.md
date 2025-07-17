@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/msnidal-yellhorn-mcp-badge.png)](https://mseep.ai/app/msnidal-yellhorn-mcp)
+
 # Yellhorn MCP
 
 ![Yellhorn Logo](assets/yellhorn.png)
