@@ -175,3 +175,5 @@ cython_debug/
 
 # Jupyter notebooks
 notebooks/
+!notebooks/llm_manager.ipynb
+.claude/settings.local.json
