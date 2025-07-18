@@ -1,19 +1,21 @@
 """Unit tests for the LLMManager class."""
 
-import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from google.api_core import exceptions as google_exceptions
+from openai import RateLimitError
+from tenacity import RetryCallState
+
 from yellhorn_mcp.llm_manager import (
+    ChunkingStrategy,
     LLMManager,
     UsageMetadata,
-    ChunkingStrategy,
-    log_retry_attempt,
     is_retryable_error,
+    log_retry_attempt,
 )
 from yellhorn_mcp.token_counter import TokenCounter
-from tenacity import RetryCallState
-from openai import RateLimitError
-from google.api_core import exceptions as google_exceptions
 
 
 class MockGeminiUsage:

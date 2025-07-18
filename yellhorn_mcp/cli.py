@@ -17,9 +17,7 @@ import uvicorn
 from yellhorn_mcp.server import is_git_repository, mcp
 
 logging.basicConfig(
-    stream=sys.stderr,
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s"
+    stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
 )
 
 
@@ -93,14 +91,18 @@ def main():
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             logging.error("GEMINI_API_KEY environment variable is not set")
-            logging.error("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
+            logging.error(
+                "Please set the GEMINI_API_KEY environment variable with your Gemini API key"
+            )
             sys.exit(1)
     # For OpenAI models
     else:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             logging.error("OPENAI_API_KEY environment variable is not set")
-            logging.error("Please set the OPENAI_API_KEY environment variable with your OpenAI API key")
+            logging.error(
+                "Please set the OPENAI_API_KEY environment variable with your OpenAI API key"
+            )
             sys.exit(1)
 
     # Set environment variables for the server

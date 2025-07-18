@@ -225,6 +225,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 )
             try:
                 from google.genai.types import GenerateContentConfig
+
                 from yellhorn_mcp.utils.search_grounding_utils import _get_gemini_search_tools
 
                 search_tools = _get_gemini_search_tools(model)

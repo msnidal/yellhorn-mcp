@@ -1,7 +1,9 @@
 """Unit tests for the TokenCounter class."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from yellhorn_mcp.token_counter import TokenCounter
 
 

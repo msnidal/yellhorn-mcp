@@ -59,10 +59,9 @@ from yellhorn_mcp.utils.git_utils import (
 )
 
 logging.basicConfig(
-    stream=sys.stderr,
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s"
+    stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
 )
+
 
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
@@ -135,7 +134,9 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         logging.info(f"Starting Yellhorn MCP server at http://127.0.0.1:8000")
         logging.info(f"Repository path: {repo_path}")
         logging.info(f"Using model: {model}")
-        logging.info(f"Google Search Grounding: {'enabled' if use_search_grounding else 'disabled'}")
+        logging.info(
+            f"Google Search Grounding: {'enabled' if use_search_grounding else 'disabled'}"
+        )
 
         yield {
             "repo_path": repo_path,

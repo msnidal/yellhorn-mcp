@@ -1,7 +1,8 @@
 """Token counting utility using tiktoken for accurate token estimation."""
 
+from typing import Any, Dict, Optional
+
 import tiktoken
-from typing import Dict, Optional, Any
 
 
 class TokenCounter:
@@ -68,7 +69,7 @@ class TokenCounter:
         config_encodings = self.config.get("model_encodings", {})
         config_key = self._find_matching_model_key(model, config_encodings)
         encoding_name = config_encodings.get(config_key) if config_key else None
-        
+
         # If not found in config, try default mapping with flexible matching
         if not encoding_name:
             default_key = self._find_matching_model_key(model, self.MODEL_TO_ENCODING)
@@ -109,23 +110,23 @@ class TokenCounter:
         """
         Find a model key that matches the given model name.
         First tries exact match, then looks for keys that are substrings of the model.
-        
+
         Args:
             model: The model name to search for
             model_dict: Dictionary of model configurations
-            
+
         Returns:
             Matching key or None if no match found
         """
         # First try exact match
         if model in model_dict:
             return model
-            
+
         # Then try substring matching - find keys that are substrings of the model
         for key in model_dict.keys():
             if key in model:
                 return key
-                
+
         return None
 
     def get_model_limit(self, model: str) -> int:
@@ -144,12 +145,12 @@ class TokenCounter:
         config_key = self._find_matching_model_key(model, config_limits)
         if config_key:
             return config_limits[config_key]
-            
+
         # Then check default limits with flexible matching
         default_key = self._find_matching_model_key(model, self.MODEL_LIMITS)
         if default_key:
             return self.MODEL_LIMITS[default_key]
-            
+
         # Fallback to configured default
         return self.config.get("default_token_limit", 128_000)
 

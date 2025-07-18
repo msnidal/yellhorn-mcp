@@ -44,7 +44,10 @@ def test_cli_missing_gemini_api_key(caplog):
             # Verify that exit was called with code 1 (it might be called multiple times)
             assert any(call_args == call(1) for call_args in mock_exit.call_args_list)
             # Check the error message was logged
-            assert any("GEMINI_API_KEY environment variable is not set" in record.message for record in caplog.records)
+            assert any(
+                "GEMINI_API_KEY environment variable is not set" in record.message
+                for record in caplog.records
+            )
 
 
 def test_cli_missing_openai_api_key(caplog):
@@ -71,7 +74,10 @@ def test_cli_missing_openai_api_key(caplog):
             # Verify that exit was called with code 1 (it might be called multiple times)
             assert any(call_args == call(1) for call_args in mock_exit.call_args_list)
             # Check the error message was logged
-            assert any("OPENAI_API_KEY environment variable is not set" in record.message for record in caplog.records)
+            assert any(
+                "OPENAI_API_KEY environment variable is not set" in record.message
+                for record in caplog.records
+            )
 
 
 def test_main_invalid_repo_path(caplog):

@@ -407,6 +407,7 @@ async def _generate_and_update_issue(
             )
         try:
             from google.genai.types import GenerateContentConfig
+
             from yellhorn_mcp.utils.search_grounding_utils import _get_gemini_search_tools
 
             search_tools = _get_gemini_search_tools(model)

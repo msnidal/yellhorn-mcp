@@ -50,7 +50,7 @@ def test_main_success(
 
         # Check that git repo validation was called (indicates success path)
         mock_is_git_repo.assert_called_once()
-        
+
         # Check that path existence was verified
         mock_exists.assert_called()
 
