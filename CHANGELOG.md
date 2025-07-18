@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2025-07-18
+
+### Added
+
+- **Unified LLM Manager**: New centralized LLM management system (`LLMManager` class) that provides:
+  - Unified interface for both OpenAI and Gemini models
+  - Automatic prompt chunking when content exceeds model context limits
+  - Intelligent chunking strategies (paragraph-based and sentence-based)
+  - Response aggregation for chunked calls
+  - Configurable overlap between chunks for better context preservation
+
+- **Enhanced Retry Logic**: Robust retry mechanism with exponential backoff:
+  - Automatic retry on rate limits and transient failures
+  - Configurable retry attempts (default: 5) with exponential backoff
+  - Support for both OpenAI `RateLimitError` and Gemini `ResourceExhausted` exceptions
+  - Detailed logging of retry attempts for debugging
+
+- **Advanced Token Counting**: Improved token counting system (`TokenCounter` class):
+  - Support for latest models: o3, o4-mini, gpt-4.1, gemini-2.5-pro, gemini-2.5-flash-lite
+  - Flexible model key matching for handling model name variations
+  - Configurable token limits and encoding mappings
+  - Context window checking with safety margins
+  - Accurate token estimation for response planning
+
+- **Comprehensive Cost Tracking**: Enhanced cost tracking and usage metrics:
+  - Real-time cost estimation for all supported models
+  - Updated pricing for latest OpenAI and Gemini models
+  - Unified `UsageMetadata` class for consistent usage tracking across providers
+  - Detailed completion metrics with token usage and cost breakdowns
+
+- **Deep Research Model Support**: Enhanced support for OpenAI Deep Research models:
+  - Automatic enabling of `web_search_preview` and `code_interpreter` tools
+  - Support for o3-deep-research and o4-mini-deep-research models
+  - Proper handling of Deep Research model response formats
+
+### Changed
+
+- **Server Architecture**: Major refactoring of server initialization:
+  - Server lifespan context now includes `LLMManager` instance
+  - Automatic client initialization based on model type detection
+  - Improved error handling during server startup
+  - All MCP tools now use the unified LLM manager instead of direct client calls
+
+- **API Integration**: Updated API integration patterns:
+  - OpenAI integration migrated to use new Responses API with proper parameter handling
+  - Gemini integration improved with better error handling and response parsing
+  - Consistent parameter passing across different model types
+
+- **Performance Optimizations**: Multiple performance improvements:
+  - Reduced API calls through intelligent chunking
+  - Better memory management for large prompts
+  - Improved response parsing and aggregation
+  - Optimized token counting with caching
+
+### Fixed
+
+- **Rate Limit Handling**: Resolved issues with rate limit errors:
+  - Proper detection of rate limit errors across different providers
+  - Automatic retry with appropriate backoff periods
+  - Better error messages and logging for debugging
+
+- **Context Window Management**: Fixed issues with large prompts:
+  - Accurate context window checking before API calls
+  - Intelligent chunking that respects model limits
+  - Proper handling of system messages in chunked calls
+
+- **Model Compatibility**: Improved model support and compatibility:
+  - Better model name detection and routing
+  - Consistent parameter handling across different model types
+  - Proper error handling for unsupported models
+
+### Technical Details
+
+- **Dependencies**: Updated dependencies for better compatibility:
+  - Enhanced `tenacity` integration for retry logic
+  - Improved `tiktoken` usage for token counting
+  - Better error handling with provider-specific exceptions
+
+- **Code Quality**: Improved code organization and maintainability:
+  - Clear separation of concerns between LLM management and business logic
+  - Better type hints and documentation
+  - Enhanced error handling and logging throughout the system
+
 ## [0.6.1] - 2025-07-14
 
 ### Added

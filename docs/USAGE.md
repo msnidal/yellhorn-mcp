@@ -2,12 +2,23 @@
 
 ## Overview
 
-Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro and OpenAI API for software development tasks. It provides these main tools:
+Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro and OpenAI API for software development tasks. Version 0.7.0 introduces major improvements including unified LLM management, automatic chunking, and robust retry logic.
+
+### What's New in v0.7.0
+
+- **🔄 Unified LLM Manager**: Centralized management for both OpenAI and Gemini models with automatic retry logic
+- **🧩 Smart Chunking**: Automatic prompt chunking when content exceeds model context limits
+- **📊 Enhanced Token Counting**: Support for latest models with accurate token estimation
+- **💰 Cost Tracking**: Real-time cost estimation and usage tracking
+- **⚡ Performance Optimizations**: Better handling of large codebases and rate limits
+
+## Main Tools
 
 1. **Create workplan**: Creates a GitHub issue with a detailed implementation plan based on your codebase and task description.
 2. **Get workplan**: Retrieves the workplan content from a GitHub issue.
 3. **Judge workplan**: Triggers an asynchronous code judgement for a Pull Request against its original workplan issue.
 4. **Curate context**: Analyzes your codebase structure to build an optimized .yellhorncontext file with directory filtering rules.
+5. **Revise workplan**: Updates an existing workplan based on revision instructions.
 
 ## Installation
 
@@ -29,9 +40,10 @@ The server requires the following environment variables:
 - `OPENAI_API_KEY` (required for OpenAI models): Your OpenAI API key
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro"). Available options:
-  - Gemini models: "gemini-2.5-pro", "gemini-2.5-flash"
-  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "o3-deep-research", "o4-mini-deep-research"
-  - Note: Deep Research models use `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
+  - **Gemini models**: "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"
+  - **OpenAI models**: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "gpt-4.1"
+  - **Deep Research models**: "o3-deep-research", "o4-mini-deep-research"
+  - Note: Deep Research models automatically enable `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
 - `YELLHORN_MCP_SEARCH` (optional): Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models
@@ -549,23 +561,28 @@ The example client uses the MCP client API to interact with the server through s
 
 ### Common Issues
 
-1. **API Key Not Set**: Make sure your `GEMINI_API_KEY` environment variable is set.
+1. **API Key Not Set**: Make sure your `GEMINI_API_KEY` or `OPENAI_API_KEY` environment variable is set depending on your chosen model.
 2. **Not a Git Repository**: Ensure that `REPO_PATH` points to a valid Git repository.
 3. **GitHub CLI Issues**: Ensure GitHub CLI (`gh`) is installed, accessible in your PATH, and authenticated.
 4. **MCP Connection Issues**: If you have trouble connecting to the server, check that you're using the latest version of the MCP SDK.
+5. **Rate Limit Errors**: The server now automatically retries with exponential backoff, but persistent rate limits may indicate quota issues.
+6. **Large Codebase Issues**: The server automatically chunks large prompts, but very large codebases may still hit limits.
 
 ### Error Messages
 
 - `GEMINI_API_KEY is required`: Set your Gemini API key as an environment variable.
+- `OPENAI_API_KEY is required`: Set your OpenAI API key as an environment variable.
 - `Not a Git repository`: The specified path is not a Git repository.
 - `Git executable not found`: Ensure Git is installed and accessible in your PATH.
 - `GitHub CLI not found`: Ensure GitHub CLI (`gh`) is installed and accessible in your PATH.
 - `GitHub CLI command failed`: Check that GitHub CLI is authenticated and has appropriate permissions.
-- `Failed to generate workplan`: Check the Gemini API key and model name.
+- `Failed to generate workplan`: Check the API key and model name for your chosen provider.
 - `Failed to create GitHub issue`: Check GitHub CLI authentication and permissions.
 - `Failed to fetch GitHub issue/PR content`: The issue or PR URL may be invalid or inaccessible.
 - `Failed to fetch GitHub PR diff`: The PR URL may be invalid or inaccessible.
 - `Failed to post GitHub PR review`: Check GitHub CLI permissions for posting PR comments.
+- `Rate limit exceeded`: The server will automatically retry, but check your API quota if persistent.
+- `Context window exceeded`: The server will automatically chunk large prompts, but very large codebases may still hit limits.
 
 ## CI/CD
 

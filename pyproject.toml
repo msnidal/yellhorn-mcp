@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "yellhorn-mcp"
 version = "0.7.0"
 authors = [{ name = "Author" }]
-description = "Yellhorn offers MCP tools to generate detailed workplans with Gemini 2.5 Pro or OpenAI models and to review diffs against them using your entire codebase as context."
+description = "Yellhorn offers MCP tools to generate detailed workplans with Gemini 2.5 Pro or OpenAI models and to review diffs against them using your entire codebase as context. Features unified LLM management, automatic chunking, and robust retry logic."
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
