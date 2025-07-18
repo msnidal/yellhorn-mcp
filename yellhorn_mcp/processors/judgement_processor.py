@@ -8,19 +8,18 @@ import asyncio
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from google import genai
 from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
 from yellhorn_mcp import __version__
-from yellhorn_mcp.integrations.gemini_integration import generate_judgement_with_gemini
 from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment,
     create_judgement_subissue,
 )
-from yellhorn_mcp.integrations.openai_integration import generate_judgement_with_openai
+from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
 from yellhorn_mcp.processors.workplan_processor import (
     build_file_structure_context,
@@ -108,6 +107,7 @@ async def process_judgement_async(
     disable_search_grounding: bool = False,
     _meta: dict[str, Any] | None = None,
     ctx: Context | None = None,
+    github_command_func: Callable | None = None,
 ) -> None:
     """Judge a code diff against a workplan asynchronously.
 
@@ -129,6 +129,7 @@ async def process_judgement_async(
         disable_search_grounding: If True, disables search grounding.
         _meta: Optional metadata from the caller.
         ctx: Optional context for logging.
+        github_command_func: Optional GitHub command function (for mocking).
     """
     try:
         # Get codebase info based on reasoning mode
@@ -207,27 +208,96 @@ Extract any URLs mentioned in the workplan or that would be helpful for understa
 
 IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
+        # Extract llm_manager from _meta
+        llm_manager = _meta.get("llm_manager") if _meta else None
+        if not llm_manager:
+            raise YellhornMCPError("LLM Manager not initialized")
+
+        # Check if we should use search grounding
+        use_search_grounding = not disable_search_grounding
+        if _meta and "original_search_grounding" in _meta:
+            use_search_grounding = _meta["original_search_grounding"] and not disable_search_grounding
+
+        # Prepare additional kwargs for the LLM call
+        llm_kwargs = {}
         is_openai_model = model.startswith("gpt-") or model.startswith("o")
+        
+        # Handle search grounding for Gemini models
+        if not is_openai_model and use_search_grounding:
+            if ctx:
+                await ctx.log(
+                    level="info",
+                    message=f"Attempting to enable search grounding for model {model}"
+                )
+            try:
+                from google.genai.types import GenerateContentConfig
+                from yellhorn_mcp.utils.search_grounding_utils import _get_gemini_search_tools
+                
+                search_tools = _get_gemini_search_tools(model)
+                if search_tools:
+                    llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
+                    if ctx:
+                        await ctx.log(
+                            level="info",
+                            message=f"Search grounding enabled for model {model}"
+                        )
+            except ImportError:
+                if ctx:
+                    await ctx.log(
+                        level="warning",
+                        message="GenerateContentConfig not available, skipping search grounding"
+                    )
 
-        # Call the appropriate API based on the model type
+        # Call LLM through the manager with citation support
         if is_openai_model:
-            if not openai_client:
-                raise YellhornMCPError("OpenAI client not initialized. Is OPENAI_API_KEY set?")
-
-            judgement_content, completion_metadata = await generate_judgement_with_openai(
-                openai_client, model, prompt, ctx
+            # OpenAI models don't support citations
+            response_data = await llm_manager.call_llm_with_usage(
+                prompt=prompt,
+                model=model,
+                temperature=0.0,
+                **llm_kwargs
+            )
+            judgement_content = response_data["content"]
+            usage_metadata = response_data["usage_metadata"]
+            completion_metadata = CompletionMetadata(
+                model_name=model,
+                status="✅ Judgement generated successfully",
+                generation_time_seconds=0.0,  # Will be calculated below
+                input_tokens=usage_metadata.prompt_tokens,
+                output_tokens=usage_metadata.completion_tokens,
+                total_tokens=usage_metadata.total_tokens,
+                timestamp=None,  # Will be set below
             )
         else:
-            if gemini_client is None:
-                raise YellhornMCPError("Gemini client not initialized. Is GEMINI_API_KEY set?")
-
-            # Get search grounding setting
-            use_search = not disable_search_grounding
-            if _meta and "original_search_grounding" in _meta:
-                use_search = _meta["original_search_grounding"] and not disable_search_grounding
-
-            judgement_content, completion_metadata = await generate_judgement_with_gemini(
-                gemini_client, model, prompt, use_search, ctx
+            # Gemini models - use citation-aware call
+            response_data = await llm_manager.call_llm_with_citations(
+                prompt=prompt,
+                model=model,
+                temperature=0.0,
+                **llm_kwargs
+            )
+            
+            judgement_content = response_data["content"]
+            usage_metadata = response_data["usage_metadata"]
+            
+            # Process citations if available
+            if "grounding_metadata" in response_data and response_data["grounding_metadata"]:
+                from yellhorn_mcp.utils.search_grounding_utils import add_citations_from_metadata
+                judgement_content = add_citations_from_metadata(
+                    judgement_content, 
+                    response_data["grounding_metadata"]
+                )
+            
+            # Create completion metadata
+            completion_metadata = CompletionMetadata(
+                model_name=model,
+                status="✅ Judgement generated successfully",
+                generation_time_seconds=0.0,  # Will be calculated below
+                input_tokens=usage_metadata.prompt_tokens,
+                output_tokens=usage_metadata.completion_tokens,
+                total_tokens=usage_metadata.total_tokens,
+                search_results_used=getattr(response_data.get("grounding_metadata"), "grounding_chunks", None) is not None,
+                timestamp=None,  # Will be set below
             )
 
         if not judgement_content:
@@ -285,6 +355,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 issue_number=subissue_to_update,
                 title=judgement_title,
                 body=full_body,
+                github_command_func=github_command_func,
             )
 
             # Construct the URL for the updated issue
@@ -298,7 +369,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             subissue_url = f"{repo_info}/issues/{subissue_to_update}"
         else:
             subissue_url = await create_judgement_subissue(
-                repo_path, parent_workplan_issue_number, judgement_title, full_body
+                repo_path, parent_workplan_issue_number, judgement_title, full_body, github_command_func=github_command_func
             )
 
         if ctx:
@@ -314,7 +385,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             if issue_match:
                 sub_issue_number = issue_match.group(1)
                 debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
-                await add_issue_comment(repo_path, sub_issue_number, debug_comment)
+                await add_issue_comment(repo_path, sub_issue_number, debug_comment, github_command_func=github_command_func)
 
         # Add completion comment to the PARENT issue, not the sub-issue
         if completion_metadata and _meta:
@@ -342,7 +413,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                     # Fallback to parent if we can't extract sub-issue number
                     sub_issue_number = parent_workplan_issue_number
 
-            await add_issue_comment(repo_path, sub_issue_number, completion_comment)
+            await add_issue_comment(repo_path, sub_issue_number, completion_comment, github_command_func=github_command_func)
 
     except Exception as e:
         error_msg = f"Error processing judgement: {str(e)}"
@@ -352,7 +423,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Try to add error comment to parent issue
         try:
             error_comment = f"❌ **Error generating judgement**\n\n{str(e)}"
-            await add_issue_comment(repo_path, parent_workplan_issue_number, error_comment)
+            await add_issue_comment(repo_path, parent_workplan_issue_number, error_comment, github_command_func=github_command_func)
         except Exception:
             # If we can't even add a comment, just log
             if ctx:

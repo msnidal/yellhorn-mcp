@@ -112,6 +112,11 @@ class UsageMetadata:
             self.completion_tokens = data.get("completion_tokens", 0)
             self.total_tokens = data.get("total_tokens", 0)
             self.model = data.get("model")
+        elif hasattr(data, "input_tokens"):
+            # Response format
+            self.prompt_tokens = getattr(data, "input_tokens", 0)
+            self.completion_tokens = getattr(data, "output_tokens", 0)
+            self.total_tokens = getattr(data, "total_tokens", 0)
         elif hasattr(data, "prompt_tokens"):
             # OpenAI CompletionUsage format
             self.prompt_tokens = getattr(data, "prompt_tokens", 0)
@@ -688,6 +693,9 @@ class LLMManager:
         # Split prompt into chunks
         chunks = self._chunk_prompt(prompt, model, available_tokens)
         
+        # Log the number of chunks created
+        logger.info(f"Split prompt into {len(chunks)} chunks for model {model}")
+        
         # Process chunks
         responses = []
         total_usage = UsageMetadata()
@@ -700,10 +708,16 @@ class LLMManager:
                 if i > 0:
                     chunk_prompt = f"[Continuing from previous chunk...]\n\n{chunk_prompt}"
             
+            # Debug log for each LLM call
+            logger.debug(f"Making LLM call {i+1}/{len(chunks)} to model {model} with chunk size: {len(chunk_prompt)} characters")
+            
             response = await self._single_call(
                 chunk_prompt, model, temperature, system_message, response_format, **kwargs
             )
             responses.append(response)
+            
+            # Debug log for response received
+            logger.debug(f"Received response from LLM call {i+1}/{len(chunks)}, response length: {len(str(response)) if response else 0} characters")
             
             # Aggregate usage metadata
             if self._last_usage_metadata:

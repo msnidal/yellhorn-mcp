@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional, Union, Callable, Set
 import weakref
 import uuid
 
+from yellhorn_mcp.server import process_workplan_async, curate_context, process_judgement_async, process_revision_async
+
 
 async def mock_github_command(repo_path: Path, command: list[str]) -> str:
     """
@@ -299,7 +301,6 @@ class MockContext:
 
 
 async def run_create_workplan(
-    create_workplan_func,
     title: str,
     detailed_description: str,
     repo_path: str = None,
@@ -319,7 +320,6 @@ async def run_create_workplan(
     Run process_workplan_async with a mock context.
     
     Args:
-        create_workplan_func: The process_workplan_async function from yellhorn_mcp.server
         title: Workplan title
         detailed_description: Detailed description for the workplan
         repo_path: Repository path
@@ -361,20 +361,25 @@ async def run_create_workplan(
         
         # Create metadata with start time for timing
         from datetime import datetime, timezone
-        _meta = {"start_time": datetime.now(timezone.utc)}
+        _meta = {
+            "start_time": datetime.now(timezone.utc),
+            "llm_manager": llm_manager
+        }
         
         # Call process_workplan_async directly
-        await create_workplan_func(
+        await process_workplan_async(
             repo_path=Path(repo_path) if repo_path else Path.cwd(),
             llm_manager=llm_manager,
             model=model,
             title=title,
             issue_number=issue_number,
-            ctx=ctx,
+            codebase_reasoning=codebase_reasoning,
             detailed_description=detailed_description,
             debug=debug,
             disable_search_grounding=disable_search_grounding,
-            _meta=_meta
+            _meta=_meta,
+            ctx=ctx,
+            github_command_func=github_command_func,
         )
         
         # Create result dict similar to what the MCP tool would return
@@ -438,7 +443,6 @@ async def run_get_workplan(
 
 
 async def run_curate_context(
-    curate_context_func,
     user_task: str,
     repo_path: str = None,
     gemini_client: Any = None,
@@ -459,7 +463,6 @@ async def run_curate_context(
     Run curate_context with a mock context.
     
     Args:
-        curate_context_func: The curate_context function from yellhorn_mcp.server
         user_task: Description of the task you're working on
         repo_path: Repository path
         gemini_client: Gemini client instance
@@ -497,7 +500,7 @@ async def run_curate_context(
     # Use task manager to track background tasks
     with ctx.task_manager:
         # Call curate_context
-        result = await curate_context_func(
+        result = await curate_context(
             ctx=ctx,
             user_task=user_task,
             codebase_reasoning=codebase_reasoning,
@@ -530,8 +533,113 @@ async def run_curate_context(
         return result
 
 
+async def run_revise_workplan(
+    issue_number: str,
+    original_workplan: str,
+    revision_instructions: str,
+    repo_path: str = None,
+    llm_manager: Any = None,
+    model: str = "gemini-2.5-pro-preview-05-06",
+    codebase_reasoning: str = "full",
+    debug: bool = False,
+    disable_search_grounding: bool = False,
+    github_command_func: Callable = None,
+    log_callback: Callable[[str, str], None] = None,
+    wait_for_background_tasks: bool = True,
+    background_task_timeout: Optional[float] = 60.0
+) -> Dict[str, str]:
+    """
+    Run process_revision_async with a mock context.
+    
+    Args:
+        process_revision_func: The process_revision_async function from yellhorn_mcp.processors.workplan_processor
+        issue_number: GitHub issue number containing the workplan to revise
+        revision_instructions: Instructions describing how to revise the workplan
+        repo_path: Repository path
+        gemini_client: Gemini client instance
+        openai_client: OpenAI client instance
+        llm_manager: LLM Manager instance
+        model: Model name to use
+        codebase_reasoning: Codebase reasoning mode
+        debug: Debug mode
+        disable_search_grounding: Whether to disable search grounding
+        github_command_func: Function to use for GitHub CLI commands (None = use mock, or pass real run_github_command)
+        log_callback: Optional callback for log messages
+        wait_for_background_tasks: Whether to wait for background tasks to complete
+        background_task_timeout: Timeout for waiting on background tasks (seconds)
+        
+    Returns:
+        Dictionary with issue_url and issue_number
+    """
+    from datetime import datetime, timezone
+    
+    # Create mock context
+    ctx = MockContext(
+        repo_path=repo_path,
+        llm_manager=llm_manager,
+        model=model,
+        use_search_grounding=(not disable_search_grounding),
+        github_command_func=github_command_func,
+        log_callback=log_callback
+    )
+    
+    # Set codebase_reasoning in context
+    ctx.lifespan_context.codebase_reasoning = codebase_reasoning
+        
+    # Use task manager to track background tasks
+    with ctx.task_manager:
+        # Create metadata with start time for timing
+        _meta = {
+            "start_time": datetime.now(timezone.utc),
+            "llm_manager": llm_manager
+        }
+        
+        # Call process_revision_async directly
+        await process_revision_async(
+            repo_path=Path(repo_path) if repo_path else Path.cwd(),
+            llm_manager=llm_manager,
+            model=model,
+            issue_number=issue_number,
+            original_workplan=original_workplan,
+            revision_instructions=revision_instructions,
+            codebase_reasoning=codebase_reasoning,
+            debug=debug,
+            disable_search_grounding=disable_search_grounding,
+            _meta=_meta,
+            ctx=ctx,
+            github_command_func=github_command_func
+        )
+        
+        # Create result dict similar to what the MCP tool would return
+        result = {
+            "issue_number": issue_number,
+            "issue_url": f"https://github.com/mock/repo/issues/{issue_number}"
+        }
+        
+        # Wait for background tasks if requested
+        if wait_for_background_tasks and codebase_reasoning != "none":
+            if log_callback:
+                log_callback("info", f"Waiting for {ctx.task_manager.pending_tasks} background tasks...")
+            else:
+                print(f"[INFO] Waiting for {ctx.task_manager.pending_tasks} background tasks...")
+                
+            try:
+                await ctx.task_manager.wait_for_all_tasks(timeout=background_task_timeout)
+                
+                if log_callback:
+                    log_callback("info", "All background tasks completed")
+                else:
+                    print("[INFO] All background tasks completed")
+            except asyncio.TimeoutError:
+                if log_callback:
+                    log_callback("warning", f"Background tasks timed out after {background_task_timeout}s")
+                else:
+                    print(f"[WARNING] Background tasks timed out after {background_task_timeout}s")
+                    
+        return result
+
+
 async def run_judge_workplan(
-    process_judgement_func,
     workplan_content: str,
     diff_content: str,
     base_ref: str,
@@ -600,28 +708,33 @@ async def run_judge_workplan(
     ctx.lifespan_context.codebase_reasoning = codebase_reasoning
     
     # Create metadata with start time for timing
-    _meta = {"start_time": datetime.now(timezone.utc)}
+    _meta = {
+        "start_time": datetime.now(timezone.utc),
+        "llm_manager": llm_manager
+    }
     
     # Use task manager to track background tasks
     with ctx.task_manager:
         # Call process_judgement_async
-        await process_judgement_func(
+        await process_judgement_async(
             repo_path=Path(repo_path) if repo_path else Path.cwd(),
-            llm_manager=llm_manager,
+            gemini_client=gemini_client,
+            openai_client=openai_client,
             model=model,
             workplan_content=workplan_content,
             diff_content=diff_content,
             base_ref=base_ref,
             head_ref=head_ref,
-            subissue_to_update=subissue_to_update,
-            parent_workplan_issue_number=parent_workplan_issue_number,
-            ctx=ctx,
             base_commit_hash=base_commit_hash,
             head_commit_hash=head_commit_hash,
+            parent_workplan_issue_number=parent_workplan_issue_number,
+            subissue_to_update=subissue_to_update,
             debug=debug,
             codebase_reasoning=codebase_reasoning,
             disable_search_grounding=disable_search_grounding,
-            _meta=_meta
+            _meta=_meta,
+            ctx=ctx,
+            github_command_func=github_command_func,
         )
         
         # Wait for background tasks if requested

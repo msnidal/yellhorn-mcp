@@ -6,7 +6,7 @@ abstracting error handling and JSON parsing.
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from yellhorn_mcp.utils.git_utils import (
     YellhornMCPError,
@@ -24,6 +24,7 @@ async def create_github_issue(
     title: str,
     body: str,
     labels: list[str] | str = "yellhorn-mcp",
+    github_command_func: Callable | None = None,
 ) -> dict[str, Any]:
     """Create a GitHub issue and return its data.
 
@@ -32,6 +33,7 @@ async def create_github_issue(
         title: Issue title.
         body: Issue body.
         labels: Labels to apply (default: "yellhorn-mcp").
+        github_command_func: Optional GitHub command function (for mocking).
 
     Returns:
         Dictionary with issue number and URL.
@@ -39,15 +41,18 @@ async def create_github_issue(
     Raises:
         YellhornMCPError: If issue creation fails.
     """
+    # Use provided command function or default to run_github_command
+    command_func = github_command_func or run_github_command
     # Normalize labels to a list
     if isinstance(labels, str):
         labels_list = [labels]
     else:
         labels_list = labels
 
-    # Ensure all labels exist
-    for label in labels_list:
-        await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP")
+    # Ensure all labels exist (only if using real GitHub CLI)
+    if github_command_func is None:
+        for label in labels_list:
+            await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP")
 
     # Build command with multiple labels
     command = ["issue", "create", "--title", title, "--body", body]
@@ -57,7 +62,7 @@ async def create_github_issue(
         command.extend(["--label", label])
 
     # Create the issue - gh issue create outputs the URL directly
-    result = await run_github_command(repo_path, command)
+    result = await command_func(repo_path, command)
 
     # Parse the URL to extract issue number
     # Expected format: https://github.com/owner/repo/issues/123
@@ -86,6 +91,7 @@ async def update_issue_with_workplan(
     workplan_text: str,
     usage: Any | None,
     title: str | None = None,
+    github_command_func: Callable | None = None,
 ) -> None:
     """Update a GitHub issue with workplan content and metrics.
 
@@ -95,10 +101,15 @@ async def update_issue_with_workplan(
         workplan_text: Generated workplan content.
         usage: Usage/completion metadata.
         title: Optional title for metrics section.
+        github_command_func: Optional GitHub command function (for mocking).
     """
     # Format the full issue body with workplan and metrics
     # (The metrics formatting will be handled by the caller)
-    await update_github_issue(repo_path, issue_number, body=workplan_text)
+    if github_command_func:
+        # For mock mode, use the provided command function
+        await github_command_func(repo_path, ["issue", "edit", issue_number, "--body", workplan_text])
+    else:
+        await update_github_issue(repo_path, issue_number, body=workplan_text)
 
 
 async def create_judgement_subissue(
@@ -106,6 +117,7 @@ async def create_judgement_subissue(
     parent_issue: str,
     judgement_title: str,
     judgement_content: str,
+    github_command_func: Callable | None = None,
 ) -> str:
     """Create a sub-issue for a workplan judgement.
 
@@ -114,23 +126,36 @@ async def create_judgement_subissue(
         parent_issue: Parent issue number.
         judgement_title: Title for the sub-issue.
         judgement_content: Judgement content.
+        github_command_func: Optional GitHub command function (for mocking).
 
     Returns:
         URL of the created sub-issue.
     """
-    return await create_github_subissue(
-        repo_path,
-        parent_issue,
-        judgement_title,
-        judgement_content,
-        labels=["yellhorn-mcp", "yellhorn-judgement-subissue"],
-    )
+    if github_command_func:
+        # For mock mode, create a simple issue
+        result = await create_github_issue(
+            repo_path,
+            f"[Sub-issue of #{parent_issue}] {judgement_title}",
+            judgement_content,
+            labels=["yellhorn-mcp", "yellhorn-judgement-subissue"],
+            github_command_func=github_command_func,
+        )
+        return result["url"]
+    else:
+        return await create_github_subissue(
+            repo_path,
+            parent_issue,
+            judgement_title,
+            judgement_content,
+            labels=["yellhorn-mcp", "yellhorn-judgement-subissue"],
+        )
 
 
 async def add_issue_comment(
     repo_path: Path,
     issue_number: str,
     comment: str,
+    github_command_func: Callable | None = None,
 ) -> None:
     """Add a comment to a GitHub issue.
 
@@ -138,21 +163,32 @@ async def add_issue_comment(
         repo_path: Path to the repository.
         issue_number: Issue number.
         comment: Comment text.
+        github_command_func: Optional GitHub command function (for mocking).
     """
-    await add_github_issue_comment(repo_path, issue_number, comment)
+    if github_command_func:
+        # For mock mode, use the provided command function
+        await github_command_func(repo_path, ["issue", "comment", issue_number, "--body", comment])
+    else:
+        await add_github_issue_comment(repo_path, issue_number, comment)
 
 
 async def get_issue_body(
     repo_path: Path,
     issue_identifier: str,
+    github_command_func: Callable | None = None,
 ) -> str:
     """Get the body of a GitHub issue.
 
     Args:
         repo_path: Path to the repository.
         issue_identifier: Issue number or URL.
+        github_command_func: Optional GitHub command function (for mocking).
 
     Returns:
         Issue body content.
     """
-    return await get_github_issue_body(repo_path, issue_identifier)
+    if github_command_func:
+        # For mock mode, use the provided command function
+        return await github_command_func(repo_path, ["issue", "view", issue_identifier, "--json", "body", "--jq", ".body"])
+    else:
+        return await get_github_issue_body(repo_path, issue_identifier)

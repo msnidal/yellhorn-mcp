@@ -4,6 +4,7 @@ This module handles token usage tracking, cost calculation,
 and metrics formatting for various AI models.
 """
 
+from yellhorn_mcp.llm_manager import UsageMetadata
 from yellhorn_mcp.models.metadata_models import CompletionMetadata
 
 # Pricing configuration for models (USD per 1M tokens)
@@ -15,15 +16,37 @@ MODEL_PRICING = {
     },
     "gemini-2.5-flash": {
         "input": {
-            "default": 0.15,
-            "above_200k": 0.15,  # Flash doesn't have different pricing tiers
+            "default": 0.30,
+            "above_200k": 0.30,
         },
         "output": {
-            "default": 3.50,
-            "above_200k": 3.50,
+            "default": 2.50,
+            "above_200k": 2.50,
+        },
+        "cache": {
+            "default": 0.075,
+            "storage": 1.00,  # per 1M tokens per hour
+        },
+    },
+    "gemini-2.5-flash-lite": {
+        "input": {
+            "default": 0.10,
+            "audio": 0.50,
+        },
+        "output": {
+            "default": 0.40,
+        },
+        "cache": {
+            "default": 0.025,
+            "audio": 0.125,
+            "storage": 1.00,  # per 1M tokens per hour
         },
     },
     # OpenAI models
+    "gpt-4.1": {
+        "input": {"default": 2.00, "cached": 0.50},
+        "output": {"default": 8.00},
+    },
     "gpt-4o": {
         "input": {"default": 5.00},  # $5 per 1M input tokens
         "output": {"default": 15.00},  # $15 per 1M output tokens
@@ -78,7 +101,7 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float |
     return input_cost + output_cost
 
 
-def format_metrics_section(model: str, usage: CompletionMetadata | None) -> str:
+def format_metrics_section(model: str, usage: UsageMetadata | None) -> str:
     """Formats the completion metrics into a Markdown section.
 
     Args:
@@ -94,8 +117,8 @@ def format_metrics_section(model: str, usage: CompletionMetadata | None) -> str:
         return na_metrics
 
     # Extract token counts
-    input_tokens = usage.input_tokens
-    output_tokens = usage.output_tokens
+    input_tokens = usage.prompt_tokens
+    output_tokens = usage.completion_tokens
     total_tokens = usage.total_tokens
 
     if input_tokens is None or output_tokens is None:
