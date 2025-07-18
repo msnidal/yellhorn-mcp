@@ -18,7 +18,9 @@ The server requires GitHub CLI to be installed and authenticated for GitHub oper
 
 import asyncio
 import json
+import logging
 import os
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -56,6 +58,11 @@ from yellhorn_mcp.utils.git_utils import (
     run_git_command,
 )
 
+logging.basicConfig(
+    stream=sys.stderr,
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
 
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
@@ -123,12 +130,12 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         raise ValueError(f"Path {repo_path} is not a Git repository")
 
     try:
-        # Logging happens outside lifespan context via print statements since
+        # Logging happens outside lifespan context via logging statements since
         # the server context is not available here
-        print(f"Starting Yellhorn MCP server at http://127.0.0.1:8000")
-        print(f"Repository path: {repo_path}")
-        print(f"Using model: {model}")
-        print(f"Google Search Grounding: {'enabled' if use_search_grounding else 'disabled'}")
+        logging.info(f"Starting Yellhorn MCP server at http://127.0.0.1:8000")
+        logging.info(f"Repository path: {repo_path}")
+        logging.info(f"Using model: {model}")
+        logging.info(f"Google Search Grounding: {'enabled' if use_search_grounding else 'disabled'}")
 
         yield {
             "repo_path": repo_path,

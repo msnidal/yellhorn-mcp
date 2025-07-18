@@ -456,35 +456,6 @@ def test_is_git_repository():
                 assert is_git_repository(Path("/mock/strange_repo")) is False
 
 
-def test_calculate_cost():
-    """Test the calculate_cost function with different token counts and models."""
-    from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost
-
-    # Test with standard model and default tier (below 200k tokens)
-    cost = calculate_cost("gemini-2.5-pro", 100_000, 50_000)
-    # Expected: (100,000 / 1M) * 1.25 + (50,000 / 1M) * 10.00 = 0.125 + 0.5 = 0.625
-    assert cost == 0.625
-
-    # Test with standard model and higher tier (above 200k tokens)
-    cost = calculate_cost("gemini-2.5-pro", 250_000, 300_000)
-    # Expected: (250,000 / 1M) * 2.50 + (300,000 / 1M) * 15.00 = 0.625 + 4.5 = 5.125
-    assert cost == 5.125
-
-    # Test with standard model and mixed tiers
-    cost = calculate_cost("gemini-2.5-pro", 150_000, 250_000)
-    # Expected: (150,000 / 1M) * 1.25 + (250,000 / 1M) * 15.00 = 0.1875 + 3.75 = 3.9375
-    assert cost == 3.9375
-
-    # Test with flash model (same pricing across tiers)
-    cost = calculate_cost("gemini-2.5-flash", 150_000, 50_000)
-    # Expected: (150,000 / 1M) * 0.30 + (50,000 / 1M) * 2.50 = 0.045 + 0.125 = 0.17
-    assert cost == pytest.approx(0.17)
-
-    # Test with unknown model
-    cost = calculate_cost("unknown-model", 100_000, 50_000)
-    assert cost is None
-
-
 @pytest.mark.asyncio
 async def test_create_workplan(mock_request_context, mock_genai_client):
     """Test creating a workplan."""

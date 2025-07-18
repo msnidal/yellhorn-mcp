@@ -12,19 +12,15 @@ class TokenCounter:
         # OpenAI models
         "gpt-4o": 128_000,
         "gpt-4o-mini": 128_000,
-        "o4-mini": 65_000,
-        "o3": 65_000,
-        "gpt-4.1": 1_000_000,  # Added support for GPT-4.1
-        "gpt-4": 8_192,
-        "gpt-4-32k": 32_768,
-        "gpt-3.5-turbo": 16_385,
-        "gpt-3.5-turbo-16k": 16_385,
+        "o4-mini": 200_000,
+        "o3": 200_000,
+        "gpt-4.1": 1_000_000,
         # Google models
         "gemini-2.0-flash-exp": 1_048_576,
         "gemini-1.5-flash": 1_048_576,
         "gemini-1.5-pro": 2_097_152,
-        "gemini-2.5-pro-preview-05-06": 1_048_576,
-        "gemini-2.5-flash-preview-05-20": 1_048_576,
+        "gemini-2.5-pro": 1_048_576,
+        "gemini-2.5-flash": 1_048_576,
     }
 
     # Model to encoding mapping
@@ -34,19 +30,13 @@ class TokenCounter:
         "gpt-4o-mini": "o200k_base",
         "o4-mini": "o200k_base",
         "o3": "o200k_base",
-        # GPT-4 models use cl100k_base
-        "gpt-4.1": "cl100k_base",  # Added support for GPT-4.1
-        "gpt-4": "cl100k_base",
-        "gpt-4-32k": "cl100k_base",
-        "gpt-3.5-turbo": "cl100k_base",
-        "gpt-3.5-turbo-16k": "cl100k_base",
+        "gpt-4.1": "o200k_base",
         # Gemini models - we'll use cl100k_base as approximation
-        # since tiktoken doesn't have specific Gemini encodings
         "gemini-2.0-flash-exp": "cl100k_base",
         "gemini-1.5-flash": "cl100k_base",
         "gemini-1.5-pro": "cl100k_base",
-        "gemini-2.5-pro-preview-05-06": "cl100k_base",
-        "gemini-2.5-flash-preview-05-20": "cl100k_base",
+        "gemini-2.5-pro": "cl100k_base",
+        "gemini-2.5-flash": "cl100k_base",
     }
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -74,10 +64,15 @@ class TokenCounter:
 
     def _get_encoding(self, model: str) -> tiktoken.Encoding:
         """Get the appropriate encoding for a model, with caching."""
-        # Get encoding name from config overrides or default mapping
-        encoding_name = self.config.get("model_encodings", {}).get(
-            model
-        ) or self.MODEL_TO_ENCODING.get(model)
+        # Get encoding name from config overrides with flexible matching
+        config_encodings = self.config.get("model_encodings", {})
+        config_key = self._find_matching_model_key(model, config_encodings)
+        encoding_name = config_encodings.get(config_key) if config_key else None
+        
+        # If not found in config, try default mapping with flexible matching
+        if not encoding_name:
+            default_key = self._find_matching_model_key(model, self.MODEL_TO_ENCODING)
+            encoding_name = self.MODEL_TO_ENCODING.get(default_key) if default_key else None
 
         if not encoding_name:
             # Use default from config or fallback to cl100k_base
@@ -110,9 +105,33 @@ class TokenCounter:
         encoding = self._get_encoding(model)
         return len(encoding.encode(text))
 
+    def _find_matching_model_key(self, model: str, model_dict: Dict[str, Any]) -> Optional[str]:
+        """
+        Find a model key that matches the given model name.
+        First tries exact match, then looks for keys that are substrings of the model.
+        
+        Args:
+            model: The model name to search for
+            model_dict: Dictionary of model configurations
+            
+        Returns:
+            Matching key or None if no match found
+        """
+        # First try exact match
+        if model in model_dict:
+            return model
+            
+        # Then try substring matching - find keys that are substrings of the model
+        for key in model_dict.keys():
+            if key in model:
+                return key
+                
+        return None
+
     def get_model_limit(self, model: str) -> int:
         """
         Get the token limit for the specified model.
+        Uses flexible matching to find model configurations.
 
         Args:
             model: The model name
@@ -120,12 +139,19 @@ class TokenCounter:
         Returns:
             Token limit for the model, using config overrides or defaults
         """
-        # First check config overrides, then default limits, then fallback to configured default
-        return (
-            self.config.get("model_limits", {}).get(model)
-            or self.MODEL_LIMITS.get(model)
-            or self.config.get("default_token_limit", 8_192)
-        )
+        # First check config overrides with flexible matching
+        config_limits = self.config.get("model_limits", {})
+        config_key = self._find_matching_model_key(model, config_limits)
+        if config_key:
+            return config_limits[config_key]
+            
+        # Then check default limits with flexible matching
+        default_key = self._find_matching_model_key(model, self.MODEL_LIMITS)
+        if default_key:
+            return self.MODEL_LIMITS[default_key]
+            
+        # Fallback to configured default
+        return self.config.get("default_token_limit", 128_000)
 
     def estimate_response_tokens(self, prompt: str, model: str) -> int:
         """

@@ -11,17 +11,15 @@ from yellhorn_mcp.models.metadata_models import CompletionMetadata
 MODEL_PRICING = {
     # Gemini models
     "gemini-2.5-pro": {
-        "input": {"default": 1.25, "above_200k": 2.50},
-        "output": {"default": 10.00, "above_200k": 15.00},
+        "input": {"default": 1.25},
+        "output": {"default": 10.00},
     },
     "gemini-2.5-flash": {
         "input": {
             "default": 0.30,
-            "above_200k": 0.30,
         },
         "output": {
             "default": 2.50,
-            "above_200k": 2.50,
         },
         "cache": {
             "default": 0.075,
@@ -90,14 +88,11 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float |
     if not pricing:
         return None
 
-    # Determine which pricing tier to use based on token count
-    input_tier = "above_200k" if input_tokens > 200_000 else "default"
-    output_tier = "above_200k" if output_tokens > 200_000 else "default"
-
     # Calculate costs (convert to millions for rate multiplication)
-    input_cost = (input_tokens / 1_000_000) * pricing["input"][input_tier]
-    output_cost = (output_tokens / 1_000_000) * pricing["output"][output_tier]
-
+    input_rate = pricing["input"]["default"]
+    output_rate = pricing["output"]["default"]
+    input_cost = (input_tokens / 1_000_000) * input_rate
+    output_cost = (output_tokens / 1_000_000) * output_rate
     return input_cost + output_cost
 
 

@@ -7,6 +7,7 @@ application, making it easier to integrate with other programs or launch directl
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
@@ -14,6 +15,12 @@ from pathlib import Path
 import uvicorn
 
 from yellhorn_mcp.server import is_git_repository, mcp
+
+logging.basicConfig(
+    stream=sys.stderr,
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
 
 
 def main():
@@ -85,15 +92,15 @@ def main():
     if not is_openai_model:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            print("Error: GEMINI_API_KEY environment variable is not set")
-            print("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
+            logging.error("GEMINI_API_KEY environment variable is not set")
+            logging.error("Please set the GEMINI_API_KEY environment variable with your Gemini API key")
             sys.exit(1)
     # For OpenAI models
     else:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            print("Error: OPENAI_API_KEY environment variable is not set")
-            print("Please set the OPENAI_API_KEY environment variable with your OpenAI API key")
+            logging.error("OPENAI_API_KEY environment variable is not set")
+            logging.error("Please set the OPENAI_API_KEY environment variable with your OpenAI API key")
             sys.exit(1)
 
     # Set environment variables for the server
@@ -108,23 +115,23 @@ def main():
     # Validate repository path
     repo_path = Path(args.repo_path).resolve()
     if not repo_path.exists():
-        print(f"Error: Repository path {repo_path} does not exist")
+        logging.error(f"Repository path {repo_path} does not exist")
         sys.exit(1)
 
     # Check if the path is a Git repository (either standard or worktree)
     if not is_git_repository(repo_path):
-        print(f"Error: {repo_path} is not a Git repository")
+        logging.error(f"{repo_path} is not a Git repository")
         sys.exit(1)
 
-    print(f"Starting Yellhorn MCP server at http://{args.host}:{args.port}")
-    print(f"Repository path: {repo_path}")
-    print(f"Using model: {args.model}")
+    logging.info(f"Starting Yellhorn MCP server at http://{args.host}:{args.port}")
+    logging.info(f"Repository path: {repo_path}")
+    logging.info(f"Using model: {args.model}")
 
     # Show search grounding status if using Gemini model
     is_openai_model = args.model.startswith("gpt-") or args.model.startswith("o")
     if not is_openai_model:
         search_status = "disabled" if args.no_search_grounding else "enabled"
-        print(f"Google Search Grounding: {search_status}")
+        logging.info(f"Google Search Grounding: {search_status}")
 
     mcp.run(transport="stdio")
 

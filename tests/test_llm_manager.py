@@ -224,7 +224,7 @@ class TestLLMManager:
         manager = LLMManager(openai_client=mock_openai)
 
         # Create a very long prompt that needs chunking
-        long_prompt = "This is a test sentence. " * 20000
+        long_prompt = "This is a test sentence. " * 36000
 
         result = await manager.call_llm(prompt=long_prompt, model="o4-mini", temperature=0.7)
 
