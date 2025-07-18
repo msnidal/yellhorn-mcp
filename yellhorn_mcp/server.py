@@ -113,8 +113,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
                 "safety_margin_tokens": 2000,  # Reserve tokens for system prompts and responses
                 "overlap_ratio": 0.1,  # 10% overlap between chunks
                 "chunk_strategy": "paragraph",  # Use paragraph-based chunking
-                "aggregation_strategy": "concatenate"  # Concatenate chunk responses
-            }
+                "aggregation_strategy": "concatenate",  # Concatenate chunk responses
+            },
         )
 
     # Validate repository path
@@ -284,7 +284,9 @@ async def create_workplan(
                         "submitted_urls": submitted_urls,
                     },
                     ctx=ctx,
-                    github_command_func=ctx.request_context.lifespan_context.get("github_command_func"),
+                    github_command_func=ctx.request_context.lifespan_context.get(
+                        "github_command_func"
+                    ),
                 )
             )
         else:

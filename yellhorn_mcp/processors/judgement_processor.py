@@ -209,46 +209,43 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Check if we should use search grounding
         use_search_grounding = not disable_search_grounding
         if _meta and "original_search_grounding" in _meta:
-            use_search_grounding = _meta["original_search_grounding"] and not disable_search_grounding
+            use_search_grounding = (
+                _meta["original_search_grounding"] and not disable_search_grounding
+            )
 
         # Prepare additional kwargs for the LLM call
         llm_kwargs = {}
         is_openai_model = llm_manager._is_openai_model(model)
-        
+
         # Handle search grounding for Gemini models
         if not is_openai_model and use_search_grounding:
             if ctx:
                 await ctx.log(
-                    level="info",
-                    message=f"Attempting to enable search grounding for model {model}"
+                    level="info", message=f"Attempting to enable search grounding for model {model}"
                 )
             try:
                 from google.genai.types import GenerateContentConfig
                 from yellhorn_mcp.utils.search_grounding_utils import _get_gemini_search_tools
-                
+
                 search_tools = _get_gemini_search_tools(model)
                 if search_tools:
                     llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
                     if ctx:
                         await ctx.log(
-                            level="info",
-                            message=f"Search grounding enabled for model {model}"
+                            level="info", message=f"Search grounding enabled for model {model}"
                         )
             except ImportError:
                 if ctx:
                     await ctx.log(
                         level="warning",
-                        message="GenerateContentConfig not available, skipping search grounding"
+                        message="GenerateContentConfig not available, skipping search grounding",
                     )
 
         # Call LLM through the manager with citation support
         if is_openai_model:
             # OpenAI models don't support citations
             response_data = await llm_manager.call_llm_with_usage(
-                prompt=prompt,
-                model=model,
-                temperature=0.0,
-                **llm_kwargs
+                prompt=prompt, model=model, temperature=0.0, **llm_kwargs
             )
             judgement_content = response_data["content"]
             usage_metadata = response_data["usage_metadata"]
@@ -264,23 +261,20 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         else:
             # Gemini models - use citation-aware call
             response_data = await llm_manager.call_llm_with_citations(
-                prompt=prompt,
-                model=model,
-                temperature=0.0,
-                **llm_kwargs
+                prompt=prompt, model=model, temperature=0.0, **llm_kwargs
             )
-            
+
             judgement_content = response_data["content"]
             usage_metadata = response_data["usage_metadata"]
-            
+
             # Process citations if available
             if "grounding_metadata" in response_data and response_data["grounding_metadata"]:
                 from yellhorn_mcp.utils.search_grounding_utils import add_citations_from_metadata
+
                 judgement_content = add_citations_from_metadata(
-                    judgement_content, 
-                    response_data["grounding_metadata"]
+                    judgement_content, response_data["grounding_metadata"]
                 )
-            
+
             # Create completion metadata
             completion_metadata = CompletionMetadata(
                 model_name=model,
@@ -289,7 +283,10 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 input_tokens=usage_metadata.prompt_tokens,
                 output_tokens=usage_metadata.completion_tokens,
                 total_tokens=usage_metadata.total_tokens,
-                search_results_used=getattr(response_data.get("grounding_metadata"), "grounding_chunks", None) is not None,
+                search_results_used=getattr(
+                    response_data.get("grounding_metadata"), "grounding_chunks", None
+                )
+                is not None,
                 timestamp=None,  # Will be set below
             )
 
@@ -362,7 +359,11 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             subissue_url = f"{repo_info}/issues/{subissue_to_update}"
         else:
             subissue_url = await create_judgement_subissue(
-                repo_path, parent_workplan_issue_number, judgement_title, full_body, github_command_func=github_command_func
+                repo_path,
+                parent_workplan_issue_number,
+                judgement_title,
+                full_body,
+                github_command_func=github_command_func,
             )
 
         if ctx:
@@ -378,7 +379,12 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             if issue_match:
                 sub_issue_number = issue_match.group(1)
                 debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
-                await add_issue_comment(repo_path, sub_issue_number, debug_comment, github_command_func=github_command_func)
+                await add_issue_comment(
+                    repo_path,
+                    sub_issue_number,
+                    debug_comment,
+                    github_command_func=github_command_func,
+                )
 
         # Add completion comment to the PARENT issue, not the sub-issue
         if completion_metadata and _meta:
@@ -406,7 +412,12 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                     # Fallback to parent if we can't extract sub-issue number
                     sub_issue_number = parent_workplan_issue_number
 
-            await add_issue_comment(repo_path, sub_issue_number, completion_comment, github_command_func=github_command_func)
+            await add_issue_comment(
+                repo_path,
+                sub_issue_number,
+                completion_comment,
+                github_command_func=github_command_func,
+            )
 
     except Exception as e:
         error_msg = f"Error processing judgement: {str(e)}"
@@ -416,7 +427,12 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Try to add error comment to parent issue
         try:
             error_comment = f"❌ **Error generating judgement**\n\n{str(e)}"
-            await add_issue_comment(repo_path, parent_workplan_issue_number, error_comment, github_command_func=github_command_func)
+            await add_issue_comment(
+                repo_path,
+                parent_workplan_issue_number,
+                error_comment,
+                github_command_func=github_command_func,
+            )
         except Exception:
             # If we can't even add a comment, just log
             if ctx:

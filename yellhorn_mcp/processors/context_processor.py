@@ -59,7 +59,9 @@ async def process_context_curation_async(
         # Store original search grounding setting
         original_search_grounding = None
         if disable_search_grounding and ctx:
-            original_search_grounding = ctx.request_context.lifespan_context.get("use_search_grounding", True)
+            original_search_grounding = ctx.request_context.lifespan_context.get(
+                "use_search_grounding", True
+            )
             ctx.request_context.lifespan_context["use_search_grounding"] = False
 
         if ctx:
@@ -69,10 +71,14 @@ async def process_context_curation_async(
         all_file_paths = []
         for root, dirs, files in os.walk(repo_path):
             # Skip hidden directories and common ignore patterns
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', 'venv', 'env']]
-            
+            dirs[:] = [
+                d
+                for d in dirs
+                if not d.startswith(".") and d not in ["node_modules", "__pycache__", "venv", "env"]
+            ]
+
             for file in files:
-                if not file.startswith('.') and not file.endswith('.pyc'):
+                if not file.startswith(".") and not file.endswith(".pyc"):
                     file_path = os.path.join(root, file)
                     relative_path = os.path.relpath(file_path, repo_path)
                     all_file_paths.append(relative_path)
@@ -82,7 +88,7 @@ async def process_context_curation_async(
 
         # Use all files without ignore filtering
         filtered_file_paths = all_file_paths.copy()
-        
+
         if ctx:
             await ctx.log(
                 level="info",
@@ -127,8 +133,12 @@ async def process_context_curation_async(
             )
 
         # Build the codebase context based on reasoning mode
-        codebase_reasoning_mode = ctx.request_context.lifespan_context.get("codebase_reasoning", codebase_reasoning) if ctx else codebase_reasoning
-        
+        codebase_reasoning_mode = (
+            ctx.request_context.lifespan_context.get("codebase_reasoning", codebase_reasoning)
+            if ctx
+            else codebase_reasoning
+        )
+
         if codebase_reasoning_mode == "lsp":
             # Use LSP mode to get detailed code structure
             if ctx:
@@ -138,15 +148,18 @@ async def process_context_curation_async(
                 )
             # Get LSP snapshot of the codebase
             from yellhorn_mcp.utils.lsp_utils import get_lsp_snapshot
+
             lsp_file_paths, lsp_file_contents = await get_lsp_snapshot(repo_path)
-            
+
             # Use all LSP results without filtering
             filtered_lsp_paths = lsp_file_paths
             filtered_lsp_contents = lsp_file_contents
-            
+
             # Format with LSP structure
-            directory_context = await format_codebase_for_prompt(filtered_lsp_paths, filtered_lsp_contents)
-            
+            directory_context = await format_codebase_for_prompt(
+                filtered_lsp_paths, filtered_lsp_contents
+            )
+
         elif codebase_reasoning_mode == "full":
             # Use full mode with file contents
             if ctx:
@@ -154,7 +167,7 @@ async def process_context_curation_async(
                     level="info",
                     message="Using full mode with file contents for codebase analysis",
                 )
-            
+
             # Get file contents for filtered files
             file_contents = {}
             for file_path in filtered_file_paths:
@@ -166,10 +179,10 @@ async def process_context_curation_async(
                     except Exception:
                         # Skip files that can't be read
                         pass
-            
+
             # Format with full file contents
             directory_context = await format_codebase_for_prompt(filtered_file_paths, file_contents)
-            
+
         else:
             # Default to file structure mode
             if ctx:
@@ -178,12 +191,16 @@ async def process_context_curation_async(
                     message="Using file structure mode for codebase analysis",
                 )
             directory_context = build_file_structure_context(filtered_file_paths)
-        
+
         # Log peek of directory_context
         if ctx:
             await ctx.log(
                 level="info",
-                message=f"Directory context:\n{directory_context[:500]}..." if len(directory_context) > 500 else f"Directory context:\n{directory_context}",
+                message=(
+                    f"Directory context:\n{directory_context[:500]}..."
+                    if len(directory_context) > 500
+                    else f"Directory context:\n{directory_context}"
+                ),
             )
 
         # Construct the system message
@@ -239,24 +256,24 @@ Don't include explanations for your choices, just return the list in the specifi
                 prompt=prompt,
                 system_message=system_message,
                 temperature=0.0,
-                **llm_kwargs
+                **llm_kwargs,
             )
 
             # Extract directory paths from all context blocks using regex
             import re
-            
+
             # Ensure result is a string
             result_str = result if isinstance(result, str) else str(result)
-            
+
             # Find all context blocks (```context followed by content and closing ```)
-            context_blocks = re.findall(r'```context\n([\s\S]*?)\n```', result_str, re.MULTILINE)
-            
+            context_blocks = re.findall(r"```context\n([\s\S]*?)\n```", result_str, re.MULTILINE)
+
             # Process each block
             for block in context_blocks:
-                for line in block.split('\n'):
+                for line in block.split("\n"):
                     line = line.strip()
                     # Skip empty lines and comments
-                    if line and not line.startswith('#'):
+                    if line and not line.startswith("#"):
                         # Validate that the directory exists in our sorted_dirs list
                         if line in sorted_dirs or line == ".":
                             all_important_dirs.add(line)
@@ -267,7 +284,12 @@ Don't include explanations for your choices, just return the list in the specifi
                     line = line.strip()
                     # Only add if it looks like a directory path (no spaces, existing in our list)
                     # and not part of a code block
-                    if line and " " not in line and (line in sorted_dirs or line == ".") and not line.startswith('```'):
+                    if (
+                        line
+                        and " " not in line
+                        and (line in sorted_dirs or line == ".")
+                        and not line.startswith("```")
+                    ):
                         all_important_dirs.add(line)
 
             # Log the directories found
@@ -324,7 +346,9 @@ Don't include explanations for your choices, just return the list in the specifi
                         )
             except Exception as e:
                 if ctx:
-                    await ctx.log(level="warning", message=f"Failed to read .gitignore file: {str(e)}")
+                    await ctx.log(
+                        level="warning", message=f"Failed to read .gitignore file: {str(e)}"
+                    )
 
         # Skip ignore file patterns since we're not using them
         # Sort directories for consistent output
@@ -415,4 +439,3 @@ Don't include explanations for your choices, just return the list in the specifi
         if ctx:
             await ctx.log(level="error", message=error_message)
         raise YellhornMCPError(error_message)
-

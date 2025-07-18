@@ -332,16 +332,18 @@ async def test_integration_process_workplan_lsp_mode():
     gemini_client.aio = MagicMock()
     gemini_client.aio.models = MagicMock()
     gemini_client.aio.models.generate_content = AsyncMock(return_value=response)
-    
+
     # Create LLMManager with mock Gemini client
     llm_manager = LLMManager(gemini_client=gemini_client)
-    
+
     # Mock the LLM manager call methods
-    llm_manager.call_llm_with_citations = AsyncMock(return_value={
-        'content': 'Mock workplan content',
-        'usage_metadata': usage_metadata,
-        'grounding_metadata': None
-    })
+    llm_manager.call_llm_with_citations = AsyncMock(
+        return_value={
+            "content": "Mock workplan content",
+            "usage_metadata": usage_metadata,
+            "grounding_metadata": None,
+        }
+    )
 
     model = "mock-model"
     title = "Test Workplan"
@@ -393,8 +395,10 @@ async def test_integration_process_workplan_lsp_mode():
                     mock_lsp_snapshot.assert_called_once_with(repo_path)
 
                     # Verify LLM was called through the manager
-                    assert llm_manager.call_llm_with_citations.called, "LLM call_llm_with_citations method was not called"
-                    
+                    assert (
+                        llm_manager.call_llm_with_citations.called
+                    ), "LLM call_llm_with_citations method was not called"
+
                     # Verify formatted snapshot was passed to the prompt
                     call_args = llm_manager.call_llm_with_citations.call_args
                     prompt = call_args[1]["prompt"]  # keyword argument
@@ -454,16 +458,18 @@ async def test_integration_process_judgement_lsp_mode():
     gemini_client.aio.models = MagicMock()
     gemini_client.aio.models.generate_content = AsyncMock(return_value=response)
     gemini_client.aio.generate_content = AsyncMock(return_value=response)
-    
+
     # Create LLMManager with mock Gemini client
     llm_manager = LLMManager(gemini_client=gemini_client)
-    
+
     # Mock the LLM manager call methods
-    llm_manager.call_llm_with_citations = AsyncMock(return_value={
-        'content': 'Mock judgement content',
-        'usage_metadata': usage_metadata,
-        'grounding_metadata': None
-    })
+    llm_manager.call_llm_with_citations = AsyncMock(
+        return_value={
+            "content": "Mock judgement content",
+            "usage_metadata": usage_metadata,
+            "grounding_metadata": None,
+        }
+    )
 
     model = "mock-model"
     workplan = "Mock workplan"
@@ -536,10 +542,12 @@ async def test_integration_process_judgement_lsp_mode():
 
                                 # Verify LSP snapshot was used
                                 mock_lsp_snapshot.assert_called_once_with(repo_path)
-                                
+
                                 # Verify LLM was called through the manager
-                                assert llm_manager.call_llm_with_citations.called, "LLM call_llm_with_citations method was not called"
-                                
+                                assert (
+                                    llm_manager.call_llm_with_citations.called
+                                ), "LLM call_llm_with_citations method was not called"
+
                                 # Verify formatted snapshot was passed to the prompt
                                 call_args = llm_manager.call_llm_with_citations.call_args
                                 prompt = call_args[1]["prompt"]  # keyword argument

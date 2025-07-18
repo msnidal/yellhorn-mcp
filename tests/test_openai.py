@@ -118,20 +118,16 @@ async def test_process_workplan_async_openai(mock_request_context, mock_openai_c
     """Test workplan generation with OpenAI model."""
     # Create mock LLM Manager
     from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+
     mock_llm_manager = MagicMock(spec=LLMManager)
-    
+
     # Mock call_llm_with_usage to return content and usage
     async def mock_call_with_usage(**kwargs):
-        usage = UsageMetadata({
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "total_tokens": 1500
-        })
-        return {
-            "content": "Mock OpenAI response text",
-            "usage_metadata": usage
-        }
-    
+        usage = UsageMetadata(
+            {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
+        )
+        return {"content": "Mock OpenAI response text", "usage_metadata": usage}
+
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_usage)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_usage)
     mock_llm_manager._is_openai_model = MagicMock(return_value=True)
@@ -281,20 +277,16 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
     """Test judgement generation with OpenAI model."""
     # Create mock LLM Manager
     from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+
     mock_llm_manager = MagicMock(spec=LLMManager)
-    
+
     # Mock call_llm_with_usage to return content and usage
     async def mock_call_with_usage(**kwargs):
-        usage = UsageMetadata({
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "total_tokens": 1500
-        })
-        return {
-            "content": "Mock OpenAI response text",
-            "usage_metadata": usage
-        }
-    
+        usage = UsageMetadata(
+            {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
+        )
+        return {"content": "Mock OpenAI response text", "usage_metadata": usage}
+
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_usage)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_usage)
     mock_llm_manager._is_openai_model = MagicMock(return_value=True)
@@ -336,7 +328,7 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
 
         # Pass empty _meta (no longer needed, as llm_manager is passed directly)
         _meta = {}
-        
+
         # Test without issue number (direct output)
         await process_judgement_async(
             Path("/mock/repo"),
@@ -384,23 +376,19 @@ async def test_process_judgement_async_openai(mock_request_context, mock_openai_
 async def test_process_workplan_async_deep_research_model(mock_request_context, mock_openai_client):
     """Test workplan generation with Deep Research model."""
     mock_request_context.request_context.lifespan_context["model"] = "o3-deep-research"
-    
+
     # Create mock LLM Manager
     from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+
     mock_llm_manager = MagicMock(spec=LLMManager)
-    
+
     # Mock call_llm_with_usage to return content and usage
     async def mock_call_with_usage(**kwargs):
-        usage = UsageMetadata({
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "total_tokens": 1500
-        })
-        return {
-            "content": "Mock OpenAI response text",
-            "usage_metadata": usage
-        }
-    
+        usage = UsageMetadata(
+            {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
+        )
+        return {"content": "Mock OpenAI response text", "usage_metadata": usage}
+
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_usage)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_usage)
     mock_llm_manager._is_openai_model = MagicMock(return_value=True)
@@ -456,23 +444,19 @@ async def test_process_judgement_async_deep_research_model(
 ):
     """Test judgement generation with Deep Research model."""
     mock_request_context.request_context.lifespan_context["model"] = "o4-mini-deep-research"
-    
+
     # Create mock LLM Manager
     from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+
     mock_llm_manager = MagicMock(spec=LLMManager)
-    
+
     # Mock call_llm_with_usage to return content and usage
     async def mock_call_with_usage(**kwargs):
-        usage = UsageMetadata({
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "total_tokens": 1500
-        })
-        return {
-            "content": "Mock judgement from Deep Research",
-            "usage_metadata": usage
-        }
-    
+        usage = UsageMetadata(
+            {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
+        )
+        return {"content": "Mock judgement from Deep Research", "usage_metadata": usage}
+
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_usage)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_usage)
     mock_llm_manager._is_openai_model = MagicMock(return_value=True)
@@ -516,7 +500,7 @@ async def test_process_judgement_async_deep_research_model(
 
         # Pass empty _meta (no longer needed, as llm_manager is passed directly)
         _meta = {}
-        
+
         # Test judgement with Deep Research model
         await process_judgement_async(
             Path("/mock/repo"),
@@ -551,21 +535,18 @@ async def test_process_workplan_async_list_output(mock_request_context):
     """Test workplan generation when OpenAI returns output as a list."""
     # Create mock LLM Manager that returns list output
     from yellhorn_mcp.llm_manager import LLMManager
+
     manager = MagicMock(spec=LLMManager)
-    
+
     # Mock call_llm_with_usage to return a dictionary with content and usage_metadata
     async def mock_call_with_usage(**kwargs):
         from yellhorn_mcp.llm_manager import UsageMetadata
-        usage = UsageMetadata({
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "total_tokens": 1500
-        })
-        return {
-            "content": "Mock OpenAI response from list output",
-            "usage_metadata": usage
-        }
-    
+
+        usage = UsageMetadata(
+            {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
+        )
+        return {"content": "Mock OpenAI response from list output", "usage_metadata": usage}
+
     manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_usage)
     manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_usage)
 
@@ -632,21 +613,18 @@ async def test_process_judgement_async_list_output(mock_request_context):
     """Test judgement generation when OpenAI returns output as a list."""
     # Create mock LLM Manager that returns list output
     from yellhorn_mcp.llm_manager import LLMManager
+
     manager = MagicMock(spec=LLMManager)
-    
+
     # Mock call_llm_with_usage to return a dictionary with content and usage_metadata
     async def mock_call_with_usage(**kwargs):
         from yellhorn_mcp.llm_manager import UsageMetadata
-        usage = UsageMetadata({
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "total_tokens": 1500
-        })
-        return {
-            "content": "Mock judgement from list output",
-            "usage_metadata": usage
-        }
-    
+
+        usage = UsageMetadata(
+            {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
+        )
+        return {"content": "Mock judgement from list output", "usage_metadata": usage}
+
     manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_usage)
     manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_usage)
 
@@ -687,7 +665,7 @@ async def test_process_judgement_async_list_output(mock_request_context):
 
         # Pass llm_manager in _meta
         _meta = {"llm_manager": manager}
-        
+
         # Test judgement with list output
         await process_judgement_async(
             Path("/mock/repo"),

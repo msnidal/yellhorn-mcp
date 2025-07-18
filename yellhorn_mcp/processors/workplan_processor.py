@@ -83,14 +83,14 @@ async def get_codebase_snapshot(
     context_blacklist_patterns = []
     context_whitelist_patterns = []
     context_negation_patterns = []
-    
+
     if yellhorncontext_path.exists():
         lines = [
             line.strip()
             for line in yellhorncontext_path.read_text().strip().split("\n")
             if line.strip() and not line.strip().startswith("#")
         ]
-        
+
         # Separate patterns by type
         for line in lines:
             if line.startswith("!"):
@@ -99,16 +99,29 @@ async def get_codebase_snapshot(
             elif line in ["**/*", "*"]:
                 # Global blacklist pattern
                 context_blacklist_patterns.append(line)
-            elif any(ignore_keyword in line.lower() for ignore_keyword in [
-                "__pycache__", "*.py[cod]", "build/", "dist/", ".egg", ".cache", 
-                "*.log", ".env", "venv/", ".git", ".pytest_cache", ".mypy_cache"
-            ]):
+            elif any(
+                ignore_keyword in line.lower()
+                for ignore_keyword in [
+                    "__pycache__",
+                    "*.py[cod]",
+                    "build/",
+                    "dist/",
+                    ".egg",
+                    ".cache",
+                    "*.log",
+                    ".env",
+                    "venv/",
+                    ".git",
+                    ".pytest_cache",
+                    ".mypy_cache",
+                ]
+            ):
                 # Looks like a blacklist pattern (from .gitignore style)
                 context_blacklist_patterns.append(line)
             else:
                 # Assume it's a whitelist pattern (directory/file to include)
                 context_whitelist_patterns.append(line)
-        
+
         log_function(
             f"Found .yellhorncontext with {len(context_whitelist_patterns)} whitelist, "
             f"{len(context_blacklist_patterns)} blacklist, and {len(context_negation_patterns)} negation patterns"
@@ -117,7 +130,7 @@ async def get_codebase_snapshot(
     def is_ignored(file_path: str) -> bool:
         """Check if a file should be ignored based on patterns."""
         import fnmatch
-        
+
         # Helper function to match patterns
         def matches_pattern(path: str, pattern: str) -> bool:
             if pattern.endswith("/"):
@@ -126,12 +139,12 @@ async def get_codebase_snapshot(
             else:
                 # File pattern
                 return fnmatch.fnmatch(path, pattern)
-        
+
         # Step 1: Check negation patterns from .yellhorncontext (these override everything)
         for pattern in context_negation_patterns:
             if matches_pattern(file_path, pattern):
                 return False  # Explicitly included
-        
+
         # Step 2: If we have .yellhorncontext whitelist patterns, check them
         if context_whitelist_patterns:
             # Check if file matches any whitelist pattern
@@ -142,17 +155,17 @@ async def get_codebase_snapshot(
             else:
                 # File doesn't match any whitelist pattern, ignore it
                 return True
-        
+
         # Step 3: Check .yellhorncontext blacklist patterns
         for pattern in context_blacklist_patterns:
             if matches_pattern(file_path, pattern):
                 return True
-        
+
         # Step 4: Check .yellhornignore patterns (fallback)
         for pattern in yellhornignore_patterns:
             if matches_pattern(file_path, pattern):
                 return True
-        
+
         return False
 
     # Apply filtering
@@ -174,7 +187,7 @@ async def get_codebase_snapshot(
             pattern_types.append(f"{len(context_negation_patterns)} negation")
         if yellhornignore_patterns:
             pattern_types.append(f"{len(yellhornignore_patterns)} ignore")
-        
+
         pattern_desc = ", ".join(pattern_types) if pattern_types else "ignore"
         log_function(
             f"Filtered {ignored_count} files using {pattern_desc} patterns, "
@@ -385,31 +398,29 @@ async def _generate_and_update_issue(
     # Prepare additional kwargs for the LLM call
     llm_kwargs = {}
     is_openai_model = model.startswith("gpt-") or model.startswith("o")
-    
+
     # Handle search grounding for Gemini models
     if not is_openai_model and use_search_grounding:
         if ctx:
             await ctx.log(
-                level="info",
-                message=f"Attempting to enable search grounding for model {model}"
+                level="info", message=f"Attempting to enable search grounding for model {model}"
             )
         try:
             from google.genai.types import GenerateContentConfig
             from yellhorn_mcp.utils.search_grounding_utils import _get_gemini_search_tools
-            
+
             search_tools = _get_gemini_search_tools(model)
             if search_tools:
                 llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
                 if ctx:
                     await ctx.log(
-                        level="info",
-                        message=f"Search grounding enabled for model {model}"
+                        level="info", message=f"Search grounding enabled for model {model}"
                     )
         except ImportError:
             if ctx:
                 await ctx.log(
                     level="warning",
-                    message="GenerateContentConfig not available, skipping search grounding"
+                    message="GenerateContentConfig not available, skipping search grounding",
                 )
 
     try:
@@ -417,10 +428,7 @@ async def _generate_and_update_issue(
         if is_openai_model:
             # OpenAI models don't support citations
             response_data = await llm_manager.call_llm_with_usage(
-                prompt=prompt,
-                model=model,
-                temperature=0.0,
-                **llm_kwargs
+                prompt=prompt, model=model, temperature=0.0, **llm_kwargs
             )
             workplan_content = response_data["content"]
             usage_metadata = response_data["usage_metadata"]
@@ -436,23 +444,20 @@ async def _generate_and_update_issue(
         else:
             # Gemini models - use citation-aware call
             response_data = await llm_manager.call_llm_with_citations(
-                prompt=prompt,
-                model=model,
-                temperature=0.0,
-                **llm_kwargs
+                prompt=prompt, model=model, temperature=0.0, **llm_kwargs
             )
-            
+
             workplan_content = response_data["content"]
             usage_metadata = response_data["usage_metadata"]
-            
+
             # Process citations if available
             if "grounding_metadata" in response_data and response_data["grounding_metadata"]:
                 from yellhorn_mcp.utils.search_grounding_utils import add_citations_from_metadata
+
                 workplan_content = add_citations_from_metadata(
-                    workplan_content, 
-                    response_data["grounding_metadata"]
+                    workplan_content, response_data["grounding_metadata"]
                 )
-            
+
             # Create completion metadata
             completion_metadata = CompletionMetadata(
                 model_name=model,
@@ -461,15 +466,23 @@ async def _generate_and_update_issue(
                 input_tokens=usage_metadata.prompt_tokens,
                 output_tokens=usage_metadata.completion_tokens,
                 total_tokens=usage_metadata.total_tokens,
-                search_results_used=getattr(response_data.get("grounding_metadata"), "grounding_chunks", None) is not None,
+                search_results_used=getattr(
+                    response_data.get("grounding_metadata"), "grounding_chunks", None
+                )
+                is not None,
                 timestamp=None,  # Will be set below
             )
-        
+
     except Exception as e:
         error_message = f"Failed to generate workplan: {str(e)}"
         if ctx:
             await ctx.log(level="error", message=error_message)
-        await add_issue_comment(repo_path, issue_number, f"❌ **Error generating workplan** – {str(e)}", github_command_func=github_command_func)
+        await add_issue_comment(
+            repo_path,
+            issue_number,
+            f"❌ **Error generating workplan** – {str(e)}",
+            github_command_func=github_command_func,
+        )
         return
 
     if not workplan_content:
@@ -483,7 +496,9 @@ async def _generate_and_update_issue(
         error_message_comment = (
             f"⚠️ AI workplan enhancement failed: Received an empty response from {api_name} API."
         )
-        await add_issue_comment(repo_path, issue_number, error_message_comment, github_command_func=github_command_func)
+        await add_issue_comment(
+            repo_path, issue_number, error_message_comment, github_command_func=github_command_func
+        )
         return
 
     # Calculate generation time if we have metadata
@@ -510,7 +525,14 @@ async def _generate_and_update_issue(
     full_body = f"{content_prefix}{workplan_content}"
 
     # Update the GitHub issue with the generated workplan
-    await update_issue_with_workplan(repo_path, issue_number, full_body, completion_metadata, title, github_command_func=github_command_func)
+    await update_issue_with_workplan(
+        repo_path,
+        issue_number,
+        full_body,
+        completion_metadata,
+        title,
+        github_command_func=github_command_func,
+    )
     if ctx:
         await ctx.log(
             level="info",
@@ -520,12 +542,16 @@ async def _generate_and_update_issue(
     # Add debug comment if requested
     if debug:
         debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
-        await add_issue_comment(repo_path, issue_number, debug_comment, github_command_func=github_command_func)
+        await add_issue_comment(
+            repo_path, issue_number, debug_comment, github_command_func=github_command_func
+        )
 
     # Add completion comment if we have submission metadata
     if completion_metadata and _meta:
         completion_comment = format_completion_comment(completion_metadata)
-        await add_issue_comment(repo_path, issue_number, completion_comment, github_command_func=github_command_func)
+        await add_issue_comment(
+            repo_path, issue_number, completion_comment, github_command_func=github_command_func
+        )
 
 
 async def process_workplan_async(
@@ -658,7 +684,9 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         # Try to add error comment to issue
         try:
             error_comment = f"❌ **Error generating workplan**\n\n{str(e)}"
-            await add_issue_comment(repo_path, issue_number, error_comment, github_command_func=github_command_func)
+            await add_issue_comment(
+                repo_path, issue_number, error_comment, github_command_func=github_command_func
+            )
         except Exception:
             # If we can't even add a comment, just log
             if ctx:
@@ -770,7 +798,9 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         # Try to add error comment to issue
         try:
             error_comment = f"❌ **Error revising workplan**\n\n{str(e)}"
-            await add_issue_comment(repo_path, issue_number, error_comment, github_command_func=github_command_func)
+            await add_issue_comment(
+                repo_path, issue_number, error_comment, github_command_func=github_command_func
+            )
         except Exception:
             # If we can't even add a comment, just log
             if ctx:

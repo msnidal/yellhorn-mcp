@@ -55,7 +55,9 @@ async def run_git_command(repo_path: Path, command: list[str]) -> str:
         raise YellhornMCPError("Git executable not found. Please ensure Git is installed.")
 
 
-async def run_github_command(repo_path: Path, command: list[str], github_command_func: Callable | None = None) -> str:
+async def run_github_command(
+    repo_path: Path, command: list[str], github_command_func: Callable | None = None
+) -> str:
     """
     Run a GitHub CLI command in the repository.
 
@@ -150,11 +152,11 @@ async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str
 
 
 async def update_github_issue(
-    repo_path: Path, 
-    issue_number: str, 
-    title: str | None = None, 
+    repo_path: Path,
+    issue_number: str,
+    title: str | None = None,
     body: str | None = None,
-    github_command_func: Callable | None = None
+    github_command_func: Callable | None = None,
 ) -> None:
     """
     Update a GitHub issue title and/or body.
@@ -191,7 +193,9 @@ async def update_github_issue(
 
             try:
                 command.extend(["--body-file", tmp_path])
-                await run_github_command(repo_path, command, github_command_func=github_command_func)
+                await run_github_command(
+                    repo_path, command, github_command_func=github_command_func
+                )
             finally:
                 # Clean up the temporary file
                 import os

@@ -7,7 +7,10 @@ import pytest
 from mcp.server.fastmcp import Context
 
 from tests.helpers import DummyContext
-from yellhorn_mcp.processors.workplan_processor import process_revision_async, process_workplan_async
+from yellhorn_mcp.processors.workplan_processor import (
+    process_revision_async,
+    process_workplan_async,
+)
 from yellhorn_mcp.processors.judgement_processor import process_judgement_async
 from yellhorn_mcp.server import (
     YellhornMCPError,
@@ -63,7 +66,7 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
 
         # Create LLMManager with no clients to trigger error
         llm_manager = LLMManager()
-        
+
         # Create a typical error flow: process_workplan_async catches exception and adds comment
         await process_workplan_async(
             Path("/mock/repo"),
@@ -109,7 +112,7 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
 
         # Create LLMManager with mock client that will error
         llm_manager = LLMManager(openai_client=mock_client)
-        
+
         # Process should handle API error and add a comment to the issue with error message
         await process_workplan_async(
             Path("/mock/repo"),
@@ -129,7 +132,9 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
             and "OpenAI API error" in call.kwargs.get("message", "")
             for call in mock_ctx.log.call_args_list
         )
-        assert error_call_found, f"Error log not found in log calls: {[call.kwargs for call in mock_ctx.log.call_args_list]}"
+        assert (
+            error_call_found
+        ), f"Error log not found in log calls: {[call.kwargs for call in mock_ctx.log.call_args_list]}"
 
         # Verify comment was added with error message via gh command
         mock_gh_command.assert_called()
@@ -180,7 +185,7 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
 
         # Create LLMManager with mock client that returns empty response
         llm_manager = LLMManager(openai_client=client)
-        
+
         # Process should handle empty response and add comment to issue
         await process_workplan_async(
             Path("/mock/repo"),
@@ -225,7 +230,7 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
 
         # Create LLMManager with no clients to trigger error
         llm_manager = LLMManager()
-        
+
         with pytest.raises(YellhornMCPError, match="OpenAI client not initialized"):
             await process_judgement_async(
                 Path("/mock/repo"),
@@ -259,7 +264,7 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
 
         # Create LLMManager with mock client that will error
         llm_manager = LLMManager(openai_client=mock_client)
-        
+
         # Process should raise error since there's no issue to update
         with pytest.raises(YellhornMCPError, match="Error processing judgement"):
             await process_judgement_async(
@@ -318,7 +323,7 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
 
         # Create LLMManager with mock client that returns empty response
         llm_manager = LLMManager(openai_client=client)
-        
+
         # Process should raise error for empty response
         with pytest.raises(
             YellhornMCPError,
@@ -361,7 +366,7 @@ async def test_process_revision_async_openai(mock_openai_client):
 
         # Create LLMManager with mock OpenAI client
         llm_manager = LLMManager(openai_client=mock_openai_client)
-        
+
         # Since this uses _generate_and_update_issue internally, we just need to make sure
         # the function doesn't raise an exception and calls the OpenAI API
         await process_revision_async(
@@ -415,7 +420,7 @@ async def test_process_revision_async_error_handling():
 
         # Create LLMManager with no clients to trigger error
         llm_manager = LLMManager()
-        
+
         # Process should catch exception and add error comment
         await process_revision_async(
             Path("/mock/repo"),

@@ -107,7 +107,9 @@ async def update_issue_with_workplan(
     # (The metrics formatting will be handled by the caller)
     if github_command_func:
         # For mock mode, use the provided command function
-        await github_command_func(repo_path, ["issue", "edit", issue_number, "--body", workplan_text])
+        await github_command_func(
+            repo_path, ["issue", "edit", issue_number, "--body", workplan_text]
+        )
     else:
         await update_github_issue(repo_path, issue_number, body=workplan_text)
 
@@ -189,6 +191,8 @@ async def get_issue_body(
     """
     if github_command_func:
         # For mock mode, use the provided command function
-        return await github_command_func(repo_path, ["issue", "view", issue_identifier, "--json", "body", "--jq", ".body"])
+        return await github_command_func(
+            repo_path, ["issue", "view", issue_identifier, "--json", "body", "--jq", ".body"]
+        )
     else:
         return await get_github_issue_body(repo_path, issue_identifier)
