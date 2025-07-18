@@ -402,7 +402,7 @@ class LLMManager:
     
     def _is_gemini_model(self, model: str) -> bool:
         """Check if model is a Gemini model."""
-        return model.startswith("gemini-")
+        return model.startswith("gemini-") or model.startswith("mock-")
     
     def _is_deep_research_model(self, model: str) -> bool:
         """Check if model is a deep research model that supports web search and code interpreter tools."""

@@ -88,7 +88,17 @@ class TestLLMManager:
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text="Test response")])]
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_response.usage = MagicMock()
+
+        mock_response.usage.prompt_tokens = 10
+
+        mock_response.usage.completion_tokens = 20
+
+        mock_response.usage.total_tokens = 30
+
+        # Ensure it doesn't have input_tokens so it uses the prompt_tokens path
+
+        del mock_response.usage.input_tokens
         # Ensure output_text is not present so it uses the output array structure
         del mock_response.output_text
         
@@ -131,7 +141,17 @@ class TestLLMManager:
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text="Test response")])]
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_response.usage = MagicMock()
+
+        mock_response.usage.prompt_tokens = 10
+
+        mock_response.usage.completion_tokens = 20
+
+        mock_response.usage.total_tokens = 30
+
+        # Ensure it doesn't have input_tokens so it uses the prompt_tokens path
+
+        del mock_response.usage.input_tokens
         # Ensure output_text is not present so it uses the output array structure
         del mock_response.output_text
         
@@ -159,7 +179,17 @@ class TestLLMManager:
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text='{"key": "value"}')])]
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_response.usage = MagicMock()
+
+        mock_response.usage.prompt_tokens = 10
+
+        mock_response.usage.completion_tokens = 20
+
+        mock_response.usage.total_tokens = 30
+
+        # Ensure it doesn't have input_tokens so it uses the prompt_tokens path
+
+        del mock_response.usage.input_tokens
         # Ensure output_text is not present so it uses the output array structure
         del mock_response.output_text
         
@@ -381,7 +411,17 @@ class TestLLMManager:
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text="Deep research response")])]
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_response.usage = MagicMock()
+
+        mock_response.usage.prompt_tokens = 10
+
+        mock_response.usage.completion_tokens = 20
+
+        mock_response.usage.total_tokens = 30
+
+        # Ensure it doesn't have input_tokens so it uses the prompt_tokens path
+
+        del mock_response.usage.input_tokens
         # Ensure output_text is not present so it uses the output array structure
         del mock_response.output_text
         
@@ -411,7 +451,17 @@ class TestLLMManager:
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text="Regular response")])]
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_response.usage = MagicMock()
+
+        mock_response.usage.prompt_tokens = 10
+
+        mock_response.usage.completion_tokens = 20
+
+        mock_response.usage.total_tokens = 30
+
+        # Ensure it doesn't have input_tokens so it uses the prompt_tokens path
+
+        del mock_response.usage.input_tokens
         # Ensure output_text is not present so it uses the output array structure
         del mock_response.output_text
         
@@ -437,7 +487,17 @@ class TestLLMManager:
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output_text = "Response via output_text"
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_response.usage = MagicMock()
+
+        mock_response.usage.prompt_tokens = 10
+
+        mock_response.usage.completion_tokens = 20
+
+        mock_response.usage.total_tokens = 30
+
+        # Ensure it doesn't have input_tokens so it uses the prompt_tokens path
+
+        del mock_response.usage.input_tokens
         
         mock_openai.responses.create = AsyncMock(return_value=mock_response)
         
@@ -547,7 +607,12 @@ class TestLLMManager:
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text="OpenAI response")])]
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 20
+        mock_response.usage.total_tokens = 30
+        # Ensure it doesn't have input_tokens so it uses the prompt_tokens path
+        del mock_response.usage.input_tokens
         # Ensure output_text is not present so it uses the output array structure
         del mock_response.output_text
         
@@ -606,7 +671,17 @@ class TestLLMManager:
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text="Test response")])]
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_response.usage = MagicMock()
+
+        mock_response.usage.prompt_tokens = 10
+
+        mock_response.usage.completion_tokens = 20
+
+        mock_response.usage.total_tokens = 30
+
+        # Ensure it doesn't have input_tokens so it uses the prompt_tokens path
+
+        del mock_response.usage.input_tokens
         # Ensure output_text is not present so it uses the output array structure
         del mock_response.output_text
         
@@ -650,7 +725,17 @@ class TestLLMManager:
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text="Test response")])]
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_response.usage = MagicMock()
+
+        mock_response.usage.prompt_tokens = 10
+
+        mock_response.usage.completion_tokens = 20
+
+        mock_response.usage.total_tokens = 30
+
+        # Ensure it doesn't have input_tokens so it uses the prompt_tokens path
+
+        del mock_response.usage.input_tokens
         del mock_response.output_text
         
         mock_openai.responses.create = AsyncMock(return_value=mock_response)
@@ -725,7 +810,17 @@ class TestLLMManager:
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text="Invalid JSON content")])]
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_response.usage = MagicMock()
+
+        mock_response.usage.prompt_tokens = 10
+
+        mock_response.usage.completion_tokens = 20
+
+        mock_response.usage.total_tokens = 30
+
+        # Ensure it doesn't have input_tokens so it uses the prompt_tokens path
+
+        del mock_response.usage.input_tokens
         del mock_response.output_text
         
         mock_openai.responses.create = AsyncMock(return_value=mock_response)

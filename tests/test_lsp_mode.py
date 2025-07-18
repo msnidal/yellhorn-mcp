@@ -307,6 +307,7 @@ async def test_update_snapshot_with_full_diff_files():
 async def test_integration_process_workplan_lsp_mode():
     """Test the integration of LSP mode with process_workplan_async."""
     from yellhorn_mcp.processors.workplan_processor import process_workplan_async
+    from yellhorn_mcp.llm_manager import LLMManager
 
     # Mock dependencies
     repo_path = Path("/mock/repo")
@@ -331,6 +332,16 @@ async def test_integration_process_workplan_lsp_mode():
     gemini_client.aio = MagicMock()
     gemini_client.aio.models = MagicMock()
     gemini_client.aio.models.generate_content = AsyncMock(return_value=response)
+    
+    # Create LLMManager with mock Gemini client
+    llm_manager = LLMManager(gemini_client=gemini_client)
+    
+    # Mock the LLM manager call methods
+    llm_manager.call_llm_with_citations = AsyncMock(return_value={
+        'content': 'Mock workplan content',
+        'usage_metadata': usage_metadata,
+        'grounding_metadata': None
+    })
 
     model = "mock-model"
     title = "Test Workplan"
@@ -369,8 +380,7 @@ async def test_integration_process_workplan_lsp_mode():
                     # Call the function with LSP mode
                     await process_workplan_async(
                         repo_path,
-                        gemini_client,
-                        None,  # No OpenAI client
+                        llm_manager,
                         model,
                         title,
                         issue_number,
@@ -382,12 +392,13 @@ async def test_integration_process_workplan_lsp_mode():
                     # Verify LSP snapshot was used
                     mock_lsp_snapshot.assert_called_once_with(repo_path)
 
+                    # Verify LLM was called through the manager
+                    assert llm_manager.call_llm_with_citations.called, "LLM call_llm_with_citations method was not called"
+                    
                     # Verify formatted snapshot was passed to the prompt
-                    if gemini_client.aio.models.generate_content.called:
-                        prompt = gemini_client.aio.models.generate_content.call_args[1]["contents"]
-                        assert "<formatted LSP snapshot>" in prompt
-                    else:
-                        assert False, "generate_content method was not called"
+                    call_args = llm_manager.call_llm_with_citations.call_args
+                    prompt = call_args[1]["prompt"]  # keyword argument
+                    assert "<formatted LSP snapshot>" in prompt
 
                     # Check if GitHub commands were called
                     gh_calls = mock_gh_command.call_args_list
@@ -417,6 +428,7 @@ async def test_integration_process_workplan_lsp_mode():
 async def test_integration_process_judgement_lsp_mode():
     """Test the integration of LSP mode with process_judgement_async."""
     from yellhorn_mcp.processors.judgement_processor import process_judgement_async
+    from yellhorn_mcp.llm_manager import LLMManager
 
     # Mock dependencies
     repo_path = Path("/mock/repo")
@@ -442,6 +454,16 @@ async def test_integration_process_judgement_lsp_mode():
     gemini_client.aio.models = MagicMock()
     gemini_client.aio.models.generate_content = AsyncMock(return_value=response)
     gemini_client.aio.generate_content = AsyncMock(return_value=response)
+    
+    # Create LLMManager with mock Gemini client
+    llm_manager = LLMManager(gemini_client=gemini_client)
+    
+    # Mock the LLM manager call methods
+    llm_manager.call_llm_with_citations = AsyncMock(return_value={
+        'content': 'Mock judgement content',
+        'usage_metadata': usage_metadata,
+        'grounding_metadata': None
+    })
 
     model = "mock-model"
     workplan = "Mock workplan"
@@ -463,7 +485,7 @@ async def test_integration_process_judgement_lsp_mode():
         mock_lsp_snapshot.return_value = (["file1.py"], {"file1.py": "```py\ndef function1()\n```"})
 
         with patch(
-            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
+            "yellhorn_mcp.processors.judgement_processor.format_codebase_for_prompt",
             new_callable=AsyncMock,
         ) as mock_format:
             mock_format.return_value = "<formatted LSP+diff snapshot>"
@@ -496,8 +518,7 @@ async def test_integration_process_judgement_lsp_mode():
                                 # Call the function with LSP mode
                                 result = await process_judgement_async(
                                     repo_path,
-                                    gemini_client,
-                                    None,  # No OpenAI client
+                                    llm_manager,
                                     model,
                                     workplan,
                                     diff,
@@ -505,7 +526,7 @@ async def test_integration_process_judgement_lsp_mode():
                                     head_ref,
                                     "abc123",  # base_commit_hash
                                     "def456",  # head_commit_hash
-                                    issue_number,  # parent_workplan_issue_number
+                                    "parent-123",  # parent_workplan_issue_number
                                     subissue_to_update="subissue-123",
                                     debug=False,
                                     codebase_reasoning="lsp",
@@ -515,6 +536,14 @@ async def test_integration_process_judgement_lsp_mode():
 
                                 # Verify LSP snapshot was used
                                 mock_lsp_snapshot.assert_called_once_with(repo_path)
+                                
+                                # Verify LLM was called through the manager
+                                assert llm_manager.call_llm_with_citations.called, "LLM call_llm_with_citations method was not called"
+                                
+                                # Verify formatted snapshot was passed to the prompt
+                                call_args = llm_manager.call_llm_with_citations.call_args
+                                prompt = call_args[1]["prompt"]  # keyword argument
+                                assert "<formatted LSP+diff snapshot>" in prompt
 
                                 # Note: update_snapshot_with_full_diff_files is not actually called
                                 # in the current implementation of process_judgement_async for LSP mode
@@ -526,7 +555,7 @@ async def test_integration_process_judgement_lsp_mode():
                                 # Verify the update was called with the correct parameters
                                 call_args = mock_update_issue.call_args
                                 assert call_args.kwargs["issue_number"] == "subissue-123"
-                                assert "Judgement for #123" in call_args.kwargs["title"]
+                                assert "Judgement for #parent-123" in call_args.kwargs["title"]
 
 
 @pytest.mark.asyncio

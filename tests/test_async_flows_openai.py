@@ -7,13 +7,13 @@ import pytest
 from mcp.server.fastmcp import Context
 
 from tests.helpers import DummyContext
-from yellhorn_mcp.processors.workplan_processor import process_revision_async
+from yellhorn_mcp.processors.workplan_processor import process_revision_async, process_workplan_async
+from yellhorn_mcp.processors.judgement_processor import process_judgement_async
 from yellhorn_mcp.server import (
     YellhornMCPError,
     add_github_issue_comment,
-    process_judgement_async,
-    process_workplan_async,
 )
+from yellhorn_mcp.llm_manager import LLMManager
 
 
 @pytest.fixture
@@ -61,11 +61,13 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
         mock_format.return_value = "Formatted codebase"
         mock_gh_command.return_value = ""
 
+        # Create LLMManager with no clients to trigger error
+        llm_manager = LLMManager()
+        
         # Create a typical error flow: process_workplan_async catches exception and adds comment
         await process_workplan_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            None,  # No OpenAI client - will cause exception
+            llm_manager,
             "gpt-4o",  # OpenAI model
             "Feature Implementation Plan",
             "123",
@@ -105,11 +107,13 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
         mock_client = MagicMock()
         mock_client.responses.create = AsyncMock(side_effect=Exception("OpenAI API error"))
 
+        # Create LLMManager with mock client that will error
+        llm_manager = LLMManager(openai_client=mock_client)
+        
         # Process should handle API error and add a comment to the issue with error message
         await process_workplan_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            mock_client,
+            llm_manager,
             "gpt-4o",
             "Feature Implementation Plan",
             "123",
@@ -119,12 +123,13 @@ async def test_process_workplan_async_openai_errors(mock_openai_client):
         )
 
         # Verify error was logged (check in all calls, not just the last one)
+        # The error is now logged by LLMManager with a different format
         error_call_found = any(
             call.kwargs.get("level") == "error"
-            and "Error processing workplan: OpenAI API error" in call.kwargs.get("message", "")
+            and "OpenAI API error" in call.kwargs.get("message", "")
             for call in mock_ctx.log.call_args_list
         )
-        assert error_call_found, "Error log not found in log calls"
+        assert error_call_found, f"Error log not found in log calls: {[call.kwargs for call in mock_ctx.log.call_args_list]}"
 
         # Verify comment was added with error message via gh command
         mock_gh_command.assert_called()
@@ -173,11 +178,13 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
         responses.create = AsyncMock(return_value=response)
         client.responses = responses
 
+        # Create LLMManager with mock client that returns empty response
+        llm_manager = LLMManager(openai_client=client)
+        
         # Process should handle empty response and add comment to issue
         await process_workplan_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            client,
+            llm_manager,
             "gpt-4o",
             "Feature Implementation Plan",
             "123",
@@ -197,9 +204,9 @@ async def test_process_workplan_async_openai_empty_response(mock_openai_client):
 
         assert comment_call is not None, "No issue comment call found"
         assert comment_call[0][1][2] == "123"  # issue number
-        # The empty response from OpenAI raises an exception, so we get the error format
-        assert comment_call[0][1][4].startswith("❌ **Error generating workplan**")
-        assert "Received empty response from OpenAI API" in comment_call[0][1][4]
+        # The empty response from OpenAI triggers a warning, not an error
+        assert comment_call[0][1][4].startswith("⚠️ AI workplan enhancement failed")
+        assert "Received an empty response from OpenAI API" in comment_call[0][1][4]
 
 
 @pytest.mark.asyncio
@@ -216,11 +223,13 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
         mock_snapshot.return_value = ([], {})
         mock_git_cmd.return_value = ""
 
+        # Create LLMManager with no clients to trigger error
+        llm_manager = LLMManager()
+        
         with pytest.raises(YellhornMCPError, match="OpenAI client not initialized"):
             await process_judgement_async(
                 Path("/mock/repo"),
-                None,  # No Gemini client
-                None,  # No OpenAI client
+                llm_manager,
                 "gpt-4o",  # OpenAI model
                 "Workplan content",
                 "Diff content",
@@ -248,12 +257,14 @@ async def test_process_judgement_async_openai_errors(mock_openai_client):
         mock_client = MagicMock()
         mock_client.responses.create = AsyncMock(side_effect=Exception("OpenAI API error"))
 
+        # Create LLMManager with mock client that will error
+        llm_manager = LLMManager(openai_client=mock_client)
+        
         # Process should raise error since there's no issue to update
         with pytest.raises(YellhornMCPError, match="Error processing judgement"):
             await process_judgement_async(
                 Path("/mock/repo"),
-                None,  # No Gemini client
-                mock_client,
+                llm_manager,
                 "gpt-4o",
                 "Workplan content",
                 "Diff content",
@@ -305,15 +316,17 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
         responses.create = AsyncMock(return_value=response)
         client.responses = responses
 
+        # Create LLMManager with mock client that returns empty response
+        llm_manager = LLMManager(openai_client=client)
+        
         # Process should raise error for empty response
         with pytest.raises(
             YellhornMCPError,
-            match="Error processing judgement: Received empty response from OpenAI API",
+            match="Error processing judgement: Failed to generate judgement: Received an empty response from OpenAI API",
         ):
             await process_judgement_async(
                 Path("/mock/repo"),
-                None,  # No Gemini client
-                client,
+                llm_manager,
                 "gpt-4o",
                 "Workplan content",
                 "Diff content",
@@ -322,7 +335,7 @@ async def test_process_judgement_async_openai_empty_response(mock_openai_client)
                 "abc123",  # base_commit_hash
                 "def456",  # head_commit_hash
                 "123",  # parent_workplan_issue_number
-                None,  # subissue_to_update
+                "456",  # subissue_to_update
                 ctx=mock_ctx,
             )
 
@@ -346,12 +359,14 @@ async def test_process_revision_async_openai(mock_openai_client):
         mock_get_context.return_value = "Formatted codebase context"
         mock_gh_command.return_value = ""  # Mock empty response for git commands
 
+        # Create LLMManager with mock OpenAI client
+        llm_manager = LLMManager(openai_client=mock_openai_client)
+        
         # Since this uses _generate_and_update_issue internally, we just need to make sure
         # the function doesn't raise an exception and calls the OpenAI API
         await process_revision_async(
             Path("/mock/repo"),
-            None,  # No Gemini client
-            mock_openai_client,
+            llm_manager,
             "gpt-4o",
             "123",
             "# Original Workplan\n## Summary\nOriginal content",
@@ -398,11 +413,13 @@ async def test_process_revision_async_error_handling():
         mock_get_context.side_effect = Exception("Failed to get codebase")
         mock_gh_command.return_value = ""  # Mock empty response
 
+        # Create LLMManager with no clients to trigger error
+        llm_manager = LLMManager()
+        
         # Process should catch exception and add error comment
         await process_revision_async(
             Path("/mock/repo"),
-            None,
-            None,  # No OpenAI client
+            llm_manager,
             "gpt-4o",
             "123",
             "# Original Workplan",

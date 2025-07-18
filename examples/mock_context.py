@@ -718,8 +718,7 @@ async def run_judge_workplan(
         # Call process_judgement_async
         await process_judgement_async(
             repo_path=Path(repo_path) if repo_path else Path.cwd(),
-            gemini_client=gemini_client,
-            openai_client=openai_client,
+            llm_manager=llm_manager,
             model=model,
             workplan_content=workplan_content,
             diff_content=diff_content,

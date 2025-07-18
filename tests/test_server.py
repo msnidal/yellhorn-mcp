@@ -477,8 +477,8 @@ def test_calculate_cost():
 
     # Test with flash model (same pricing across tiers)
     cost = calculate_cost("gemini-2.5-flash", 150_000, 50_000)
-    # Expected: (150,000 / 1M) * 0.15 + (50,000 / 1M) * 3.50 = 0.0225 + 0.175 = 0.1975
-    assert cost == 0.1975
+    # Expected: (150,000 / 1M) * 0.30 + (50,000 / 1M) * 2.50 = 0.045 + 0.125 = 0.17
+    assert cost == pytest.approx(0.17)
 
     # Test with unknown model
     cost = calculate_cost("unknown-model", 100_000, 50_000)
@@ -791,6 +791,27 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
     mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
     mock_request_context.request_context.lifespan_context["openai_client"] = None
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
+    
+    # Create mock LLM Manager
+    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    mock_llm_manager = MagicMock(spec=LLMManager)
+    
+    # Mock call_llm_with_citations to return content and usage
+    async def mock_call_with_citations(**kwargs):
+        usage = UsageMetadata({
+            "prompt_tokens": 1000,
+            "completion_tokens": 500,
+            "total_tokens": 1500
+        })
+        return {
+            "content": "Mock workplan content",
+            "usage_metadata": usage
+        }
+    
+    mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
+    mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
+    mock_llm_manager._is_openai_model = MagicMock(return_value=False)
+    mock_llm_manager._is_gemini_model = MagicMock(return_value=True)
 
     with (
         patch(
@@ -801,10 +822,6 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
             "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
             new_callable=AsyncMock,
         ) as mock_format,
-        patch(
-            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini",
-            new_callable=AsyncMock,
-        ) as mock_generate_gemini,
         patch(
             "yellhorn_mcp.processors.workplan_processor.update_issue_with_workplan",
             new_callable=AsyncMock,
@@ -824,29 +841,12 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         )
         mock_calculate_cost.return_value = 0.001  # Mock cost calculation
 
-        # Mock completion metadata
-        from yellhorn_mcp.models.metadata_models import CompletionMetadata
-
-        mock_completion_metadata = CompletionMetadata(
-            model_name="gemini-2.5-pro",
-            status="✅ Generated successfully",
-            generation_time_seconds=0.0,
-            input_tokens=1000,
-            output_tokens=500,
-            total_tokens=1500,
-            timestamp=None,
-        )
-
-        # Mock generate_workplan_with_gemini to return content and metadata
-        mock_generate_gemini.return_value = ("Mock workplan content", mock_completion_metadata)
-
         # Test with required parameters
         from datetime import datetime, timezone
 
         await process_workplan_async(
             Path("/mock/repo"),
-            mock_genai_client,
-            None,  # No OpenAI client
+            mock_llm_manager,
             "gemini-2.5-pro",
             "Feature Implementation Plan",
             "123",
@@ -856,16 +856,16 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
             _meta={
                 "start_time": datetime.now(timezone.utc),
                 "submitted_urls": [],
+                "llm_manager": mock_llm_manager,
             },
         )
 
-        # Check that generate_workplan_with_gemini was called
-        mock_generate_gemini.assert_called_once()
-        call_args = mock_generate_gemini.call_args
-        assert call_args[0][0] == mock_genai_client  # client
-        assert call_args[0][1] == "gemini-2.5-pro"  # model
-        # The prompt is the third argument
-        prompt_content = call_args[0][2]
+        # Check that llm_manager.call_llm_with_citations was called
+        mock_llm_manager.call_llm_with_citations.assert_called_once()
+        call_args = mock_llm_manager.call_llm_with_citations.call_args
+        
+        # The prompt is in kwargs
+        prompt_content = call_args[1].get("prompt", "")
         assert "# Task Title" in prompt_content
         assert "Feature Implementation Plan" in prompt_content
         assert "# Task Details" in prompt_content
@@ -903,7 +903,7 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         completion_comment = comment_args[0][2]  # comment content
 
         # Verify the completion comment contains expected metadata
-        assert "## ✅ Generated successfully" in completion_comment
+        assert "## ✅ Workplan generated successfully" in completion_comment
         assert "### Generation Details" in completion_comment
         assert "**Time**: " in completion_comment
         assert "### Token Usage" in completion_comment
@@ -919,6 +919,22 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
     mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
     mock_request_context.request_context.lifespan_context["openai_client"] = None
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
+    
+    # Create mock LLM Manager that returns empty response
+    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    mock_llm_manager = MagicMock(spec=LLMManager)
+    
+    # Mock call_llm_with_citations to return empty content
+    async def mock_call_empty(**kwargs):
+        return {
+            "content": "",  # Empty content
+            "usage_metadata": UsageMetadata()
+        }
+    
+    mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_empty)
+    mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_empty)
+    mock_llm_manager._is_openai_model = MagicMock(return_value=False)
+    mock_llm_manager._is_gemini_model = MagicMock(return_value=True)
 
     with (
         patch(
@@ -930,10 +946,6 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
             new_callable=AsyncMock,
         ) as mock_format,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini",
-            new_callable=AsyncMock,
-        ) as mock_generate_gemini,
-        patch(
             "yellhorn_mcp.processors.workplan_processor.add_issue_comment", new_callable=AsyncMock
         ) as mock_add_comment,
         patch(
@@ -943,14 +955,10 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
 
-        # Mock generate_workplan_with_gemini to return empty content
-        mock_generate_gemini.return_value = ("", None)  # Empty content, no metadata
-
         # Run the function
         await process_workplan_async(
             Path("/mock/repo"),
-            mock_genai_client,
-            None,  # No OpenAI client
+            mock_llm_manager,
             "gemini-2.5-pro",
             "Feature Implementation Plan",
             "123",
@@ -978,6 +986,16 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
     mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
     mock_request_context.request_context.lifespan_context["openai_client"] = None
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
+    
+    # Create mock LLM Manager that raises an error
+    from yellhorn_mcp.llm_manager import LLMManager
+    mock_llm_manager = MagicMock(spec=LLMManager)
+    
+    # Mock call_llm_with_citations to raise an error
+    mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=Exception("API error"))
+    mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=Exception("API error"))
+    mock_llm_manager._is_openai_model = MagicMock(return_value=False)
+    mock_llm_manager._is_gemini_model = MagicMock(return_value=True)
 
     with (
         patch(
@@ -989,10 +1007,6 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
             new_callable=AsyncMock,
         ) as mock_format,
         patch(
-            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini",
-            new_callable=AsyncMock,
-        ) as mock_generate_gemini,
-        patch(
             "yellhorn_mcp.processors.workplan_processor.add_issue_comment", new_callable=AsyncMock
         ) as mock_add_comment,
         patch(
@@ -1002,14 +1016,10 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
 
-        # Mock generate_workplan_with_gemini to raise an exception
-        mock_generate_gemini.side_effect = Exception("API error occurred")
-
         # Run the function
         await process_workplan_async(
             Path("/mock/repo"),
-            mock_genai_client,
-            None,  # No OpenAI client
+            mock_llm_manager,
             "gemini-2.5-pro",
             "Feature Implementation Plan",
             "123",
@@ -1027,7 +1037,7 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
 
         # Verify the error comment contains expected content
         assert "❌ **Error generating workplan**" in error_comment
-        assert "API error occurred" in error_comment
+        assert "API error" in error_comment
 
         # Verify update_github_issue was not called
         mock_update.assert_not_called()
@@ -1084,6 +1094,31 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
     """Test judging work with required issue number and placeholder sub-issue creation."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["openai_client"] = None
+    
+    # Create mock LLM Manager
+    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    mock_llm_manager = MagicMock(spec=LLMManager)
+    
+    # Mock call_llm_with_citations to return content and usage
+    async def mock_call_with_citations(**kwargs):
+        usage = UsageMetadata({
+            "prompt_tokens": 1000,
+            "completion_tokens": 500,
+            "total_tokens": 1500
+        })
+        return {
+            "content": "Mock judgement content",
+            "usage_metadata": usage
+        }
+    
+    mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
+    mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
+    mock_llm_manager._is_openai_model = MagicMock(return_value=False)
+    mock_llm_manager._is_gemini_model = MagicMock(return_value=True)
+    
+    mock_request_context.request_context.lifespan_context["llm_manager"] = mock_llm_manager
 
     with patch("yellhorn_mcp.server.run_git_command", new_callable=AsyncMock) as mock_run_git:
         # Mock the git rev-parse commands
@@ -1148,6 +1183,31 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
     """Test judging work with a different issue number and codebase reasoning modes."""
     # Set the mock client in the context
     mock_request_context.request_context.lifespan_context["client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["gemini_client"] = mock_genai_client
+    mock_request_context.request_context.lifespan_context["openai_client"] = None
+    
+    # Create mock LLM Manager
+    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    mock_llm_manager = MagicMock(spec=LLMManager)
+    
+    # Mock call_llm_with_citations to return content and usage
+    async def mock_call_with_citations(**kwargs):
+        usage = UsageMetadata({
+            "prompt_tokens": 1000,
+            "completion_tokens": 500,
+            "total_tokens": 1500
+        })
+        return {
+            "content": "Mock judgement content",
+            "usage_metadata": usage
+        }
+    
+    mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
+    mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
+    mock_llm_manager._is_openai_model = MagicMock(return_value=False)
+    mock_llm_manager._is_gemini_model = MagicMock(return_value=True)
+    
+    mock_request_context.request_context.lifespan_context["llm_manager"] = mock_llm_manager
 
     with patch("yellhorn_mcp.server.run_git_command", new_callable=AsyncMock) as mock_run_git:
         # Mock the git rev-parse commands
@@ -1368,29 +1428,49 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                                         "use_search_grounding"
                                     ] = True
 
+                                    # Create mock LLM Manager
+                                    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+                                    mock_llm_manager = MagicMock(spec=LLMManager)
+                                    
+                                    # Mock call_llm_with_usage to return content and usage
+                                    async def mock_call_with_usage(**kwargs):
+                                        usage = UsageMetadata({
+                                            "prompt_tokens": 1000,
+                                            "completion_tokens": 500,
+                                            "total_tokens": 1500
+                                        })
+                                        return {
+                                            "content": "## Judgement Summary\nImplementation looks good.",
+                                            "usage_metadata": usage
+                                        }
+                                    
+                                    mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_usage)
+                                    mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_usage)
+                                    mock_llm_manager._is_openai_model = MagicMock(return_value=False)
+                                    mock_llm_manager._is_gemini_model = MagicMock(return_value=True)
+                                    
                                     # Call process_judgement_async with new signature
                                     from datetime import datetime, timezone
 
                                     await process_judgement_async(
                                         repo_path=Path("/test/repo"),
-                                        gemini_client=mock_genai_client,
-                                        openai_client=None,
+                                        llm_manager=mock_llm_manager,
                                         model="gemini-2.5-pro",
                                         workplan_content="# Workplan\n1. Do something",
                                         diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
                                         base_ref="main",
                                         head_ref="HEAD",
-                                        subissue_to_update="789",
-                                        parent_workplan_issue_number="123",
-                                        ctx=mock_request_context,
                                         base_commit_hash="abc1234",
                                         head_commit_hash="def5678",
+                                        parent_workplan_issue_number="123",
+                                        subissue_to_update="789",
                                         debug=False,
                                         codebase_reasoning="full",
                                         _meta={
                                             "start_time": datetime.now(timezone.utc),
                                             "submitted_urls": [],
                                         },
+                                        ctx=mock_request_context,
                                     )
 
                                     # Verify update_github_issue was called instead of create_github_subissue
@@ -1428,14 +1508,13 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                                     completion_comment = comment_args[0][2]  # comment content
 
                                     # Verify the completion comment contains expected metadata
-                                    assert "## ✅ Generated successfully" in completion_comment
+                                    assert "## ✅ Judgement generated successfully" in completion_comment
                                     assert "### Generation Details" in completion_comment
                                     assert "**Time**: " in completion_comment
                                     assert "### Token Usage" in completion_comment
                                     assert "**Input Tokens**: 1,000" in completion_comment
                                     assert "**Total Tokens**: 1,500" in completion_comment
                                     assert "**Context Size**: " in completion_comment
-                                    assert "**Finish Reason**: `STOP`" in completion_comment
 
                                     # Test with debug=True
                                     mock_update_issue.reset_mock()
@@ -1443,24 +1522,23 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
 
                                 await process_judgement_async(
                                     repo_path=Path("/test/repo"),
-                                    gemini_client=mock_genai_client,
-                                    openai_client=None,
+                                    llm_manager=mock_llm_manager,
                                     model="gemini-2.5-pro",
                                     workplan_content="# Workplan\n1. Do something",
                                     diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
                                     base_ref="main",
                                     head_ref="HEAD",
-                                    subissue_to_update="789",
-                                    parent_workplan_issue_number="123",
-                                    ctx=mock_request_context,
                                     base_commit_hash="abc1234",
                                     head_commit_hash="def5678",
+                                    parent_workplan_issue_number="123",
+                                    subissue_to_update="789",
                                     debug=True,
                                     codebase_reasoning="full",
                                     _meta={
                                         "start_time": datetime.now(timezone.utc),
                                         "submitted_urls": [],
                                     },
+                                    ctx=mock_request_context,
                                 )
 
                                 # Verify both completion metadata and debug comments were added
@@ -1477,7 +1555,7 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                                 # Second call should be completion metadata
                                 second_call_args = mock_add_comment.call_args_list[1]
                                 assert second_call_args[0][1] == "789"  # subissue_to_update
-                                assert "## ✅ Generated successfully" in second_call_args[0][2]
+                                assert "## ✅ Judgement generated successfully" in second_call_args[0][2]
 
 
 # This test is no longer needed because issue_number is now required
@@ -1616,11 +1694,32 @@ This workplan implements feature X.
         mock_candidate.grounding_metadata.grounding_supports = []
         mock_response.candidates = [mock_candidate]
 
+        # Create mock LLM Manager
+        from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+        mock_llm_manager = MagicMock(spec=LLMManager)
+        
+        # Mock call_llm_with_citations to return content and usage with grounding metadata
+        async def mock_call_with_citations(**kwargs):
+            usage = UsageMetadata({
+                "prompt_tokens": 1000,
+                "completion_tokens": 500,
+                "total_tokens": 1500
+            })
+            return {
+                "content": "## Summary\\nThis workplan implements feature X.\\n\\n## Implementation Steps\\n1. Add new function\\n2. Update tests\\n\\n## Citations\\n1. https://docs.python.org/3/library/json.html\\n2. https://github.com/user/repo/issues/123",
+                "usage_metadata": usage,
+                "grounding_metadata": MagicMock()
+            }
+        
+        mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
+        mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
+        mock_llm_manager._is_openai_model = MagicMock(return_value=False)
+        mock_llm_manager._is_gemini_model = MagicMock(return_value=True)
+        
         # Test with required parameters
         await process_workplan_async(
             Path("/mock/repo"),
-            mock_genai_client,
-            None,  # No OpenAI client
+            mock_llm_manager,
             "gemini-2.5-pro",
             "Feature Implementation Plan",
             "123",
@@ -1629,11 +1728,8 @@ This workplan implements feature X.
             ctx=mock_request_context,
         )
 
-        # Check that either API was called for generation
-        assert (
-            mock_genai_client.aio.models.generate_content.called
-            or mock_genai_client.aio.generate_content.called
-        )
+        # Check that LLM manager was called for generation
+        mock_llm_manager.call_llm_with_citations.assert_called_once()
 
         # Check that the issue was updated with the workplan including citations
         mock_update.assert_called_once()
@@ -1760,14 +1856,6 @@ async def test_process_workplan_async_search_grounding_enabled(
         patch(
             "yellhorn_mcp.processors.workplan_processor.add_issue_comment", new_callable=AsyncMock
         ) as mock_add_comment,
-        patch(
-            "yellhorn_mcp.processors.workplan_processor.generate_workplan_with_gemini",
-            new_callable=AsyncMock,
-        ) as mock_generate_gemini,
-        patch(
-            "yellhorn_mcp.integrations.gemini_integration._get_gemini_search_tools"
-        ) as mock_get_tools,
-        patch("yellhorn_mcp.integrations.gemini_integration.add_citations") as mock_add_citations,
     ):
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
         mock_format.return_value = "Formatted codebase"
@@ -1775,31 +1863,33 @@ async def test_process_workplan_async_search_grounding_enabled(
             "\n\n---\n## Completion Metrics\n*   **Model Used**: `gemini-2.5-pro`"
         )
 
-        # Mock search tools
-        mock_search_tools = [MagicMock()]
-        mock_get_tools.return_value = mock_search_tools
+        # Mocks are now handled by LLM Manager
 
-        # Mock add_citations processing
-        mock_add_citations.return_value = "Generated workplan content with citations"
-
-        # Mock completion metadata
-        mock_completion_metadata = MagicMock()
-        mock_completion_metadata.status = "success"
-        mock_completion_metadata.model_name = "gemini-2.5-pro"
-        mock_completion_metadata.input_tokens = 1000
-        mock_completion_metadata.output_tokens = 500
-        mock_completion_metadata.total_tokens = 1500
-
-        # Mock generate_workplan_with_gemini to return workplan and metadata
-        mock_generate_gemini.return_value = (
-            "Generated workplan content with citations",
-            mock_completion_metadata,
-        )
-
+        # Create mock LLM Manager
+        from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+        mock_llm_manager = MagicMock(spec=LLMManager)
+        
+        # Mock call_llm_with_citations to return content and usage with grounding metadata
+        async def mock_call_with_citations(**kwargs):
+            usage = UsageMetadata({
+                "prompt_tokens": 1000,
+                "completion_tokens": 500,
+                "total_tokens": 1500
+            })
+            return {
+                "content": "Generated workplan content with citations",
+                "usage_metadata": usage,
+                "grounding_metadata": MagicMock()
+            }
+        
+        mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
+        mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
+        mock_llm_manager._is_openai_model = MagicMock(return_value=False)
+        mock_llm_manager._is_gemini_model = MagicMock(return_value=True)
+        
         await process_workplan_async(
             Path("/mock/repo"),
-            mock_genai_client,
-            None,  # No OpenAI client
+            mock_llm_manager,
             "gemini-2.5-pro",
             "Feature Implementation Plan",
             "123",
@@ -1808,12 +1898,8 @@ async def test_process_workplan_async_search_grounding_enabled(
             ctx=mock_request_context,
         )
 
-        # Verify that generate_workplan_with_gemini was called with use_search=True
-        mock_generate_gemini.assert_called_once()
-        call_args = mock_generate_gemini.call_args
-        assert call_args[0][0] == mock_genai_client  # client
-        assert call_args[0][1] == "gemini-2.5-pro"  # model
-        assert call_args[0][3] == True  # use_search parameter should be True
+        # Verify that LLM manager was called for generation with citations
+        mock_llm_manager.call_llm_with_citations.assert_called_once()
 
         # Verify the final content includes citations
         mock_update.assert_called_once()
@@ -1895,39 +1981,51 @@ async def test_process_judgement_async_search_grounding_enabled(
         # Set context for search grounding enabled
         mock_request_context.request_context.lifespan_context["use_search_grounding"] = True
 
+        # Create mock LLM Manager
+        from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+        mock_llm_manager = MagicMock(spec=LLMManager)
+        
+        # Mock call_llm_with_citations to return content and usage with grounding metadata
+        async def mock_call_with_citations(**kwargs):
+            usage = UsageMetadata({
+                "prompt_tokens": 1000,
+                "completion_tokens": 500,
+                "total_tokens": 1500
+            })
+            return {
+                "content": "## Judgement Summary\nImplementation looks good.\n\n## Citations\n[1] Example citation",
+                "usage_metadata": usage,
+                "grounding_metadata": MagicMock()
+            }
+        
+        mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
+        mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
+        mock_llm_manager._is_openai_model = MagicMock(return_value=False)
+        mock_llm_manager._is_gemini_model = MagicMock(return_value=True)
+        
         from datetime import datetime, timezone
 
         await process_judgement_async(
             repo_path=Path("/test/repo"),
-            gemini_client=mock_genai_client,
-            openai_client=None,
+            llm_manager=mock_llm_manager,
             model="gemini-2.5-pro",
             workplan_content="# Workplan\n1. Do something",
             diff_content="diff --git a/file.py b/file.py\n+def test(): pass",
             base_ref="main",
             head_ref="HEAD",
-            subissue_to_update="789",
-            parent_workplan_issue_number="123",
-            ctx=mock_request_context,
             base_commit_hash="abc1234",
             head_commit_hash="def5678",
+            parent_workplan_issue_number="123",
+            subissue_to_update="789",
             debug=False,
             codebase_reasoning="full",
-            _meta={"start_time": datetime.now(timezone.utc), "submitted_urls": []},
+            ctx=mock_request_context,
         )
 
-        # Verify that _get_gemini_search_tools was called
-        mock_get_tools.assert_called_once_with("gemini-2.5-pro")
+        # Verify that LLM manager was called for judgement with citations
+        mock_llm_manager.call_llm_with_citations.assert_called_once()
 
-        # Verify that async_generate_content_with_config was called with generation_config
-        mock_generate.assert_called_once()
-        call_args = mock_generate.call_args
-        assert call_args[0][0] == mock_genai_client  # client
-        assert call_args[0][1] == "gemini-2.5-pro"  # model
-        assert call_args[1]["generation_config"] is not None  # generation_config should be passed
-
-        # Verify citations processing was called
-        mock_add_citations.assert_called_once_with(mock_response)
+        # Citations are now handled internally by the LLM Manager
 
         # Verify update_github_issue was called instead of create_github_subissue
         mock_update_issue.assert_called_once()

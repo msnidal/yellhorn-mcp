@@ -91,8 +91,7 @@ async def get_git_diff(
 
 async def process_judgement_async(
     repo_path: Path,
-    gemini_client: genai.Client | None,
-    openai_client: AsyncOpenAI | None,
+    llm_manager: LLMManager,
     model: str,
     workplan_content: str,
     diff_content: str,
@@ -113,8 +112,7 @@ async def process_judgement_async(
 
     Args:
         repo_path: Path to the repository.
-        gemini_client: Gemini API client (None for OpenAI models).
-        openai_client: OpenAI API client (None for Gemini models).
+        llm_manager: LLM Manager instance for API calls.
         model: Model name to use (Gemini or OpenAI).
         workplan_content: The original workplan content.
         diff_content: The code diff to judge.
@@ -208,11 +206,6 @@ Extract any URLs mentioned in the workplan or that would be helpful for understa
 
 IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Judgement Summary' heading.
 """
-        # Extract llm_manager from _meta
-        llm_manager = _meta.get("llm_manager") if _meta else None
-        if not llm_manager:
-            raise YellhornMCPError("LLM Manager not initialized")
-
         # Check if we should use search grounding
         use_search_grounding = not disable_search_grounding
         if _meta and "original_search_grounding" in _meta:
@@ -220,7 +213,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
         # Prepare additional kwargs for the LLM call
         llm_kwargs = {}
-        is_openai_model = model.startswith("gpt-") or model.startswith("o")
+        is_openai_model = llm_manager._is_openai_model(model)
         
         # Handle search grounding for Gemini models
         if not is_openai_model and use_search_grounding:

@@ -270,8 +270,7 @@ async def create_workplan(
             asyncio.create_task(
                 process_workplan_async(
                     repo_path,
-                    gemini_client,
-                    openai_client,
+                    llm_manager,
                     model,
                     title,
                     issue_number,
@@ -283,9 +282,9 @@ async def create_workplan(
                         "original_search_grounding": original_search_grounding,
                         "start_time": start_time,
                         "submitted_urls": submitted_urls,
-                        "llm_manager": llm_manager,
                     },
                     ctx=ctx,
+                    github_command_func=ctx.request_context.lifespan_context.get("github_command_func"),
                 )
             )
         else:
@@ -420,8 +419,7 @@ async def revise_workplan(
         asyncio.create_task(
             process_revision_async(
                 repo_path,
-                gemini_client,
-                openai_client,
+                llm_manager,
                 model,
                 issue_number,
                 original_workplan,
@@ -433,9 +431,9 @@ async def revise_workplan(
                     "original_search_grounding": original_search_grounding,
                     "start_time": start_time,
                     "submitted_urls": submitted_urls,
-                    "llm_manager": llm_manager,
                 },
                 ctx=ctx,
+                github_command_func=ctx.request_context.lifespan_context.get("github_command_func"),
             )
         )
 
@@ -734,8 +732,7 @@ async def judge_workplan(
         asyncio.create_task(
             process_judgement_async(
                 repo_path,
-                gemini_client,
-                openai_client,
+                llm_manager,
                 model,
                 workplan,
                 diff,
@@ -752,7 +749,6 @@ async def judge_workplan(
                     "original_search_grounding": original_search_grounding,
                     "start_time": start_time,
                     "submitted_urls": submitted_urls,
-                    "llm_manager": llm_manager,
                 },
                 ctx=ctx,
                 github_command_func=ctx.request_context.lifespan_context.get("github_command_func"),
