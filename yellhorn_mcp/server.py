@@ -552,7 +552,9 @@ async def curate_context(
         if disable_search_grounding:
             ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
 
-        return result
+        return json.dumps(
+            {"status": "✅ Context curation completed successfully", "message": result}
+        )
 
     except Exception as e:
         # Restore original search grounding setting on error
@@ -596,6 +598,8 @@ async def judge_workplan(
     codebase_reasoning: str = "full",
     debug: bool = False,
     disable_search_grounding: bool = False,
+    subissue_to_update: str | None = None,
+    pr_url: str | None = None,
 ) -> str:
     """Triggers an asynchronous code judgement for changes against a workplan.
 
@@ -668,13 +672,22 @@ async def judge_workplan(
                 f"You can find the workplan issue number in the PR description."
             )
 
-        # Resolve git references to commit hashes
-        base_commit_hash = await run_git_command(repo_path, ["rev-parse", base_ref])
-        head_commit_hash = await run_git_command(repo_path, ["rev-parse", head_ref])
-
-        # Fetch the workplan and generate diff for review
+        # Fetch the workplan
         workplan = await get_issue_body(repo_path, issue_number)
-        diff = await get_git_diff(repo_path, base_ref, head_ref, codebase_reasoning)
+
+        # Handle PR URL or git refs for diff generation
+        if pr_url:
+            # Use PR diff instead of git refs
+            diff = await get_github_pr_diff(repo_path, pr_url)
+            # For PR, use placeholder commit hashes
+            base_commit_hash = "pr_base"
+            head_commit_hash = "pr_head"
+        else:
+            # Resolve git references to commit hashes
+            base_commit_hash = await run_git_command(repo_path, ["rev-parse", base_ref])
+            head_commit_hash = await run_git_command(repo_path, ["rev-parse", head_ref])
+            # Generate diff for review
+            diff = await get_git_diff(repo_path, base_ref, head_ref, codebase_reasoning)
 
         # Check if diff is empty or only contains the header for file_structure mode
         is_empty = not diff.strip() or (
@@ -712,18 +725,25 @@ async def judge_workplan(
         placeholder_body = f"Parent workplan: #{issue_number}\n\n## Status\nGenerating judgement...\n\n{submission_comment}"
         judgement_title = f"Judgement for #{issue_number}: {head_ref} vs {base_ref}"
 
-        # Create the sub-issue
-        from yellhorn_mcp.integrations.github_integration import create_judgement_subissue
+        # Create or update the sub-issue
+        if subissue_to_update:
+            # Update existing subissue
+            subissue_number = subissue_to_update
+            subissue_url = f"https://github.com/{repo_path.name}/issues/{subissue_number}"
+            await update_github_issue(repo_path, subissue_number, placeholder_body)
+        else:
+            # Create new sub-issue
+            from yellhorn_mcp.integrations.github_integration import create_judgement_subissue
 
-        subissue_url = await create_judgement_subissue(
-            repo_path, issue_number, judgement_title, placeholder_body
-        )
+            subissue_url = await create_judgement_subissue(
+                repo_path, issue_number, judgement_title, placeholder_body
+            )
 
-        # Extract sub-issue number from URL
-        import re
+            # Extract sub-issue number from URL
+            import re
 
-        issue_match = re.search(r"/issues/(\d+)", subissue_url)
-        subissue_number = issue_match.group(1) if issue_match else None
+            issue_match = re.search(r"/issues/(\d+)", subissue_url)
+            subissue_number = issue_match.group(1) if issue_match else None
 
         await ctx.log(
             level="info",

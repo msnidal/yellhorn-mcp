@@ -18,6 +18,7 @@ from yellhorn_mcp import __version__
 from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment,
     create_judgement_subissue,
+    update_github_issue,
 )
 from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
@@ -339,8 +340,6 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Create or update the sub-issue
         if subissue_to_update:
             # Update existing issue
-            from yellhorn_mcp.utils.git_utils import update_github_issue
-
             await update_github_issue(
                 repo_path=repo_path,
                 issue_number=subissue_to_update,

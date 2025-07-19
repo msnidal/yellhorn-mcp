@@ -397,7 +397,7 @@ async def _generate_and_update_issue(
 
     # Prepare additional kwargs for the LLM call
     llm_kwargs = {}
-    is_openai_model = model.startswith("gpt-") or model.startswith("o")
+    is_openai_model = llm_manager._is_openai_model(model)
 
     # Handle search grounding for Gemini models
     if not is_openai_model and use_search_grounding:
