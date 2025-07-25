@@ -108,6 +108,40 @@ To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json
 
 ## Tools
 
+### curate_context
+
+Analyzes the codebase and creates a `.yellhorncontext` file listing directories to be included in AI context. This tool helps optimize AI context by understanding the task you want to accomplish and creating a whitelist of relevant directories, significantly reducing token usage and improving AI focus on relevant code.
+
+**Input**:
+
+- `user_task`: Description of the task you want to accomplish
+- `codebase_reasoning`: (optional) Control the level of codebase analysis:
+  - `"file_structure"`: (default) Basic file structure analysis (fastest)
+  - `"lsp"`: Function signatures and docstrings only (lighter weight)
+  - `"full"`: Complete file contents (most comprehensive)
+  - `"none"`: No codebase context
+- `ignore_file_path`: (optional) Path to ignore file (defaults to `.yellhornignore`)
+- `output_path`: (optional) Output path for context file (defaults to `.yellhorncontext`)
+- `depth_limit`: (optional) Maximum directory depth to analyze (0 = no limit)
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
+
+**Output**:
+
+- JSON string containing:
+  - `context_file_path`: Path to the created `.yellhorncontext` file
+  - `directories_included`: Number of directories included in the context
+  - `files_analyzed`: Number of files analyzed during curation
+
+The `.yellhorncontext` file acts as a whitelist - only files matching the patterns will be included in subsequent workplan/judgement calls. This significantly reduces token usage and improves AI focus on relevant code.
+
+**Example `.yellhorncontext` output**:
+```
+src/api/
+src/models/
+tests/api/
+*.config.js
+```
+
 ### create_workplan
 
 Creates a GitHub issue with a detailed workplan based on the title and detailed description.
