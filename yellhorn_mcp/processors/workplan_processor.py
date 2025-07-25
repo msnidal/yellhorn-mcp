@@ -49,7 +49,12 @@ async def get_codebase_snapshot(
     gitignore_patterns = []
     gitignore_path = repo_path / ".gitignore"
     if gitignore_path.exists():
-        gitignore_patterns = gitignore_path.read_text().strip().split("\n")
+        gitignore_patterns = [
+            line.strip()
+            for line in gitignore_path.read_text().strip().split("\n")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        log_function(f"Found .gitignore with {len(gitignore_patterns)} patterns")
 
     # Get tracked files
     tracked_files = await run_git_command(repo_path, ["ls-files"])
@@ -94,32 +99,10 @@ async def get_codebase_snapshot(
         # Separate patterns by type
         for line in lines:
             if line.startswith("!"):
-                # Negation pattern (whitelist override)
-                context_negation_patterns.append(line[1:])  # Remove the '!' prefix
-            elif line in ["**/*", "*"]:
-                # Global blacklist pattern
-                context_blacklist_patterns.append(line)
-            elif any(
-                ignore_keyword in line.lower()
-                for ignore_keyword in [
-                    "__pycache__",
-                    "*.py[cod]",
-                    "build/",
-                    "dist/",
-                    ".egg",
-                    ".cache",
-                    "*.log",
-                    ".env",
-                    "venv/",
-                    ".git",
-                    ".pytest_cache",
-                    ".mypy_cache",
-                ]
-            ):
-                # Looks like a blacklist pattern (from .gitignore style)
-                context_blacklist_patterns.append(line)
+                # Blacklist pattern (exclude this directory/file)
+                context_blacklist_patterns.append(line[1:])  # Remove the '!' prefix
             else:
-                # Assume it's a whitelist pattern (directory/file to include)
+                # All other patterns are whitelist (directories/files to include)
                 context_whitelist_patterns.append(line)
 
         log_function(
@@ -168,31 +151,98 @@ async def get_codebase_snapshot(
 
         return False
 
-    # Apply filtering
+    # Apply filtering with detailed logging
     filtered_files = []
-    ignored_count = 0
-    for file_path in sorted(all_files):
-        if is_ignored(file_path):
-            ignored_count += 1
-            continue
-        filtered_files.append(file_path)
-
-    if yellhornignore_patterns or context_whitelist_patterns or context_blacklist_patterns:
-        pattern_types = []
+    total_files = len(all_files)
+    
+    # Counters for debugging
+    negation_override_count = 0
+    whitelist_miss_count = 0
+    context_blacklist_count = 0
+    yellhornignore_count = 0
+    kept_count = 0
+    
+    # Sample a few files for debugging
+    sample_files = list(sorted(all_files))[:10] if all_files else []
+    log_function(f"Sample file paths: {sample_files}")
+    
+    if context_whitelist_patterns:
+        sample_patterns = context_whitelist_patterns[:5]
+        log_function(f"Sample whitelist patterns: {sample_patterns}")
+    
+    def is_ignored_with_logging(file_path: str) -> tuple[bool, str]:
+        """Check if a file should be ignored and return reason."""
+        import fnmatch
+        
+        # Helper function to match patterns
+        def matches_pattern(path: str, pattern: str) -> bool:
+            if pattern.endswith("/"):
+                # Directory pattern - check if file is within this directory
+                return path.startswith(pattern) or fnmatch.fnmatch(path + "/", pattern)
+            else:
+                # File pattern
+                return fnmatch.fnmatch(path, pattern)
+        
+        # Step 1: Check negation patterns from .yellhorncontext (these override everything)
+        for pattern in context_negation_patterns:
+            if matches_pattern(file_path, pattern):
+                return False, "negation_override"  # Explicitly included
+        
+        # Step 2: If we have .yellhorncontext whitelist patterns, check them
         if context_whitelist_patterns:
-            pattern_types.append(f"{len(context_whitelist_patterns)} whitelist")
-        if context_blacklist_patterns:
-            pattern_types.append(f"{len(context_blacklist_patterns)} blacklist")
-        if context_negation_patterns:
-            pattern_types.append(f"{len(context_negation_patterns)} negation")
-        if yellhornignore_patterns:
-            pattern_types.append(f"{len(yellhornignore_patterns)} ignore")
+            # Check if file matches any whitelist pattern
+            for pattern in context_whitelist_patterns:
+                if matches_pattern(file_path, pattern):
+                    # File is whitelisted, but still check context blacklist
+                    break
+            else:
+                # File doesn't match any whitelist pattern, ignore it
+                return True, "whitelist_miss"
+        
+        # Step 3: Check .yellhorncontext blacklist patterns
+        for pattern in context_blacklist_patterns:
+            if matches_pattern(file_path, pattern):
+                return True, "context_blacklist"
+        
+        # Step 4: Check .yellhornignore patterns (fallback)
+        for pattern in yellhornignore_patterns:
+            if matches_pattern(file_path, pattern):
+                return True, "yellhornignore"
+        
+        return False, "kept"
+    
+    for file_path in sorted(all_files):
+        ignored, reason = is_ignored_with_logging(file_path)
+        
+        if reason == "negation_override":
+            negation_override_count += 1
+            filtered_files.append(file_path)
+        elif reason == "whitelist_miss":
+            whitelist_miss_count += 1
+        elif reason == "context_blacklist":
+            context_blacklist_count += 1
+        elif reason == "yellhornignore":
+            yellhornignore_count += 1
+        elif reason == "kept":
+            kept_count += 1
+            filtered_files.append(file_path)
+    
+    # Log detailed filtering results
+    log_function(f"Filtering results out of {total_files} files:")
+    if negation_override_count > 0:
+        log_function(f"  - {negation_override_count} kept by negation override")
+    if whitelist_miss_count > 0:
+        log_function(f"  - {whitelist_miss_count} dropped (no whitelist match)")
+    if context_blacklist_count > 0:
+        log_function(f"  - {context_blacklist_count} dropped by context blacklist")
+    if yellhornignore_count > 0:
+        log_function(f"  - {yellhornignore_count} dropped by .yellhornignore")
+    if kept_count > 0:
+        log_function(f"  - {kept_count} kept (passed all filters)")
+    
+    log_function(f"Total kept: {len(filtered_files)} files")
 
-        pattern_desc = ", ".join(pattern_types) if pattern_types else "ignore"
-        log_function(
-            f"Filtered {ignored_count} files using {pattern_desc} patterns, "
-            f"keeping {len(filtered_files)} files"
-        )
+
 
     file_paths = filtered_files
 

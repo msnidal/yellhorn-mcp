@@ -109,11 +109,10 @@ class TestGetCodebaseSnapshot:
         (repo_path / "tests" / "test_main.py").write_text("test content")
         (repo_path / "README.md").write_text("readme")
 
-        # Create .yellhorncontext with whitelist patterns
+        # Create .yellhorncontext with whitelist patterns (current format)
         context_content = """# Yellhorn Context File
-!src/
-!tests/
-**/*"""
+src/
+tests/"""
         (repo_path / ".yellhorncontext").write_text(context_content)
 
         with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
@@ -124,11 +123,12 @@ class TestGetCodebaseSnapshot:
 
             file_paths, file_contents = await get_codebase_snapshot(repo_path)
 
-            # Should include src/ and tests/ files due to whitelist, and README.md is also included
+            # Should include src/ and tests/ files due to whitelist patterns
             assert "src/main.py" in file_paths
             assert "tests/test_main.py" in file_paths
-            # With the current filtering logic, README.md is included
-            assert len(file_paths) == 3  # All three files are included
+            # README.md should be excluded since it doesn't match whitelist patterns
+            assert "README.md" not in file_paths
+            assert len(file_paths) == 2  # Only src/ and tests/ files are included
 
     @pytest.mark.asyncio
     async def test_get_codebase_snapshot_large_file_skip(self, tmp_path):
