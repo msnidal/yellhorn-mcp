@@ -363,7 +363,8 @@ async def run_create_workplan(
         from datetime import datetime, timezone
         _meta = {
             "start_time": datetime.now(timezone.utc),
-            "llm_manager": llm_manager
+            "llm_manager": llm_manager,
+            "original_search_grounding": True
         }
         
         # Call process_workplan_async directly

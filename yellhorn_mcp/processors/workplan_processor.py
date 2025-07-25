@@ -390,6 +390,13 @@ async def _generate_and_update_issue(
         )
         return
 
+    # Add debug comment if requested
+    if debug:
+        debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
+        await add_issue_comment(
+            repo_path, issue_number, debug_comment, github_command_func=github_command_func
+        )
+
     # Check if we should use search grounding
     use_search_grounding = not disable_search_grounding
     if _meta and "original_search_grounding" in _meta:
@@ -400,19 +407,17 @@ async def _generate_and_update_issue(
     is_openai_model = llm_manager._is_openai_model(model)
 
     # Handle search grounding for Gemini models
+    search_tools = None
     if not is_openai_model and use_search_grounding:
         if ctx:
             await ctx.log(
                 level="info", message=f"Attempting to enable search grounding for model {model}"
             )
         try:
-            from google.genai.types import GenerateContentConfig
-
             from yellhorn_mcp.utils.search_grounding_utils import _get_gemini_search_tools
 
             search_tools = _get_gemini_search_tools(model)
             if search_tools:
-                llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
                 if ctx:
                     await ctx.log(
                         level="info", message=f"Search grounding enabled for model {model}"
@@ -421,7 +426,7 @@ async def _generate_and_update_issue(
             if ctx:
                 await ctx.log(
                     level="warning",
-                    message="GenerateContentConfig not available, skipping search grounding",
+                    message="Search grounding tools not available, skipping search grounding",
                 )
 
     try:
@@ -445,7 +450,7 @@ async def _generate_and_update_issue(
         else:
             # Gemini models - use citation-aware call
             response_data = await llm_manager.call_llm_with_citations(
-                prompt=prompt, model=model, temperature=0.0, **llm_kwargs
+                prompt=prompt, model=model, temperature=0.0, tools=search_tools, **llm_kwargs
             )
 
             workplan_content = response_data["content"]
@@ -538,13 +543,6 @@ async def _generate_and_update_issue(
         await ctx.log(
             level="info",
             message=f"Successfully updated GitHub issue #{issue_number} with generated workplan and metrics",
-        )
-
-    # Add debug comment if requested
-    if debug:
-        debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
-        await add_issue_comment(
-            repo_path, issue_number, debug_comment, github_command_func=github_command_func
         )
 
     # Add completion comment if we have submission metadata
@@ -651,14 +649,16 @@ Your response will be published directly to a GitHub issue without modification,
 - Any configuration changes or dependencies needed
 
 The workplan should be comprehensive enough that a developer or AI assistant could implement it without additional context, and structured in a way that makes it easy for an LLM to quickly understand and work with the contained information.
-
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
 
         # Add the title as header prefix
         content_prefix = f"# {title}\n\n"
 
-        # llm_manager is now passed as a parameter
+
+        # If not disable_search_grounding, use search grounding
+        if not disable_search_grounding:
+            prompt += "Search the internet for latest package versions and describe how to use them."
 
         # Generate and update issue using the helper
         await _generate_and_update_issue(
