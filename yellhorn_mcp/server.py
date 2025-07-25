@@ -18,7 +18,9 @@ The server requires GitHub CLI to be installed and authenticated for GitHub oper
 
 import asyncio
 import json
+import logging
 import os
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -30,14 +32,14 @@ from mcp.server.fastmcp import Context, FastMCP
 from openai import AsyncOpenAI
 
 from yellhorn_mcp import __version__
-from yellhorn_mcp.integrations.gemini_integration import generate_curate_context_with_gemini
 from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment,
     create_github_issue,
     get_issue_body,
 )
-from yellhorn_mcp.integrations.openai_integration import generate_curate_context_with_openai
+from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 from yellhorn_mcp.models.metadata_models import SubmissionMetadata
+from yellhorn_mcp.processors.context_processor import process_context_curation_async
 from yellhorn_mcp.processors.judgement_processor import get_git_diff, process_judgement_async
 from yellhorn_mcp.processors.workplan_processor import (
     build_file_structure_context,
@@ -54,6 +56,10 @@ from yellhorn_mcp.utils.git_utils import (
     list_resources,
     read_resource,
     run_git_command,
+)
+
+logging.basicConfig(
+    stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
 )
 
 
@@ -83,6 +89,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     # Initialize clients based on the model type
     gemini_client = None
     openai_client = None
+    llm_manager = None
 
     # For Gemini models, require Gemini API key
     if not is_openai_model:
@@ -103,23 +110,39 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         http_client = httpx.AsyncClient()
         openai_client = AsyncOpenAI(api_key=openai_api_key, http_client=http_client)
 
+    # Initialize LLM Manager with available clients
+    if gemini_client or openai_client:
+        llm_manager = LLMManager(
+            openai_client=openai_client,
+            gemini_client=gemini_client,
+            config={
+                "safety_margin_tokens": 2000,  # Reserve tokens for system prompts and responses
+                "overlap_ratio": 0.1,  # 10% overlap between chunks
+                "chunk_strategy": "paragraph",  # Use paragraph-based chunking
+                "aggregation_strategy": "concatenate",  # Concatenate chunk responses
+            },
+        )
+
     # Validate repository path
     repo_path = Path(repo_path).resolve()
     if not is_git_repository(repo_path):
         raise ValueError(f"Path {repo_path} is not a Git repository")
 
     try:
-        # Logging happens outside lifespan context via print statements since
+        # Logging happens outside lifespan context via logging statements since
         # the server context is not available here
-        print(f"Starting Yellhorn MCP server at http://127.0.0.1:8000")
-        print(f"Repository path: {repo_path}")
-        print(f"Using model: {model}")
-        print(f"Google Search Grounding: {'enabled' if use_search_grounding else 'disabled'}")
+        logging.info(f"Starting Yellhorn MCP server at http://127.0.0.1:8000")
+        logging.info(f"Repository path: {repo_path}")
+        logging.info(f"Using model: {model}")
+        logging.info(
+            f"Google Search Grounding: {'enabled' if use_search_grounding else 'disabled'}"
+        )
 
         yield {
             "repo_path": repo_path,
             "gemini_client": gemini_client,
             "openai_client": openai_client,
+            "llm_manager": llm_manager,
             "model": model,
             "use_search_grounding": use_search_grounding,
         }
@@ -239,6 +262,7 @@ async def create_workplan(
             # Get clients from context
             gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
             openai_client = ctx.request_context.lifespan_context.get("openai_client")
+            llm_manager = ctx.request_context.lifespan_context.get("llm_manager")
             model = ctx.request_context.lifespan_context["model"]
 
             # Store codebase_reasoning in context for process_workplan_async
@@ -254,8 +278,7 @@ async def create_workplan(
             asyncio.create_task(
                 process_workplan_async(
                     repo_path,
-                    gemini_client,
-                    openai_client,
+                    llm_manager,
                     model,
                     title,
                     issue_number,
@@ -269,6 +292,9 @@ async def create_workplan(
                         "submitted_urls": submitted_urls,
                     },
                     ctx=ctx,
+                    github_command_func=ctx.request_context.lifespan_context.get(
+                        "github_command_func"
+                    ),
                 )
             )
         else:
@@ -390,6 +416,7 @@ async def revise_workplan(
         # Get clients from context
         gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
         openai_client = ctx.request_context.lifespan_context.get("openai_client")
+        llm_manager = ctx.request_context.lifespan_context.get("llm_manager")
         model = ctx.request_context.lifespan_context["model"]
 
         # Launch background task to process the revision
@@ -402,8 +429,7 @@ async def revise_workplan(
         asyncio.create_task(
             process_revision_async(
                 repo_path,
-                gemini_client,
-                openai_client,
+                llm_manager,
                 model,
                 issue_number,
                 original_workplan,
@@ -417,6 +443,7 @@ async def revise_workplan(
                     "submitted_urls": submitted_urls,
                 },
                 ctx=ctx,
+                github_command_func=ctx.request_context.lifespan_context.get("github_command_func"),
             )
         )
 
@@ -491,9 +518,11 @@ async def curate_context(
     try:
         # Get repository path from context
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
-        gemini_client: genai.Client = ctx.request_context.lifespan_context.get("gemini_client")
-        openai_client: AsyncOpenAI = ctx.request_context.lifespan_context.get("openai_client")
+        llm_manager: LLMManager = ctx.request_context.lifespan_context.get("llm_manager")
         model: str = ctx.request_context.lifespan_context["model"]
+
+        if not llm_manager:
+            raise YellhornMCPError("LLM Manager not initialized")
 
         # Handle search grounding override if specified
         original_search_grounding = ctx.request_context.lifespan_context.get(
@@ -506,262 +535,26 @@ async def curate_context(
                 message="Search grounding temporarily disabled for this request",
             )
 
-        # Get file paths from codebase snapshot
-        file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths")
-
-        if not file_paths:
-            raise YellhornMCPError("No files found in repository to analyze")
-
-        await ctx.log(
-            level="info",
-            message=f"Found {len(file_paths)} files in repository to analyze",
-        )
-
-        # Check for existing patterns to use for filtering
-        ignore_patterns = []
-        whitelist_patterns = []
-
-        # Read .yellhornignore if it exists
-        ignore_path = repo_path / ignore_file_path
-        if ignore_path.exists():
-            ignore_patterns = [
-                line.strip()
-                for line in ignore_path.read_text().strip().split("\n")
-                if line.strip() and not line.strip().startswith("#")
-            ]
-            await ctx.log(
-                level="info",
-                message=f"Found {len(ignore_patterns)} patterns in {ignore_file_path}",
-            )
-
-        # Read existing .yellhorncontext if it exists
-        context_path = repo_path / output_path
-        if context_path.exists():
-            whitelist_patterns = [
-                line.strip()
-                for line in context_path.read_text().strip().split("\n")
-                if line.strip() and not line.strip().startswith("#")
-            ]
-            await ctx.log(
-                level="info",
-                message=f"Found existing {output_path} with {len(whitelist_patterns)} patterns",
-            )
-
-        # Apply filtering if patterns exist
-        if ignore_patterns or whitelist_patterns:
-            import fnmatch
-
-            def is_ignored(file_path: str) -> bool:
-                # First check if the file is whitelisted
-                for pattern in whitelist_patterns:
-                    if pattern.endswith("/"):
-                        if file_path.startswith(pattern) or fnmatch.fnmatch(
-                            file_path + "/", pattern
-                        ):
-                            return False
-                    else:
-                        if fnmatch.fnmatch(file_path, pattern):
-                            return False
-
-                # If we have whitelist patterns and file didn't match any, ignore it
-                if whitelist_patterns:
-                    return True
-
-                # Otherwise check against ignore patterns
-                for pattern in ignore_patterns:
-                    if pattern.endswith("/"):
-                        if file_path.startswith(pattern) or fnmatch.fnmatch(
-                            file_path + "/", pattern
-                        ):
-                            return True
-                    else:
-                        if fnmatch.fnmatch(file_path, pattern):
-                            return True
-
-                return False
-
-            # Filter files
-            original_count = len(file_paths)
-            file_paths = [fp for fp in file_paths if not is_ignored(fp)]
-            if original_count != len(file_paths):
-                await ctx.log(
-                    level="info",
-                    message=f"Filtered from {original_count} to {len(file_paths)} files based on patterns",
-                )
-
-        # Group files by directory
-        from collections import defaultdict
-
-        dir_files = defaultdict(list)
-        for file_path in file_paths:
-            parts = file_path.split("/")
-            if len(parts) == 1:
-                dir_files["."].append(file_path)
-            else:
-                dir_path = "/".join(parts[:-1])
-                dir_files[dir_path].append(parts[-1])
-
-        # Apply depth limit if specified
-        if depth_limit > 0:
-            filtered_dirs = {}
-            for dir_path, files in dir_files.items():
-                depth = 0 if dir_path == "." else dir_path.count("/") + 1
-                if depth <= depth_limit:
-                    filtered_dirs[dir_path] = files
-            dir_files = filtered_dirs
-            await ctx.log(
-                level="info",
-                message=f"Limited to {len(dir_files)} directories with depth <= {depth_limit}",
-            )
-
-        # Process in chunks to manage context size
-        chunk_size = 50  # Process 50 directories at a time
-        dir_list = list(dir_files.keys())
-        all_relevant_dirs = set()
-
-        for i in range(0, len(dir_list), chunk_size):
-            chunk_dirs = dir_list[i : i + chunk_size]
-
-            # Build chunk context
-            chunk_file_paths = []
-            for dir_path in chunk_dirs:
-                if dir_path == ".":
-                    chunk_file_paths.extend(dir_files[dir_path])
-                else:
-                    for filename in dir_files[dir_path]:
-                        chunk_file_paths.append(f"{dir_path}/{filename}")
-
-            # Use the build_file_structure_context function
-            directory_tree = build_file_structure_context(chunk_file_paths)
-
-            # Construct the prompt for this chunk
-            prompt = f"""You are an expert software developer tasked with analyzing a codebase structure to identify important directories for AI context.
-
-User Task: {user_task}
-
-Codebase Structure (Chunk {i//chunk_size + 1}/{(len(dir_list) + chunk_size - 1)//chunk_size}):
-{directory_tree}
-
-Analyze this codebase structure and identify which directories contain files most relevant to the user's task.
-
-Return ONLY a JSON array of directory paths that should be included in the AI context.
-Include directories that contain:
-- Code directly related to the task
-- Tests for that code
-- Configuration files that might need updates
-- Documentation that should be updated
-
-Be selective - only include directories that are truly relevant to the task.
-
-Example response:
-["src/api/", "src/models/", "tests/api/", "docs/api/"]
-
-IMPORTANT: Return ONLY the JSON array, no other text or markdown formatting."""
-
-            # Call the appropriate AI model
-            is_openai_model = model.startswith("gpt-") or model.startswith("o")
-
-            try:
-                if is_openai_model:
-                    if not openai_client:
-                        raise YellhornMCPError(
-                            "OpenAI client not initialized. Is OPENAI_API_KEY set?"
-                        )
-
-                    chunk_result = await generate_curate_context_with_openai(
-                        openai_client, model, prompt
-                    )
-                else:
-                    if gemini_client is None:
-                        raise YellhornMCPError(
-                            "Gemini client not initialized. Is GEMINI_API_KEY set?"
-                        )
-
-                    # Get search grounding setting
-                    use_search = ctx.request_context.lifespan_context.get(
-                        "use_search_grounding", False
-                    )
-
-                    chunk_result = await generate_curate_context_with_gemini(
-                        gemini_client, model, prompt, use_search
-                    )
-
-                # Extract directory paths from the result
-                try:
-                    # Try to parse as JSON first
-                    if chunk_result.strip().startswith("["):
-                        relevant_dirs = json.loads(chunk_result.strip())
-                    else:
-                        # Extract JSON array from the response
-                        import re
-
-                        json_match = re.search(r"\[.*?\]", chunk_result, re.DOTALL)
-                        if json_match:
-                            relevant_dirs = json.loads(json_match.group())
-                        else:
-                            relevant_dirs = []
-
-                    # Add to our set of relevant directories
-                    for dir_path in relevant_dirs:
-                        if isinstance(dir_path, str):
-                            # Ensure directory paths end with /
-                            if dir_path and not dir_path.endswith("/"):
-                                dir_path = dir_path + "/"
-                            all_relevant_dirs.add(dir_path)
-
-                    await ctx.log(
-                        level="info",
-                        message=f"Chunk {i//chunk_size + 1}: Found {len(relevant_dirs)} relevant directories",
-                    )
-
-                except json.JSONDecodeError as e:
-                    await ctx.log(
-                        level="warning",
-                        message=f"Failed to parse JSON from chunk {i//chunk_size + 1}: {str(e)}",
-                    )
-                    continue
-
-            except Exception as e:
-                await ctx.log(
-                    level="error",
-                    message=f"Error processing chunk {i//chunk_size + 1}: {str(e)}",
-                )
-                continue
-
-        # Sort directories for consistent output
-        sorted_dirs = sorted(all_relevant_dirs)
-
-        if not sorted_dirs:
-            # If no directories were identified as relevant, include some sensible defaults
-            sorted_dirs = ["."]
-            await ctx.log(
-                level="warning",
-                message="No specific directories identified, including root directory",
-            )
-
-        # Create the .yellhorncontext file
-        output_file = repo_path / output_path
-        header = f"""# Yellhorn Context File
-# Generated by yellhorn-mcp for task: {user_task}
-# This file defines which directories/files should be included in AI context
-# Format: One pattern per line, directories should end with /
-# Wildcards: * (any characters), ** (any path depth)
-
-"""
-        content = header + "\n".join(sorted_dirs)
-
-        output_file.write_text(content)
-
-        await ctx.log(
-            level="info",
-            message=f"Created {output_path} with {len(sorted_dirs)} directory patterns",
+        # Delegate to the processor
+        result = await process_context_curation_async(
+            repo_path=repo_path,
+            llm_manager=llm_manager,
+            model=model,
+            user_task=user_task,
+            output_path=output_path,
+            codebase_reasoning=codebase_reasoning,
+            ignore_file_path=ignore_file_path,
+            depth_limit=depth_limit,
+            ctx=ctx,
         )
 
         # Restore original search grounding setting if modified
         if disable_search_grounding:
             ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
 
-        return f"Successfully created {output_path} with {len(sorted_dirs)} directory patterns for the task: {user_task}"
+        return json.dumps(
+            {"status": "✅ Context curation completed successfully", "message": result}
+        )
 
     except Exception as e:
         # Restore original search grounding setting on error
@@ -805,6 +598,8 @@ async def judge_workplan(
     codebase_reasoning: str = "full",
     debug: bool = False,
     disable_search_grounding: bool = False,
+    subissue_to_update: str | None = None,
+    pr_url: str | None = None,
 ) -> str:
     """Triggers an asynchronous code judgement for changes against a workplan.
 
@@ -833,6 +628,7 @@ async def judge_workplan(
         model = ctx.request_context.lifespan_context["model"]
         gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
         openai_client = ctx.request_context.lifespan_context.get("openai_client")
+        llm_manager = ctx.request_context.lifespan_context.get("llm_manager")
 
         # Handle search grounding override if specified
         original_search_grounding = ctx.request_context.lifespan_context.get(
@@ -876,13 +672,22 @@ async def judge_workplan(
                 f"You can find the workplan issue number in the PR description."
             )
 
-        # Resolve git references to commit hashes
-        base_commit_hash = await run_git_command(repo_path, ["rev-parse", base_ref])
-        head_commit_hash = await run_git_command(repo_path, ["rev-parse", head_ref])
-
-        # Fetch the workplan and generate diff for review
+        # Fetch the workplan
         workplan = await get_issue_body(repo_path, issue_number)
-        diff = await get_git_diff(repo_path, base_ref, head_ref, codebase_reasoning)
+
+        # Handle PR URL or git refs for diff generation
+        if pr_url:
+            # Use PR diff instead of git refs
+            diff = await get_github_pr_diff(repo_path, pr_url)
+            # For PR, use placeholder commit hashes
+            base_commit_hash = "pr_base"
+            head_commit_hash = "pr_head"
+        else:
+            # Resolve git references to commit hashes
+            base_commit_hash = await run_git_command(repo_path, ["rev-parse", base_ref])
+            head_commit_hash = await run_git_command(repo_path, ["rev-parse", head_ref])
+            # Generate diff for review
+            diff = await get_git_diff(repo_path, base_ref, head_ref, codebase_reasoning)
 
         # Check if diff is empty or only contains the header for file_structure mode
         is_empty = not diff.strip() or (
@@ -920,18 +725,25 @@ async def judge_workplan(
         placeholder_body = f"Parent workplan: #{issue_number}\n\n## Status\nGenerating judgement...\n\n{submission_comment}"
         judgement_title = f"Judgement for #{issue_number}: {head_ref} vs {base_ref}"
 
-        # Create the sub-issue
-        from yellhorn_mcp.integrations.github_integration import create_judgement_subissue
+        # Create or update the sub-issue
+        if subissue_to_update:
+            # Update existing subissue
+            subissue_number = subissue_to_update
+            subissue_url = f"https://github.com/{repo_path.name}/issues/{subissue_number}"
+            await update_github_issue(repo_path, subissue_number, placeholder_body)
+        else:
+            # Create new sub-issue
+            from yellhorn_mcp.integrations.github_integration import create_judgement_subissue
 
-        subissue_url = await create_judgement_subissue(
-            repo_path, issue_number, judgement_title, placeholder_body
-        )
+            subissue_url = await create_judgement_subissue(
+                repo_path, issue_number, judgement_title, placeholder_body
+            )
 
-        # Extract sub-issue number from URL
-        import re
+            # Extract sub-issue number from URL
+            import re
 
-        issue_match = re.search(r"/issues/(\d+)", subissue_url)
-        subissue_number = issue_match.group(1) if issue_match else None
+            issue_match = re.search(r"/issues/(\d+)", subissue_url)
+            subissue_number = issue_match.group(1) if issue_match else None
 
         await ctx.log(
             level="info",
@@ -950,8 +762,7 @@ async def judge_workplan(
         asyncio.create_task(
             process_judgement_async(
                 repo_path,
-                gemini_client,
-                openai_client,
+                llm_manager,
                 model,
                 workplan,
                 diff,
@@ -970,6 +781,7 @@ async def judge_workplan(
                     "submitted_urls": submitted_urls,
                 },
                 ctx=ctx,
+                github_command_func=ctx.request_context.lifespan_context.get("github_command_func"),
             )
         )
 
@@ -1028,6 +840,7 @@ __all__ = [
     "mcp",
     "process_workplan_async",
     "process_judgement_async",
+    "process_context_curation_async",
     "calculate_cost",
     "format_metrics_section",
     "get_codebase_snapshot",

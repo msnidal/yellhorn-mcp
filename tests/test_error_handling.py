@@ -133,7 +133,10 @@ async def test_create_github_subissue_error():
 
     # Test error when creating sub-issue
     with patch("yellhorn_mcp.utils.git_utils.ensure_label_exists"):
-        with patch("builtins.open", side_effect=PermissionError("Permission denied")):
+        with patch(
+            "yellhorn_mcp.utils.git_utils.run_github_command",
+            side_effect=Exception("GitHub CLI error"),
+        ):
             with pytest.raises(YellhornMCPError, match="Failed to create GitHub sub-issue"):
                 await create_github_subissue(
                     Path("/mock/repo"),
