@@ -3,12 +3,17 @@
 import asyncio
 import json
 import os
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, Callable, Set
-import weakref
 import uuid
+import weakref
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
-from yellhorn_mcp.server import process_workplan_async, curate_context, process_judgement_async, process_revision_async
+from yellhorn_mcp.server import (
+    curate_context,
+    process_judgement_async,
+    process_revision_async,
+    process_workplan_async,
+)
 
 
 async def mock_github_command(repo_path: Path, command: list[str]) -> str:
@@ -573,7 +578,7 @@ async def run_revise_workplan(
         Dictionary with issue_url and issue_number
     """
     from datetime import datetime, timezone
-    
+
     # Create mock context
     ctx = MockContext(
         repo_path=repo_path,
@@ -692,7 +697,7 @@ async def run_judge_workplan(
         None (function updates the existing sub-issue)
     """
     from datetime import datetime, timezone
-    
+
     # Create mock context
     ctx = MockContext(
         repo_path=repo_path,

@@ -154,26 +154,26 @@ async def get_codebase_snapshot(
     # Apply filtering with detailed logging
     filtered_files = []
     total_files = len(all_files)
-    
+
     # Counters for debugging
     negation_override_count = 0
     whitelist_miss_count = 0
     context_blacklist_count = 0
     yellhornignore_count = 0
     kept_count = 0
-    
+
     # Sample a few files for debugging
     sample_files = list(sorted(all_files))[:10] if all_files else []
     log_function(f"Sample file paths: {sample_files}")
-    
+
     if context_whitelist_patterns:
         sample_patterns = context_whitelist_patterns[:5]
         log_function(f"Sample whitelist patterns: {sample_patterns}")
-    
+
     def is_ignored_with_logging(file_path: str) -> tuple[bool, str]:
         """Check if a file should be ignored and return reason."""
         import fnmatch
-        
+
         # Helper function to match patterns
         def matches_pattern(path: str, pattern: str) -> bool:
             if pattern.endswith("/"):
@@ -182,12 +182,12 @@ async def get_codebase_snapshot(
             else:
                 # File pattern
                 return fnmatch.fnmatch(path, pattern)
-        
+
         # Step 1: Check negation patterns from .yellhorncontext (these override everything)
         for pattern in context_negation_patterns:
             if matches_pattern(file_path, pattern):
                 return False, "negation_override"  # Explicitly included
-        
+
         # Step 2: If we have .yellhorncontext whitelist patterns, check them
         if context_whitelist_patterns:
             # Check if file matches any whitelist pattern
@@ -198,22 +198,22 @@ async def get_codebase_snapshot(
             else:
                 # File doesn't match any whitelist pattern, ignore it
                 return True, "whitelist_miss"
-        
+
         # Step 3: Check .yellhorncontext blacklist patterns
         for pattern in context_blacklist_patterns:
             if matches_pattern(file_path, pattern):
                 return True, "context_blacklist"
-        
+
         # Step 4: Check .yellhornignore patterns (fallback)
         for pattern in yellhornignore_patterns:
             if matches_pattern(file_path, pattern):
                 return True, "yellhornignore"
-        
+
         return False, "kept"
-    
+
     for file_path in sorted(all_files):
         ignored, reason = is_ignored_with_logging(file_path)
-        
+
         if reason == "negation_override":
             negation_override_count += 1
             filtered_files.append(file_path)
@@ -226,7 +226,7 @@ async def get_codebase_snapshot(
         elif reason == "kept":
             kept_count += 1
             filtered_files.append(file_path)
-    
+
     # Log detailed filtering results
     log_function(f"Filtering results out of {total_files} files:")
     if negation_override_count > 0:
@@ -239,10 +239,8 @@ async def get_codebase_snapshot(
         log_function(f"  - {yellhornignore_count} dropped by .yellhornignore")
     if kept_count > 0:
         log_function(f"  - {kept_count} kept (passed all filters)")
-    
+
     log_function(f"Total kept: {len(filtered_files)} files")
-
-
 
     file_paths = filtered_files
 
@@ -705,10 +703,11 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         # Add the title as header prefix
         content_prefix = f"# {title}\n\n"
 
-
         # If not disable_search_grounding, use search grounding
         if not disable_search_grounding:
-            prompt += "Search the internet for latest package versions and describe how to use them."
+            prompt += (
+                "Search the internet for latest package versions and describe how to use them."
+            )
 
         # Generate and update issue using the helper
         await _generate_and_update_issue(

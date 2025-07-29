@@ -348,7 +348,7 @@ Don't include explanations for your choices, just return the list in the specifi
                 else:
                     # Check if any filtered files are within this directory
                     has_files = any(f.startswith(dir_path + "/") for f in filtered_file_paths)
-                
+
                 if dir_path == ".":
                     # Root directory is a special case
                     if has_files:

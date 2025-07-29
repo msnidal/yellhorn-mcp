@@ -316,9 +316,9 @@ class TestAddCitationsFromMetadata:
             "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHC9-XYJNkpUY8tGEA2TXYSRMCTTFxqVIJmRmEAqgj-5aCWD6akMKrVClBj7BjPJ-YGEd9EiBV_1SPCIcdGGRNXBZ4A3NfHA5zslVECFDct42D8VIRYKGZa9O413cgZMl0_z9i9bA-ptwFrZVXq9bMGfY-_vnpvDmw82w==",
             "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEH1wnUSVxW0FefEEsZBzEJMVP_Tx2hGyslxwf7lEusVPDzr5P1tx8MULu479fj6li2KaYRotJyA3sKMF4EavgmjEAO8XQpVRGl9OHpxDJ65iyC5zdfAyGt",
             "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQERmT1MMNu5dYlKjuUv6fPsQ05Rm4nsTlzTpLuy0c3H-TrF49Q3Bjn5cEUcwtLbjIBlq7tMqGUTwsSJ9KeitwmbQbAAkq22Ipql0pGD8mkF93XgjtzBpIPp_zkveEM=",
-            "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGt6RNALYlIBVmuGxa_Pgb1a3NDqzZtrZNj_oQ6qcwRdqFuExm2j8CYSXsu7bwhE5bv9jMT-meA4qaKN33O0sXbWdRjp6t09SMekN36Y5Ot9iGzvZ3ROWI1bn-yIVx6ThqhEnBnyeLM4LcJWGk4m1o2QNfZezOEp9FM2aOHamNzXDu0PY3XuOWFYdZHbUO4dGNU98pHQ09yMg=="
+            "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGt6RNALYlIBVmuGxa_Pgb1a3NDqzZtrZNj_oQ6qcwRdqFuExm2j8CYSXsu7bwhE5bv9jMT-meA4qaKN33O0sXbWdRjp6t09SMekN36Y5Ot9iGzvZ3ROWI1bn-yIVx6ThqhEnBnyeLM4LcJWGk4m1o2QNfZezOEp9FM2aOHamNzXDu0PY3XuOWFYdZHbUO4dGNU98pHQ09yMg==",
         ]
-        
+
         for uri in chunk_uris:
             mock_chunk = MagicMock()
             mock_chunk.web = MagicMock()
@@ -332,28 +332,26 @@ class TestAddCitationsFromMetadata:
                 segment=MagicMock(
                     start_index=347,
                     end_index=639,
-                    text="LiteLLM is chosen over OpenRouter due to its self-hosted nature, offering greater control over the inference stack, policy-as-code via GitOps, and deeper integration with existing observability tools, which aligns well with a platform team's need for custom governance and on-prem deployments"
+                    text="LiteLLM is chosen over OpenRouter due to its self-hosted nature, offering greater control over the inference stack, policy-as-code via GitOps, and deeper integration with existing observability tools, which aligns well with a platform team's need for custom governance and on-prem deployments",
                 ),
-                grounding_chunk_indices=[0, 1]
+                grounding_chunk_indices=[0, 1],
             ),
             # Second support with chunks 2, 3, 4
             MagicMock(
                 segment=MagicMock(
                     start_index=796,
                     end_index=1014,
-                    text='LiteLLM is an open-source Python SDK and proxy server that provides an OpenAI-compatible API for over 100 LLMs, including Bedrock, Azure, OpenAI, VertexAI, Cohere, Anthropic, Sagemaker, HuggingFace, Replicate, and Groq'
+                    text="LiteLLM is an open-source Python SDK and proxy server that provides an OpenAI-compatible API for over 100 LLMs, including Bedrock, Azure, OpenAI, VertexAI, Cohere, Anthropic, Sagemaker, HuggingFace, Replicate, and Groq",
                 ),
-                grounding_chunk_indices=[2, 3, 4]
+                grounding_chunk_indices=[2, 3, 4],
             ),
             # Third support with chunk 5
             MagicMock(
                 segment=MagicMock(
-                    start_index=1528,
-                    end_index=1557,
-                    text='LiteLLM requires Python >=3.8'
+                    start_index=1528, end_index=1557, text="LiteLLM requires Python >=3.8"
                 ),
-                grounding_chunk_indices=[5]
-            )
+                grounding_chunk_indices=[5],
+            ),
         ]
 
         # Create mock grounding metadata
@@ -377,17 +375,26 @@ class TestAddCitationsFromMetadata:
         # Verify that citations are inserted at the correct positions
         # Citations should be inserted in reverse order (highest end_index first)
         # to avoid position shifting issues
-        
+
         # Check that all expected citation patterns are present
-        assert "[6](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGt6RNALYlIBVmuGxa_Pgb1a3NDqzZtrZNj_oQ6qcwRdqFuExm2j8CYSXsu7bwhE5bv9jMT-meA4qaKN33O0sXbWdRjp6t09SMekN36Y5Ot9iGzvZ3ROWI1bn-yIVx6ThqhEnBnyeLM4LcJWGk4m1o2QNfZezOEp9FM2aOHamNzXDu0PY3XuOWFYdZHbUO4dGNU98pHQ09yMg==)" in result
-        assert "[3](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHC9-XYJNkpUY8tGEA2TXYSRMCTTFxqVIJmRmEAqgj-5aCWD6akMKrVClBj7BjPJ-YGEd9EiBV_1SPCIcdGGRNXBZ4A3NfHA5zslVECFDct42D8VIRYKGZa9O413cgZMl0_z9i9bA-ptwFrZVXq9bMGfY-_vnpvDmw82w==)" in result
-        assert "[1](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEhhZced8I5CroQ0NHZXL0X7tNmAK_MOGcxehJzKq3VszaU_KmP9a9x5XdyA26IU2GfNhIvivqNYc4Vq69Sz4NVuXw_6t7aWS1_Os5EH8ks0gnP3cdg11ALb_6jfJV03PrsXr6VQKahIoK99IpcH8g-CQ==)" in result
-        
+        assert (
+            "[6](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGt6RNALYlIBVmuGxa_Pgb1a3NDqzZtrZNj_oQ6qcwRdqFuExm2j8CYSXsu7bwhE5bv9jMT-meA4qaKN33O0sXbWdRjp6t09SMekN36Y5Ot9iGzvZ3ROWI1bn-yIVx6ThqhEnBnyeLM4LcJWGk4m1o2QNfZezOEp9FM2aOHamNzXDu0PY3XuOWFYdZHbUO4dGNU98pHQ09yMg==)"
+            in result
+        )
+        assert (
+            "[3](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHC9-XYJNkpUY8tGEA2TXYSRMCTTFxqVIJmRmEAqgj-5aCWD6akMKrVClBj7BjPJ-YGEd9EiBV_1SPCIcdGGRNXBZ4A3NfHA5zslVECFDct42D8VIRYKGZa9O413cgZMl0_z9i9bA-ptwFrZVXq9bMGfY-_vnpvDmw82w==)"
+            in result
+        )
+        assert (
+            "[1](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEhhZced8I5CroQ0NHZXL0X7tNmAK_MOGcxehJzKq3VszaU_KmP9a9x5XdyA26IU2GfNhIvivqNYc4Vq69Sz4NVuXw_6t7aWS1_Os5EH8ks0gnP3cdg11ALb_6jfJV03PrsXr6VQKahIoK99IpcH8g-CQ==)"
+            in result
+        )
+
         # Verify that the original text content is preserved
         assert "LiteLLM is chosen over OpenRouter" in result
         assert "open-source Python SDK" in result
         assert "requires Python >=3.8" in result
-        
+
         # Verify that the result is longer than the original (citations added)
         assert len(result) > len(text)
 
@@ -396,29 +403,15 @@ class TestAddCitationsFromMetadata:
         # Test with dictionary format instead of object format
         grounding_metadata = {
             "grounding_chunks": [
-                {
-                    "web": {
-                        "title": "truefoundry.com",
-                        "uri": "https://example.com/page1"
-                    }
-                },
-                {
-                    "web": {
-                        "title": "github.com", 
-                        "uri": "https://example.com/page2"
-                    }
-                }
+                {"web": {"title": "truefoundry.com", "uri": "https://example.com/page1"}},
+                {"web": {"title": "github.com", "uri": "https://example.com/page2"}},
             ],
             "grounding_supports": [
                 {
-                    "segment": {
-                        "start_index": 10,
-                        "end_index": 25,
-                        "text": "some cited text"
-                    },
-                    "grounding_chunk_indices": [0, 1]
+                    "segment": {"start_index": 10, "end_index": 25, "text": "some cited text"},
+                    "grounding_chunk_indices": [0, 1],
                 }
-            ]
+            ],
         }
 
         text = "This is some cited text with more content."

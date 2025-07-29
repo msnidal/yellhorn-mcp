@@ -6,8 +6,8 @@ and formatting grounding metadata into Markdown citations.
 """
 
 from google.genai import types as genai_types
-
 from google.genai.types import GroundingMetadata
+
 
 def _get_gemini_search_tools(model_name: str) -> genai_types.ToolListUnion | None:
     """
@@ -90,7 +90,6 @@ def add_citations(response: genai_types.GenerateContentResponse) -> str:
     return text
 
 
-
 def add_citations_from_metadata(text: str, grounding_metadata: GroundingMetadata) -> str:
     """
     Inserts citation links into text based on grounding metadata.
@@ -112,13 +111,13 @@ def add_citations_from_metadata(text: str, grounding_metadata: GroundingMetadata
     # Handle both attribute access and dictionary access for flexibility
     supports = []
     chunks = []
-    
+
     # Try to get supports
     if hasattr(grounding_metadata, "grounding_supports") and grounding_metadata.grounding_supports:
         supports = grounding_metadata.grounding_supports
     elif isinstance(grounding_metadata, dict) and grounding_metadata.get("grounding_supports"):
         supports = grounding_metadata["grounding_supports"]
-    
+
     # Try to get chunks
     if hasattr(grounding_metadata, "grounding_chunks"):
         if grounding_metadata.grounding_chunks:
@@ -142,20 +141,20 @@ def add_citations_from_metadata(text: str, grounding_metadata: GroundingMetadata
             if isinstance(segment, dict) and segment.get("end_index") is not None:
                 return segment["end_index"]
         return 0
-    
+
     sorted_supports = sorted(supports, key=get_end_index, reverse=True)
 
     for support in sorted_supports:
         # Get end_index from support, handling both object and dict formats
         end_index = get_end_index(support)
-        
+
         # Get grounding_chunk_indices, handling both object and dict formats
         indices = []
         if hasattr(support, "grounding_chunk_indices"):
             indices = support.grounding_chunk_indices
         elif isinstance(support, dict) and "grounding_chunk_indices" in support:
             indices = support["grounding_chunk_indices"]
-            
+
         if indices:
             # Create citation string like [1](link1)[2](link2)
             citation_links = []
@@ -172,7 +171,7 @@ def add_citations_from_metadata(text: str, grounding_metadata: GroundingMetadata
                         web = chunk["web"]
                         if isinstance(web, dict) and "uri" in web:
                             uri = web["uri"]
-                    
+
                     if uri:
                         citation_links.append(f"[{i + 1}]({uri})")
 

@@ -621,21 +621,21 @@ tests
         # - yellhorn_mcp/integrations/github_integration.py (nested files -> simple pattern)
         # - empty_dir/ (empty directory, if returned by LLM -> ** suffix)
         # - config.py (root level file)
-        
+
         # Create src with direct file
         (repo_path / "src").mkdir()
         (repo_path / "src" / "main.py").write_text("def main(): pass")
-        
+
         # Create yellhorn_mcp/integrations with file (nested structure)
         (repo_path / "yellhorn_mcp").mkdir()
         (repo_path / "yellhorn_mcp" / "integrations").mkdir()
         (repo_path / "yellhorn_mcp" / "integrations" / "github_integration.py").write_text(
             "def create_issue(): pass"
         )
-        
+
         # Create an empty directory (won't be in filtered_file_paths)
         (repo_path / "empty_dir").mkdir()
-        
+
         # Create root level file
         (repo_path / "config.py").write_text("DEBUG = True")
 
@@ -670,36 +670,40 @@ yellhorn_mcp/integrations
 
         # Verify file content
         content = context_file.read_text()
-        
+
         # All directories returned by LLM that have files should get simple patterns
         # (Since the logic checks if any file starts with 'dir_path/', even nested files count)
         assert "src/" in content
         assert "src/**" not in content
-        
-        assert "yellhorn_mcp/" in content 
+
+        assert "yellhorn_mcp/" in content
         assert "yellhorn_mcp/**" not in content
-        
+
         assert "yellhorn_mcp/integrations/" in content
         assert "yellhorn_mcp/integrations/**" not in content
-        
+
         # Root directory has files, should get simple pattern
         assert "./" in content
         assert "./**" not in content
-        
+
         print(f"Generated content:\n{content}")
-        
+
         # Test demonstrates the key behavior:
         # - Directories with files (including nested files) get simple patterns like 'dir/'
         # - The logic correctly identifies when directories have associated files
         # - All patterns are whitelist patterns (no ! prefix)
-        
+
         # Verify whitelist patterns were generated (no ! prefix)
-        lines = content.split('\n')
-        pattern_lines = [line for line in lines if line and not line.startswith('#') and line.strip()]
-        
+        lines = content.split("\n")
+        pattern_lines = [
+            line for line in lines if line and not line.startswith("#") and line.strip()
+        ]
+
         # All pattern lines should be whitelist patterns (no ! prefix)
         for line in pattern_lines:
-            assert not line.strip().startswith('!'), f"Found blacklist pattern: {line}"
-        
+            assert not line.strip().startswith("!"), f"Found blacklist pattern: {line}"
+
         # Verify we have the expected number of patterns
-        assert len(pattern_lines) == 4  # './', 'src/', 'yellhorn_mcp/', 'yellhorn_mcp/integrations/'
+        assert (
+            len(pattern_lines) == 4
+        )  # './', 'src/', 'yellhorn_mcp/', 'yellhorn_mcp/integrations/'
