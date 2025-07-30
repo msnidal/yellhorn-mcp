@@ -8,19 +8,18 @@ import asyncio
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from google import genai
 from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
 from yellhorn_mcp import __version__
-from yellhorn_mcp.integrations.gemini_integration import generate_workplan_with_gemini
 from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment,
     update_issue_with_workplan,
 )
-from yellhorn_mcp.integrations.openai_integration import generate_workplan_with_openai
+from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
@@ -50,7 +49,12 @@ async def get_codebase_snapshot(
     gitignore_patterns = []
     gitignore_path = repo_path / ".gitignore"
     if gitignore_path.exists():
-        gitignore_patterns = gitignore_path.read_text().strip().split("\n")
+        gitignore_patterns = [
+            line.strip()
+            for line in gitignore_path.read_text().strip().split("\n")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        log_function(f"Found .gitignore with {len(gitignore_patterns)} patterns")
 
     # Get tracked files
     tracked_files = await run_git_command(repo_path, ["ls-files"])
@@ -79,66 +83,164 @@ async def get_codebase_snapshot(
         ]
         log_function(f"Found .yellhornignore with {len(yellhornignore_patterns)} patterns")
 
-    # Check for whitelist patterns from .yellhorncontext
+    # Parse .yellhorncontext patterns (supports blacklist, whitelist, and negation)
     yellhorncontext_path = repo_path / ".yellhorncontext"
-    whitelist_patterns = []
+    context_blacklist_patterns = []
+    context_whitelist_patterns = []
+    context_negation_patterns = []
+
     if yellhorncontext_path.exists():
-        whitelist_patterns = [
+        lines = [
             line.strip()
             for line in yellhorncontext_path.read_text().strip().split("\n")
             if line.strip() and not line.strip().startswith("#")
         ]
-        log_function(f"Found .yellhorncontext with {len(whitelist_patterns)} whitelist patterns")
+
+        # Separate patterns by type
+        for line in lines:
+            if line.startswith("!"):
+                # Blacklist pattern (exclude this directory/file)
+                context_blacklist_patterns.append(line[1:])  # Remove the '!' prefix
+            else:
+                # All other patterns are whitelist (directories/files to include)
+                context_whitelist_patterns.append(line)
+
+        log_function(
+            f"Found .yellhorncontext with {len(context_whitelist_patterns)} whitelist, "
+            f"{len(context_blacklist_patterns)} blacklist, and {len(context_negation_patterns)} negation patterns"
+        )
 
     def is_ignored(file_path: str) -> bool:
         """Check if a file should be ignored based on patterns."""
-        # First check if the file is whitelisted
-        for pattern in whitelist_patterns:
-            import fnmatch
+        import fnmatch
 
+        # Helper function to match patterns
+        def matches_pattern(path: str, pattern: str) -> bool:
             if pattern.endswith("/"):
                 # Directory pattern - check if file is within this directory
-                if file_path.startswith(pattern) or fnmatch.fnmatch(file_path + "/", pattern):
-                    return False
+                return path.startswith(pattern) or fnmatch.fnmatch(path + "/", pattern)
             else:
                 # File pattern
-                if fnmatch.fnmatch(file_path, pattern):
-                    return False
+                return fnmatch.fnmatch(path, pattern)
 
-        # If we have whitelist patterns and file didn't match any, ignore it
-        if whitelist_patterns:
-            return True
+        # Step 1: Check negation patterns from .yellhorncontext (these override everything)
+        for pattern in context_negation_patterns:
+            if matches_pattern(file_path, pattern):
+                return False  # Explicitly included
 
-        # Otherwise check against ignore patterns
+        # Step 2: If we have .yellhorncontext whitelist patterns, check them
+        if context_whitelist_patterns:
+            # Check if file matches any whitelist pattern
+            for pattern in context_whitelist_patterns:
+                if matches_pattern(file_path, pattern):
+                    # File is whitelisted, but still check context blacklist
+                    break
+            else:
+                # File doesn't match any whitelist pattern, ignore it
+                return True
+
+        # Step 3: Check .yellhorncontext blacklist patterns
+        for pattern in context_blacklist_patterns:
+            if matches_pattern(file_path, pattern):
+                return True
+
+        # Step 4: Check .yellhornignore patterns (fallback)
         for pattern in yellhornignore_patterns:
-            import fnmatch
-
-            if pattern.endswith("/"):
-                # Directory pattern
-                if file_path.startswith(pattern) or fnmatch.fnmatch(file_path + "/", pattern):
-                    return True
-            else:
-                # File pattern
-                if fnmatch.fnmatch(file_path, pattern):
-                    return True
+            if matches_pattern(file_path, pattern):
+                return True
 
         return False
 
-    # Apply filtering
+    # Apply filtering with detailed logging
     filtered_files = []
-    ignored_count = 0
-    for file_path in sorted(all_files):
-        if is_ignored(file_path):
-            ignored_count += 1
-            continue
-        filtered_files.append(file_path)
+    total_files = len(all_files)
 
-    if yellhornignore_patterns or whitelist_patterns:
-        pattern_type = "whitelist" if whitelist_patterns else "ignore"
-        log_function(
-            f"Filtered {ignored_count} files based on .yellhorn{pattern_type} patterns, "
-            f"keeping {len(filtered_files)} files"
-        )
+    # Counters for debugging
+    negation_override_count = 0
+    whitelist_miss_count = 0
+    context_blacklist_count = 0
+    yellhornignore_count = 0
+    kept_count = 0
+
+    # Sample a few files for debugging
+    sample_files = list(sorted(all_files))[:10] if all_files else []
+    log_function(f"Sample file paths: {sample_files}")
+
+    if context_whitelist_patterns:
+        sample_patterns = context_whitelist_patterns[:5]
+        log_function(f"Sample whitelist patterns: {sample_patterns}")
+
+    def is_ignored_with_logging(file_path: str) -> tuple[bool, str]:
+        """Check if a file should be ignored and return reason."""
+        import fnmatch
+
+        # Helper function to match patterns
+        def matches_pattern(path: str, pattern: str) -> bool:
+            if pattern.endswith("/"):
+                # Directory pattern - check if file is within this directory
+                return path.startswith(pattern) or fnmatch.fnmatch(path + "/", pattern)
+            else:
+                # File pattern
+                return fnmatch.fnmatch(path, pattern)
+
+        # Step 1: Check negation patterns from .yellhorncontext (these override everything)
+        for pattern in context_negation_patterns:
+            if matches_pattern(file_path, pattern):
+                return False, "negation_override"  # Explicitly included
+
+        # Step 2: If we have .yellhorncontext whitelist patterns, check them
+        if context_whitelist_patterns:
+            # Check if file matches any whitelist pattern
+            for pattern in context_whitelist_patterns:
+                if matches_pattern(file_path, pattern):
+                    # File is whitelisted, but still check context blacklist
+                    break
+            else:
+                # File doesn't match any whitelist pattern, ignore it
+                return True, "whitelist_miss"
+
+        # Step 3: Check .yellhorncontext blacklist patterns
+        for pattern in context_blacklist_patterns:
+            if matches_pattern(file_path, pattern):
+                return True, "context_blacklist"
+
+        # Step 4: Check .yellhornignore patterns (fallback)
+        for pattern in yellhornignore_patterns:
+            if matches_pattern(file_path, pattern):
+                return True, "yellhornignore"
+
+        return False, "kept"
+
+    for file_path in sorted(all_files):
+        ignored, reason = is_ignored_with_logging(file_path)
+
+        if reason == "negation_override":
+            negation_override_count += 1
+            filtered_files.append(file_path)
+        elif reason == "whitelist_miss":
+            whitelist_miss_count += 1
+        elif reason == "context_blacklist":
+            context_blacklist_count += 1
+        elif reason == "yellhornignore":
+            yellhornignore_count += 1
+        elif reason == "kept":
+            kept_count += 1
+            filtered_files.append(file_path)
+
+    # Log detailed filtering results
+    log_function(f"Filtering results out of {total_files} files:")
+    if negation_override_count > 0:
+        log_function(f"  - {negation_override_count} kept by negation override")
+    if whitelist_miss_count > 0:
+        log_function(f"  - {whitelist_miss_count} dropped (no whitelist match)")
+    if context_blacklist_count > 0:
+        log_function(f"  - {context_blacklist_count} dropped by context blacklist")
+    if yellhornignore_count > 0:
+        log_function(f"  - {yellhornignore_count} dropped by .yellhornignore")
+    if kept_count > 0:
+        log_function(f"  - {kept_count} kept (passed all filters)")
+
+    log_function(f"Total kept: {len(filtered_files)} files")
 
     file_paths = filtered_files
 
@@ -294,8 +396,7 @@ async def _get_codebase_context(repo_path: Path, reasoning_mode: str, log_functi
 
 async def _generate_and_update_issue(
     repo_path: Path,
-    gemini_client: genai.Client | None,
-    openai_client: AsyncOpenAI | None,
+    llm_manager: LLMManager | None,
     model: str,
     prompt: str,
     issue_number: str,
@@ -306,13 +407,13 @@ async def _generate_and_update_issue(
     codebase_reasoning: str,
     _meta: dict[str, Any] | None,
     ctx: Context | None,
+    github_command_func: Callable | None = None,
 ) -> None:
     """Generate content with AI and update the GitHub issue.
 
     Args:
         repo_path: Path to the repository.
-        gemini_client: Gemini API client (None for OpenAI models).
-        openai_client: OpenAI API client (None for Gemini models).
+        llm_manager: LLM Manager instance.
         model: Model name to use.
         prompt: Prompt to send to AI.
         issue_number: GitHub issue number to update.
@@ -323,43 +424,120 @@ async def _generate_and_update_issue(
         codebase_reasoning: Codebase reasoning mode used.
         _meta: Optional metadata from caller.
         ctx: Optional context for logging.
+        github_command_func: Optional GitHub command function (for mocking).
     """
-    is_openai_model = model.startswith("gpt-") or model.startswith("o")
-
-    # Call the appropriate API based on the model type
-    if is_openai_model:
-        if not openai_client:
-            if ctx:
-                await ctx.log(level="error", message="OpenAI client not initialized")
-            await add_issue_comment(
-                repo_path,
-                issue_number,
-                "❌ **Error generating workplan** – OpenAI client not initialized",
-            )
-            return
-
-        workplan_content, completion_metadata = await generate_workplan_with_openai(
-            openai_client, model, prompt, ctx
+    # Use LLM Manager for unified LLM calls
+    if not llm_manager:
+        if ctx:
+            await ctx.log(level="error", message="LLM Manager not initialized")
+        await add_issue_comment(
+            repo_path,
+            issue_number,
+            "❌ **Error generating workplan** – LLM Manager not initialized",
+            github_command_func=github_command_func,
         )
-    else:
-        if gemini_client is None:
-            if ctx:
-                await ctx.log(level="error", message="Gemini client not initialized")
-            await add_issue_comment(
-                repo_path,
-                issue_number,
-                "❌ **Error generating workplan** – Gemini client not initialized",
-            )
-            return
+        return
 
-        # Get search grounding setting
-        use_search = not disable_search_grounding
-        if _meta and "original_search_grounding" in _meta:
-            use_search = _meta["original_search_grounding"] and not disable_search_grounding
-
-        workplan_content, completion_metadata = await generate_workplan_with_gemini(
-            gemini_client, model, prompt, use_search, ctx
+    # Add debug comment if requested
+    if debug:
+        debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
+        await add_issue_comment(
+            repo_path, issue_number, debug_comment, github_command_func=github_command_func
         )
+
+    # Check if we should use search grounding
+    use_search_grounding = not disable_search_grounding
+    if _meta and "original_search_grounding" in _meta:
+        use_search_grounding = _meta["original_search_grounding"] and not disable_search_grounding
+
+    # Prepare additional kwargs for the LLM call
+    llm_kwargs = {}
+    is_openai_model = llm_manager._is_openai_model(model)
+
+    # Handle search grounding for Gemini models
+    search_tools = None
+    if not is_openai_model and use_search_grounding:
+        if ctx:
+            await ctx.log(
+                level="info", message=f"Attempting to enable search grounding for model {model}"
+            )
+        try:
+            from yellhorn_mcp.utils.search_grounding_utils import _get_gemini_search_tools
+
+            search_tools = _get_gemini_search_tools(model)
+            if search_tools:
+                if ctx:
+                    await ctx.log(
+                        level="info", message=f"Search grounding enabled for model {model}"
+                    )
+        except ImportError:
+            if ctx:
+                await ctx.log(
+                    level="warning",
+                    message="Search grounding tools not available, skipping search grounding",
+                )
+
+    try:
+        # Call LLM through the manager with citation support
+        if is_openai_model:
+            # OpenAI models don't support citations
+            response_data = await llm_manager.call_llm_with_usage(
+                prompt=prompt, model=model, temperature=0.0, **llm_kwargs
+            )
+            workplan_content = response_data["content"]
+            usage_metadata = response_data["usage_metadata"]
+            completion_metadata = CompletionMetadata(
+                model_name=model,
+                status="✅ Workplan generated successfully",
+                generation_time_seconds=0.0,  # Will be calculated below
+                input_tokens=usage_metadata.prompt_tokens,
+                output_tokens=usage_metadata.completion_tokens,
+                total_tokens=usage_metadata.total_tokens,
+                timestamp=None,  # Will be set below
+            )
+        else:
+            # Gemini models - use citation-aware call
+            response_data = await llm_manager.call_llm_with_citations(
+                prompt=prompt, model=model, temperature=0.0, tools=search_tools, **llm_kwargs
+            )
+
+            workplan_content = response_data["content"]
+            usage_metadata = response_data["usage_metadata"]
+
+            # Process citations if available
+            if "grounding_metadata" in response_data and response_data["grounding_metadata"]:
+                from yellhorn_mcp.utils.search_grounding_utils import add_citations_from_metadata
+
+                workplan_content = add_citations_from_metadata(
+                    workplan_content, response_data["grounding_metadata"]
+                )
+
+            # Create completion metadata
+            completion_metadata = CompletionMetadata(
+                model_name=model,
+                status="✅ Workplan generated successfully",
+                generation_time_seconds=0.0,  # Will be calculated below
+                input_tokens=usage_metadata.prompt_tokens,
+                output_tokens=usage_metadata.completion_tokens,
+                total_tokens=usage_metadata.total_tokens,
+                search_results_used=getattr(
+                    response_data.get("grounding_metadata"), "grounding_chunks", None
+                )
+                is not None,
+                timestamp=None,  # Will be set below
+            )
+
+    except Exception as e:
+        error_message = f"Failed to generate workplan: {str(e)}"
+        if ctx:
+            await ctx.log(level="error", message=error_message)
+        await add_issue_comment(
+            repo_path,
+            issue_number,
+            f"❌ **Error generating workplan** – {str(e)}",
+            github_command_func=github_command_func,
+        )
+        return
 
     if not workplan_content:
         api_name = "OpenAI" if is_openai_model else "Gemini"
@@ -372,7 +550,9 @@ async def _generate_and_update_issue(
         error_message_comment = (
             f"⚠️ AI workplan enhancement failed: Received an empty response from {api_name} API."
         )
-        await add_issue_comment(repo_path, issue_number, error_message_comment)
+        await add_issue_comment(
+            repo_path, issue_number, error_message_comment, github_command_func=github_command_func
+        )
         return
 
     # Calculate generation time if we have metadata
@@ -399,28 +579,31 @@ async def _generate_and_update_issue(
     full_body = f"{content_prefix}{workplan_content}"
 
     # Update the GitHub issue with the generated workplan
-    await update_issue_with_workplan(repo_path, issue_number, full_body, completion_metadata, title)
+    await update_issue_with_workplan(
+        repo_path,
+        issue_number,
+        full_body,
+        completion_metadata,
+        title,
+        github_command_func=github_command_func,
+    )
     if ctx:
         await ctx.log(
             level="info",
             message=f"Successfully updated GitHub issue #{issue_number} with generated workplan and metrics",
         )
 
-    # Add debug comment if requested
-    if debug:
-        debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
-        await add_issue_comment(repo_path, issue_number, debug_comment)
-
     # Add completion comment if we have submission metadata
     if completion_metadata and _meta:
         completion_comment = format_completion_comment(completion_metadata)
-        await add_issue_comment(repo_path, issue_number, completion_comment)
+        await add_issue_comment(
+            repo_path, issue_number, completion_comment, github_command_func=github_command_func
+        )
 
 
 async def process_workplan_async(
     repo_path: Path,
-    gemini_client: genai.Client | None,
-    openai_client: AsyncOpenAI | None,
+    llm_manager: LLMManager,
     model: str,
     title: str,
     issue_number: str,
@@ -430,13 +613,13 @@ async def process_workplan_async(
     disable_search_grounding: bool = False,
     _meta: dict[str, Any] | None = None,
     ctx: Context | None = None,
+    github_command_func: Callable | None = None,
 ) -> None:
     """Generate a workplan asynchronously and update the GitHub issue.
 
     Args:
         repo_path: Path to the repository.
-        gemini_client: Gemini API client (None for OpenAI models).
-        openai_client: OpenAI API client (None for Gemini models).
+        llm_manager: LLM Manager instance.
         model: Model name to use (Gemini or OpenAI).
         title: Title for the workplan.
         issue_number: GitHub issue number to update.
@@ -446,6 +629,7 @@ async def process_workplan_async(
         disable_search_grounding: If True, disables search grounding for this request.
         _meta: Optional metadata from the caller.
         ctx: Optional context for logging.
+        github_command_func: Optional GitHub command function (for mocking).
     """
     try:
         # Create a simple logging function that uses ctx if available
@@ -513,18 +697,22 @@ Your response will be published directly to a GitHub issue without modification,
 - Any configuration changes or dependencies needed
 
 The workplan should be comprehensive enough that a developer or AI assistant could implement it without additional context, and structured in a way that makes it easy for an LLM to quickly understand and work with the contained information.
-
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
 
         # Add the title as header prefix
         content_prefix = f"# {title}\n\n"
 
+        # If not disable_search_grounding, use search grounding
+        if not disable_search_grounding:
+            prompt += (
+                "Search the internet for latest package versions and describe how to use them."
+            )
+
         # Generate and update issue using the helper
         await _generate_and_update_issue(
             repo_path,
-            gemini_client,
-            openai_client,
+            llm_manager,
             model,
             prompt,
             issue_number,
@@ -535,6 +723,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             codebase_reasoning,
             _meta,
             ctx,
+            github_command_func,
         )
 
     except Exception as e:
@@ -545,7 +734,9 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         # Try to add error comment to issue
         try:
             error_comment = f"❌ **Error generating workplan**\n\n{str(e)}"
-            await add_issue_comment(repo_path, issue_number, error_comment)
+            await add_issue_comment(
+                repo_path, issue_number, error_comment, github_command_func=github_command_func
+            )
         except Exception:
             # If we can't even add a comment, just log
             if ctx:
@@ -556,8 +747,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
 
 async def process_revision_async(
     repo_path: Path,
-    gemini_client: genai.Client | None,
-    openai_client: AsyncOpenAI | None,
+    llm_manager: LLMManager,
     model: str,
     issue_number: str,
     original_workplan: str,
@@ -567,13 +757,13 @@ async def process_revision_async(
     disable_search_grounding: bool = False,
     _meta: dict[str, Any] | None = None,
     ctx: Context | None = None,
+    github_command_func: Callable | None = None,
 ) -> None:
     """Revise an existing workplan asynchronously and update the GitHub issue.
 
     Args:
         repo_path: Path to the repository.
-        gemini_client: Gemini API client (None for OpenAI models).
-        openai_client: OpenAI API client (None for Gemini models).
+        llm_manager: LLM Manager instance.
         model: Model name to use.
         issue_number: GitHub issue number to update.
         original_workplan: The current workplan content.
@@ -583,6 +773,7 @@ async def process_revision_async(
         disable_search_grounding: If True, disables search grounding for this request.
         _meta: Optional metadata from the caller.
         ctx: Optional context for logging.
+        github_command_func: Optional GitHub command function (for mocking).
     """
     try:
         # Create a simple logging function that uses ctx if available
@@ -630,11 +821,12 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         # Add the title as header prefix
         content_prefix = f"# {title}\n\n"
 
+        # llm_manager is now passed as a parameter
+
         # Generate and update issue using the helper
         await _generate_and_update_issue(
             repo_path,
-            gemini_client,
-            openai_client,
+            llm_manager,
             model,
             prompt,
             issue_number,
@@ -645,6 +837,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             codebase_reasoning,
             _meta,
             ctx,
+            github_command_func,
         )
 
     except Exception as e:
@@ -655,7 +848,9 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         # Try to add error comment to issue
         try:
             error_comment = f"❌ **Error revising workplan**\n\n{str(e)}"
-            await add_issue_comment(repo_path, issue_number, error_comment)
+            await add_issue_comment(
+                repo_path, issue_number, error_comment, github_command_func=github_command_func
+            )
         except Exception:
             # If we can't even add a comment, just log
             if ctx:

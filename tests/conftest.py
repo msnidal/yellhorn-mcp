@@ -97,15 +97,21 @@ async def patch_gh_commands(monkeypatch):
     Individual tests can override this behavior by providing their own patches.
     """
 
-    async def fake_run_github_command(repo_path, args):
+    async def fake_run_github_command(repo_path, args, **kwargs):
         """Mock implementation of run_github_command."""
         # Return dummy JSON for issue list or diff content depending on args
         if "issue" in args and "list" in args:
             return "[]"  # no issues by default, tests will override where needed
         if "issue" in args and "view" in args:
             return '{"body": ""}'
+        if "issue" in args and "create" in args:
+            return "https://github.com/owner/repo/issues/124"  # Mock issue creation URL
         if "pr" in args and "diff" in args:
             return ""  # empty diff by default
+        if args == ["remote", "get-url", "origin"]:
+            return "https://github.com/owner/repo.git"  # Mock repo URL
+        if "label" in args and "create" in args:
+            return '{"name": "label-name", "color": "ffffff"}'  # Mock label creation
         return ""
 
     async def fake_run_git_command(repo_path, args):

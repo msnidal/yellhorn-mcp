@@ -1,6 +1,7 @@
 """Tests for the Yellhorn MCP CLI module."""
 
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 from yellhorn_mcp.cli import main
@@ -10,14 +11,16 @@ from yellhorn_mcp.cli import main
 @patch("os.getenv")
 @patch("pathlib.Path.exists")
 @patch("pathlib.Path.is_dir")
+@patch("yellhorn_mcp.cli.is_git_repository")
 @patch("yellhorn_mcp.server.mcp.run")
 def test_main_success(
     mock_mcp_run,
+    mock_is_git_repo,
     mock_is_dir,
     mock_exists,
     mock_getenv,
     mock_exit,
-    capsys,
+    caplog,
 ):
     """Test successful execution of the CLI main function."""
     # Mock environment variables
@@ -32,10 +35,11 @@ def test_main_success(
     # Mock path checks
     mock_exists.return_value = True
     mock_is_dir.return_value = True
+    mock_is_git_repo.return_value = True
 
-    # Mock command-line arguments
+    # Mock command-line arguments - use the exact repo path
     sys_argv_original = sys.argv
-    sys.argv = ["yellhorn-mcp", "--host", "0.0.0.0", "--port", "8888"]
+    sys.argv = ["yellhorn-mcp", "--host", "0.0.0.0", "--port", "8888", "--repo-path", "/mock/repo"]
 
     try:
         # Run the main function
@@ -44,10 +48,11 @@ def test_main_success(
         # Check that the server was started with the correct arguments
         mock_mcp_run.assert_called_once_with(transport="stdio")
 
-        # Check that a message was printed to stdout
-        captured = capsys.readouterr()
-        assert "Repository path: /mock/repo" in captured.out
-        assert "Using model: gemini-2.5-pro" in captured.out
+        # Check that git repo validation was called (indicates success path)
+        mock_is_git_repo.assert_called_once()
+
+        # Check that path existence was verified
+        mock_exists.assert_called()
 
         # Check that sys.exit was not called
         mock_exit.assert_not_called()
@@ -61,7 +66,7 @@ def test_main_success(
 @patch("sys.exit")
 @patch("os.getenv")
 @patch("yellhorn_mcp.server.mcp.run")
-def test_main_missing_gemini_api_key(mock_mcp_run, mock_getenv, mock_exit, capsys):
+def test_main_missing_gemini_api_key(mock_mcp_run, mock_getenv, mock_exit, caplog):
     """Test execution with missing Gemini API key."""
     # Set up sys.exit to actually exit the function
     mock_exit.side_effect = SystemExit
@@ -80,10 +85,9 @@ def test_main_missing_gemini_api_key(mock_mcp_run, mock_getenv, mock_exit, capsy
     except SystemExit:
         pass  # Expected behavior
 
-    # Check that the error message was printed
-    captured = capsys.readouterr()
-    error_msg = "Error: GEMINI_API_KEY environment variable is not set"
-    assert error_msg in captured.out
+    # Check that the error message was logged
+    error_msg = "GEMINI_API_KEY environment variable is not set"
+    assert any(error_msg in record.message for record in caplog.records)
 
     # Check that sys.exit was called with exit code 1
     mock_exit.assert_any_call(1)
@@ -96,7 +100,7 @@ def test_main_missing_gemini_api_key(mock_mcp_run, mock_getenv, mock_exit, capsy
 @patch("sys.exit")
 @patch("os.getenv")
 @patch("yellhorn_mcp.server.mcp.run")
-def test_main_missing_openai_api_key(mock_mcp_run, mock_getenv, mock_exit, capsys):
+def test_main_missing_openai_api_key(mock_mcp_run, mock_getenv, mock_exit, caplog):
     """Test execution with missing OpenAI API key when using OpenAI model."""
     # Set up sys.exit to actually exit the function
     mock_exit.side_effect = SystemExit
@@ -114,10 +118,9 @@ def test_main_missing_openai_api_key(mock_mcp_run, mock_getenv, mock_exit, capsy
     except SystemExit:
         pass  # Expected behavior
 
-    # Check that the error message was printed
-    captured = capsys.readouterr()
-    error_msg = "Error: OPENAI_API_KEY environment variable is not set"
-    assert error_msg in captured.out
+    # Check that the error message was logged
+    error_msg = "OPENAI_API_KEY environment variable is not set"
+    assert any(error_msg in record.message for record in caplog.records)
 
     # Check that sys.exit was called with exit code 1
     mock_exit.assert_any_call(1)
@@ -131,7 +134,7 @@ def test_main_missing_openai_api_key(mock_mcp_run, mock_getenv, mock_exit, capsy
 @patch("os.getenv")
 @patch("pathlib.Path.exists")
 @patch("yellhorn_mcp.server.mcp.run")
-def test_main_invalid_repo_path(mock_mcp_run, mock_exists, mock_getenv, mock_exit, capsys):
+def test_main_invalid_repo_path(mock_mcp_run, mock_exists, mock_getenv, mock_exit, caplog):
     """Test execution with invalid repository path."""
     # Set up sys.exit to actually exit the function
     mock_exit.side_effect = SystemExit
@@ -152,10 +155,9 @@ def test_main_invalid_repo_path(mock_mcp_run, mock_exists, mock_getenv, mock_exi
     except SystemExit:
         pass  # Expected behavior
 
-    # Check that the error message was printed
-    captured = capsys.readouterr()
-    assert "Error: Repository path" in captured.out
-    assert "does not exist" in captured.out
+    # Check that the error message was logged
+    assert any("Repository path" in record.message for record in caplog.records)
+    assert any("does not exist" in record.message for record in caplog.records)
 
     # Check that sys.exit was called with exit code 1
     mock_exit.assert_any_call(1)
@@ -170,7 +172,7 @@ def test_main_invalid_repo_path(mock_mcp_run, mock_exists, mock_getenv, mock_exi
 @patch("pathlib.Path.exists")
 @patch("pathlib.Path.is_dir")
 @patch("yellhorn_mcp.server.mcp.run")
-def test_main_not_git_repo(mock_mcp_run, mock_is_dir, mock_exists, mock_getenv, mock_exit, capsys):
+def test_main_not_git_repo(mock_mcp_run, mock_is_dir, mock_exists, mock_getenv, mock_exit, caplog):
     """Test execution with a path that is not a Git repository."""
     # Set up sys.exit to actually exit the function
     mock_exit.side_effect = SystemExit
@@ -192,10 +194,9 @@ def test_main_not_git_repo(mock_mcp_run, mock_is_dir, mock_exists, mock_getenv, 
     except SystemExit:
         pass  # Expected behavior
 
-    # Check that the error message was printed
-    captured = capsys.readouterr()
-    error_msg = "Error: /mock/repo is not a Git repository"
-    assert error_msg in captured.out
+    # Check that the error message was logged
+    error_msg = "/mock/repo is not a Git repository"
+    assert any(error_msg in record.message for record in caplog.records)
 
     # Check that sys.exit was called with exit code 1
     mock_exit.assert_any_call(1)

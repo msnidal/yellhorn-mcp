@@ -4,6 +4,15 @@
 
 A Model Context Protocol (MCP) server that provides functionality to create detailed workplans to implement a task or feature. These workplans are generated with a large, powerful model (such as gemini 2.5 pro or even the o3 deep research API), insert your entire codebase into the context window by default, and can also access URL context and do web search depending on the model used. This pattern of creating workplans using a powerful reasoning model is highly useful for defining work to be done by code assistants like Claude Code or other MCP compatible coding agents, as well as providing a reference to reviewing the output of such coding models and ensure they meet the exactly specified original requirements.
 
+## What's New in v0.7.0
+
+- **🔄 Unified LLM Manager**: New centralized LLM management system with automatic retry logic and rate limit handling
+- **🧩 Smart Chunking**: Automatic prompt chunking for large codebases that exceed model context limits
+- **📊 Enhanced Token Counting**: Improved token counting with support for latest models (o3, o4-mini, gemini-2.5-pro)
+- **💰 Cost Tracking**: Comprehensive cost estimation and usage tracking across all supported models
+- **🔧 Reliability Improvements**: Exponential backoff retry for rate limits and transient failures
+- **⚡ Performance Optimizations**: Better handling of large prompts and improved response aggregation
+
 ## Features
 
 - **Create Workplans**: Creates detailed implementation plans based on a prompt and taking into consideration your entire codebase, posting them as GitHub issues and exposing them as MCP resources for your coding agent
@@ -12,6 +21,10 @@ A Model Context Protocol (MCP) server that provides functionality to create deta
 - **Context Control**: Use `.yellhornignore` files to exclude specific files and directories from the AI context, similar to `.gitignore`
 - **MCP Resources**: Exposes workplans as standard MCP resources for easy listing and retrieval
 - **Google Search Grounding**: Enabled by default for Gemini models, providing search capabilities with automatically formatted citations in Markdown
+- **Automatic Chunking**: Handles large codebases that exceed model context limits by intelligently splitting prompts
+- **Rate Limit Handling**: Robust retry logic with exponential backoff for rate limits and transient failures
+- **Cost Tracking**: Real-time cost estimation and usage tracking for all API calls
+- **Multi-Model Support**: Unified interface supporting OpenAI (GPT-4o, o3, o4-mini) and Gemini (2.5-pro, 2.5-flash) models
 
 ## Installation
 
@@ -33,9 +46,10 @@ The server requires the following environment variables:
 - `OPENAI_API_KEY`: Your OpenAI API key (required for OpenAI models)
 - `REPO_PATH`: Path to your repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL`: Model to use (defaults to "gemini-2.5-pro"). Available options:
-  - Gemini models: "gemini-2.5-pro", "gemini-2.5-flash"
-  - OpenAI models: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "o3-deep-research", "o4-mini-deep-research"
-  - Note: Deep Research models use `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
+  - **Gemini models**: "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"
+  - **OpenAI models**: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "gpt-4.1"
+  - **Deep Research models**: "o3-deep-research", "o4-mini-deep-research"
+  - Note: Deep Research models automatically enable `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
 - `YELLHORN_MCP_SEARCH`: Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models
@@ -93,6 +107,40 @@ To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json
 ```
 
 ## Tools
+
+### curate_context
+
+Analyzes the codebase and creates a `.yellhorncontext` file listing directories to be included in AI context. This tool helps optimize AI context by understanding the task you want to accomplish and creating a whitelist of relevant directories, significantly reducing token usage and improving AI focus on relevant code.
+
+**Input**:
+
+- `user_task`: Description of the task you want to accomplish
+- `codebase_reasoning`: (optional) Control the level of codebase analysis:
+  - `"file_structure"`: (default) Basic file structure analysis (fastest)
+  - `"lsp"`: Function signatures and docstrings only (lighter weight)
+  - `"full"`: Complete file contents (most comprehensive)
+  - `"none"`: No codebase context
+- `ignore_file_path`: (optional) Path to ignore file (defaults to `.yellhornignore`)
+- `output_path`: (optional) Output path for context file (defaults to `.yellhorncontext`)
+- `depth_limit`: (optional) Maximum directory depth to analyze (0 = no limit)
+- `disable_search_grounding`: (optional) If set to `true`, disables Google Search Grounding for this request
+
+**Output**:
+
+- JSON string containing:
+  - `context_file_path`: Path to the created `.yellhorncontext` file
+  - `directories_included`: Number of directories included in the context
+  - `files_analyzed`: Number of files analyzed during curation
+
+The `.yellhorncontext` file acts as a whitelist - only files matching the patterns will be included in subsequent workplan/judgement calls. This significantly reduces token usage and improves AI focus on relevant code.
+
+**Example `.yellhorncontext` output**:
+```
+src/api/
+src/models/
+tests/api/
+*.config.js
+```
 
 ### create_workplan
 
