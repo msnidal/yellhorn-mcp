@@ -13,7 +13,7 @@ from unittest.mock import mock_open, patch
 
 import pytest
 
-from yellhorn_mcp.server import format_codebase_for_prompt
+from yellhorn_mcp.formatters import format_codebase_for_prompt
 from yellhorn_mcp.utils.lsp_utils import (
     extract_go_api,
     extract_python_api,

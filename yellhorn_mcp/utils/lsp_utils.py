@@ -465,7 +465,7 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
         Tuple of (file list, file contents dictionary), where contents contain
         API signatures, class attributes, and docstrings as plain text (no code fences)
     """
-    from yellhorn_mcp.processors.workplan_processor import get_codebase_snapshot
+    from yellhorn_mcp.formatters import get_codebase_snapshot
 
     # Reuse logic to get paths while respecting ignores
     # The "_mode" parameter is internal and not documented, but used to

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from yellhorn_mcp.processors.workplan_processor import get_codebase_snapshot
+from yellhorn_mcp.formatters import get_codebase_snapshot
 
 
 @pytest.mark.asyncio

@@ -809,7 +809,7 @@ from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment as add_github_issue_comment,
 )
 from yellhorn_mcp.processors.judgement_processor import get_git_diff
-from yellhorn_mcp.processors.workplan_processor import (
+from yellhorn_mcp.formatters import (
     build_file_structure_context,
     format_codebase_for_prompt,
     get_codebase_snapshot,

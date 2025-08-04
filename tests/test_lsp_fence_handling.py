@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from yellhorn_mcp.server import format_codebase_for_prompt
+from yellhorn_mcp.formatters import format_codebase_for_prompt
 from yellhorn_mcp.utils.lsp_utils import _fence, get_lsp_snapshot
 
 

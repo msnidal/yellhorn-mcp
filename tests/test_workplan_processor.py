@@ -9,12 +9,14 @@ import pytest
 from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 from yellhorn_mcp.processors.workplan_processor import (
     _generate_and_update_issue,
-    _get_codebase_context,
+    process_revision_async,
+    process_workplan_async,
+)
+from yellhorn_mcp.formatters import (
     build_file_structure_context,
     format_codebase_for_prompt,
     get_codebase_snapshot,
-    process_revision_async,
-    process_workplan_async,
+    get_codebase_context,
 )
 
 
@@ -248,10 +250,10 @@ class TestFormatCodebaseForPrompt:
 
 
 class TestGetCodebaseContext:
-    """Test suite for _get_codebase_context function."""
+    """Test suite for get_codebase_context function."""
 
     @pytest.mark.asyncio
-    async def test_get_codebase_context_full(self, tmp_path):
+    async def testget_codebase_context_full(self, tmp_path):
         """Test getting full codebase context."""
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
@@ -263,14 +265,14 @@ class TestGetCodebaseContext:
         ) as mock_snapshot:
             mock_snapshot.return_value = (["main.py"], {"main.py": "print('hello')"})
 
-            result = await _get_codebase_context(repo_path, "full", print)
+            result = await get_codebase_context(repo_path, "full", print)
 
             assert "<codebase_tree>" in result
             assert "<file_contents>" in result
             assert "print('hello')" in result
 
     @pytest.mark.asyncio
-    async def test_get_codebase_context_file_structure(self, tmp_path):
+    async def testget_codebase_context_file_structure(self, tmp_path):
         """Test getting file structure context."""
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
@@ -280,14 +282,14 @@ class TestGetCodebaseContext:
         ) as mock_snapshot:
             mock_snapshot.return_value = (["main.py"], {})
 
-            result = await _get_codebase_context(repo_path, "file_structure", print)
+            result = await get_codebase_context(repo_path, "file_structure", print)
 
             assert "<codebase_tree>" in result
             assert "main.py" in result
             assert "<file_contents>" not in result
 
     @pytest.mark.asyncio
-    async def test_get_codebase_context_lsp(self, tmp_path):
+    async def testget_codebase_context_lsp(self, tmp_path):
         """Test getting LSP context."""
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
@@ -295,17 +297,17 @@ class TestGetCodebaseContext:
         with patch("yellhorn_mcp.utils.lsp_utils.get_lsp_snapshot") as mock_lsp_snapshot:
             mock_lsp_snapshot.return_value = (["main.py"], {"main.py": "def main(): pass"})
 
-            result = await _get_codebase_context(repo_path, "lsp", print)
+            result = await get_codebase_context(repo_path, "lsp", print)
 
             assert "def main(): pass" in result
 
     @pytest.mark.asyncio
-    async def test_get_codebase_context_none(self, tmp_path):
+    async def testget_codebase_context_none(self, tmp_path):
         """Test getting no context."""
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
 
-        result = await _get_codebase_context(repo_path, "none", print)
+        result = await get_codebase_context(repo_path, "none", print)
 
         assert result == ""
 
@@ -606,7 +608,7 @@ class TestProcessWorkplanAsync:
 
         with (
             patch(
-                "yellhorn_mcp.processors.workplan_processor._get_codebase_context"
+                "yellhorn_mcp.processors.workplan_processor.get_codebase_context"
             ) as mock_codebase,
             patch(
                 "yellhorn_mcp.processors.workplan_processor._generate_and_update_issue"
@@ -652,7 +654,7 @@ class TestProcessWorkplanAsync:
         mock_ctx.log = AsyncMock()
 
         with patch(
-            "yellhorn_mcp.processors.workplan_processor._get_codebase_context"
+            "yellhorn_mcp.processors.workplan_processor.get_codebase_context"
         ) as mock_codebase:
             mock_codebase.side_effect = Exception("Codebase error")
 
@@ -706,7 +708,7 @@ class TestProcessRevisionAsync:
 
         with (
             patch(
-                "yellhorn_mcp.processors.workplan_processor._get_codebase_context"
+                "yellhorn_mcp.processors.workplan_processor.get_codebase_context"
             ) as mock_codebase,
             patch(
                 "yellhorn_mcp.processors.workplan_processor._generate_and_update_issue"
@@ -753,7 +755,7 @@ class TestProcessRevisionAsync:
         mock_ctx.log = AsyncMock()
 
         with patch(
-            "yellhorn_mcp.processors.workplan_processor._get_codebase_context"
+            "yellhorn_mcp.processors.workplan_processor.get_codebase_context"
         ) as mock_codebase:
             mock_codebase.side_effect = Exception("Codebase error")
 
@@ -808,7 +810,7 @@ class TestProcessRevisionAsync:
         for original_workplan, expected_title in test_cases:
             with (
                 patch(
-                    "yellhorn_mcp.processors.workplan_processor._get_codebase_context"
+                    "yellhorn_mcp.processors.workplan_processor.get_codebase_context"
                 ) as mock_codebase,
                 patch(
                     "yellhorn_mcp.processors.workplan_processor._generate_and_update_issue"
