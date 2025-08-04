@@ -1,8 +1,7 @@
 """Formatters package for codebase processing and formatting utilities."""
 
 from .codebase_snapshot import get_codebase_snapshot
-from .file_structure import build_file_structure_context
-from .prompt_formatter import format_codebase_for_prompt
+from .prompt_formatter import format_codebase_for_prompt, build_file_structure_context
 from .context_fetcher import get_codebase_context
 
 __all__ = [

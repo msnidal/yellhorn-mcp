@@ -22,11 +22,8 @@ from yellhorn_mcp.integrations.github_integration import (
 )
 from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
-from yellhorn_mcp.processors.workplan_processor import (
-    build_file_structure_context,
-    format_codebase_for_prompt,
-    get_codebase_snapshot,
-)
+from yellhorn_mcp.token_counter import TokenCounter
+from yellhorn_mcp.formatters.context_fetcher import get_codebase_context
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
@@ -139,24 +136,22 @@ async def process_judgement_async(
             if ctx:
                 asyncio.create_task(ctx.log(level="info", message=msg))
 
-        if codebase_reasoning == "lsp":
-            # Import LSP utilities
-            from yellhorn_mcp.utils.lsp_utils import get_lsp_snapshot
-
-            file_paths, file_contents = await get_lsp_snapshot(repo_path)
-            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
-
-        elif codebase_reasoning == "file_structure":
-            file_paths, _ = await get_codebase_snapshot(
-                repo_path, _mode="paths", log_function=context_log
+        # Use get_codebase_context for all reasoning modes
+        if codebase_reasoning in ["lsp", "file_structure", "full"]:
+            # Calculate token limit for codebase context
+            token_counter = TokenCounter()
+            model_limit = token_counter.get_model_limit(model)
+            # Reserve tokens for prompt template, workplan, diff, and response
+            # Estimate: prompt template ~1000, workplan ~2000, diff ~2000, safety margin ~4000
+            codebase_token_limit = int((model_limit - 9000) * 0.7)
+            
+            codebase_info = await get_codebase_context(
+                repo_path, 
+                codebase_reasoning, 
+                context_log,
+                token_limit=codebase_token_limit,
+                model=model
             )
-            codebase_info = build_file_structure_context(file_paths)
-
-        elif codebase_reasoning == "full":
-            file_paths, file_contents = await get_codebase_snapshot(
-                repo_path, log_function=context_log
-            )
-            codebase_info = await format_codebase_for_prompt(file_paths, file_contents)
 
         # Construct prompt
         prompt = f"""You are an expert software reviewer tasked with judging whether a code diff successfully implements a given workplan.

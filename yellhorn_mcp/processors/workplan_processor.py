@@ -21,6 +21,7 @@ from yellhorn_mcp.integrations.github_integration import (
 )
 from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
+from yellhorn_mcp.token_counter import TokenCounter
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
@@ -283,7 +284,20 @@ async def process_workplan_async(
                 asyncio.create_task(ctx.log(level="info", message=msg))
 
         # Get codebase info based on reasoning mode
-        codebase_info = await get_codebase_context(repo_path, codebase_reasoning, context_log)
+        # Calculate token limit for codebase context (70% of model's context window)
+        token_counter = TokenCounter()
+        model_limit = token_counter.get_model_limit(model)
+        # Reserve tokens for prompt template, task details, and response
+        # Estimate: prompt template ~1000, task details ~500, safety margin for response ~4000
+        codebase_token_limit = int((model_limit - 5500) * 0.7)
+        
+        codebase_info = await get_codebase_context(
+            repo_path, 
+            codebase_reasoning, 
+            context_log, 
+            token_limit=codebase_token_limit,
+            model=model
+        )
 
         # Construct prompt
         prompt = f"""You are an expert software developer tasked with creating a detailed workplan that will be published as a GitHub issue.
@@ -427,7 +441,20 @@ async def process_revision_async(
                 asyncio.create_task(ctx.log(level="info", message=msg))
 
         # Get codebase info based on reasoning mode
-        codebase_info = await get_codebase_context(repo_path, codebase_reasoning, context_log)
+        # Calculate token limit for codebase context (70% of model's context window)
+        token_counter = TokenCounter()
+        model_limit = token_counter.get_model_limit(model)
+        # Reserve tokens for prompt template, task details, and response
+        # Estimate: prompt template ~1000, task details ~500, safety margin for response ~4000
+        codebase_token_limit = int((model_limit - 5500) * 0.7)
+        
+        codebase_info = await get_codebase_context(
+            repo_path, 
+            codebase_reasoning, 
+            context_log, 
+            token_limit=codebase_token_limit,
+            model=model
+        )
 
         # Extract title from original workplan (assumes first line is # Title)
         title_line = original_workplan.split("\n")[0] if original_workplan else ""

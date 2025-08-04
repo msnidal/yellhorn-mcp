@@ -15,11 +15,8 @@ from typing import Any, List, Optional, Set
 from mcp.server.fastmcp import Context
 
 from yellhorn_mcp.llm_manager import LLMManager
-from yellhorn_mcp.processors.workplan_processor import (
-    build_file_structure_context,
-    format_codebase_for_prompt,
-    get_codebase_snapshot,
-)
+from yellhorn_mcp.formatters.codebase_snapshot import get_codebase_snapshot
+from yellhorn_mcp.formatters.prompt_formatter import format_codebase_for_prompt, build_file_structure_context
 from yellhorn_mcp.utils.git_utils import YellhornMCPError
 
 
