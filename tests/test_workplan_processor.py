@@ -265,11 +265,12 @@ class TestGetCodebaseContext:
         ) as mock_snapshot:
             mock_snapshot.return_value = (["main.py"], {"main.py": "print('hello')"})
 
-            result = await get_codebase_context(repo_path, "full", print)
+            result, file_paths = await get_codebase_context(repo_path, "full", print)
 
             assert "<codebase_tree>" in result
             assert "<file_contents>" in result
             assert "print('hello')" in result
+            assert "main.py" in file_paths
 
     @pytest.mark.asyncio
     async def testget_codebase_context_file_structure(self, tmp_path):
@@ -282,11 +283,12 @@ class TestGetCodebaseContext:
         ) as mock_snapshot:
             mock_snapshot.return_value = (["main.py"], {})
 
-            result = await get_codebase_context(repo_path, "file_structure", print)
+            result, file_paths = await get_codebase_context(repo_path, "file_structure", print)
 
             assert "<codebase_tree>" in result
             assert "main.py" in result
             assert "<file_contents>" not in result
+            assert "main.py" in file_paths
 
     @pytest.mark.asyncio
     async def testget_codebase_context_lsp(self, tmp_path):
@@ -297,9 +299,10 @@ class TestGetCodebaseContext:
         with patch("yellhorn_mcp.utils.lsp_utils.get_lsp_snapshot") as mock_lsp_snapshot:
             mock_lsp_snapshot.return_value = (["main.py"], {"main.py": "def main(): pass"})
 
-            result = await get_codebase_context(repo_path, "lsp", print)
+            result, file_paths = await get_codebase_context(repo_path, "lsp", print)
 
             assert "def main(): pass" in result
+            assert "main.py" in file_paths
 
     @pytest.mark.asyncio
     async def testget_codebase_context_none(self, tmp_path):
@@ -307,9 +310,10 @@ class TestGetCodebaseContext:
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
 
-        result = await get_codebase_context(repo_path, "none", print)
+        result, file_paths = await get_codebase_context(repo_path, "none", print)
 
         assert result == ""
+        assert file_paths == []
 
 
 class TestGenerateAndUpdateIssue:

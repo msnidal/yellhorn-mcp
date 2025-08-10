@@ -71,7 +71,7 @@ async def build_codebase_context(
         file_count = len(directory_context.split("\n")) if directory_context else 0
         await ctx.log(
             level="info",
-            message=f"Codebase context metrics: {file_count} lines, {token_count} tokens ({model})",
+            message=f"Codebase context metrics: {file_count} files, {token_count} tokens based on ({model})",
         )
 
     # Extract directories from file paths
@@ -211,9 +211,15 @@ async def parse_llm_directories(
         # Look for file extensions or dot files
         path_parts = path.split("/")
         last_part = path_parts[-1]
+        # Check for common file extensions or dot files, but exclude prose text
         if (
-            "." in last_part and not last_part.endswith("/") and 
-            (last_part.count(".") == 1 or last_part.startswith("."))
+            "." in last_part
+            and not last_part.endswith("/")
+            and (last_part.count(".") == 1 or last_part.startswith("."))
+            and not any(
+                word in path.lower()
+                for word in ["found", "error", "directory", "directories", "important"]
+            )
         ):
             # This looks like a file (has extension or is a dot file)
             matched.add(path)
@@ -307,13 +313,44 @@ async def save_context_file(
     final_content += f"# Based on task: {user_task[:80]}\n\n"
 
     # Sort directories for consistent output
-    sorted_important_dirs = sorted(list(all_important_dirs))
+    # Separate files from directories
+    important_dirs = set()
+    important_files = set()
+    
+    for item in all_important_dirs:
+        # Check if this looks like a file (has extension or is a dot file)
+        if "/" in item:
+            parts = item.split("/")
+            last_part = parts[-1]
+            is_file = (
+                "." in last_part
+                and not last_part.endswith("/")
+                and (last_part.count(".") == 1 or last_part.startswith("."))
+            )
+        else:
+            is_file = (
+                "." in item
+                and (item.count(".") == 1 or item.startswith("."))
+            )
+            
+        if is_file:
+            important_files.add(item)
+        else:
+            important_dirs.add(item)
+    
+    sorted_important_dirs = sorted(list(important_dirs))
+    sorted_important_files = sorted(list(important_files))
 
-    # Convert directories to patterns
-    if sorted_important_dirs:
+    # Generate .yellhorncontext file content
+    if sorted_important_dirs or sorted_important_files:
         final_content += "# Important directories to specifically include\n"
         dir_includes = []
+        
+        # Add specific files first
+        for file_path in sorted_important_files:
+            dir_includes.append(file_path)
 
+        # Add directories
         for dir_path in sorted_important_dirs:
             # Check if directory has files
             has_files = False
@@ -366,7 +403,7 @@ async def save_context_file(
                 message=f"Successfully wrote .yellhorncontext file to {output_file_path}",
             )
 
-        return f"Successfully created .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories."
+        return f"Successfully created .yellhorncontext file at {output_file_path} with {len(sorted_important_files)} files and {len(sorted_important_dirs)} directories."
 
     except Exception as e:
         raise YellhornMCPError(f"Failed to write .yellhorncontext file: {str(e)}")

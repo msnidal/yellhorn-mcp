@@ -493,7 +493,6 @@ async def curate_context(
     codebase_reasoning: str = "file_structure",
     ignore_file_path: str = ".yellhornignore",
     output_path: str = ".yellhorncontext",
-    depth_limit: int = 0,
     disable_search_grounding: bool = False,
     debug: bool = False,
 ) -> str:

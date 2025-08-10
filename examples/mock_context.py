@@ -585,7 +585,6 @@ async def run_curate_context(
             codebase_reasoning=codebase_reasoning,
             ignore_file_path=ignore_file_path,
             output_path=output_path,
-            depth_limit=depth_limit,
             disable_search_grounding=disable_search_grounding,
             debug=debug
         )
