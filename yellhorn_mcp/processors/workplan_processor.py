@@ -294,7 +294,7 @@ async def process_workplan_async(
         # Estimate: prompt template ~1000, task details ~500, safety margin for response ~4000
         codebase_token_limit = int((model_limit - 5500) * 0.7)
         
-        codebase_info = await get_codebase_context(
+        codebase_info, _ = await get_codebase_context(
             repo_path, 
             codebase_reasoning, 
             context_log, 
@@ -530,7 +530,7 @@ async def process_revision_async(
         # Estimate: prompt template ~1000, task details ~500, safety margin for response ~4000
         codebase_token_limit = int((model_limit - 5500) * 0.7)
         
-        codebase_info = await get_codebase_context(
+        codebase_info, _ = await get_codebase_context(
             repo_path, 
             codebase_reasoning, 
             context_log, 

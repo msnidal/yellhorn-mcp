@@ -148,7 +148,7 @@ async def process_judgement_async(
             # Estimate: prompt template ~1000, workplan ~2000, diff ~2000, safety margin ~4000
             codebase_token_limit = int((model_limit - 9000) * 0.7)
             
-            codebase_info = await get_codebase_context(
+            codebase_info, _ = await get_codebase_context(
                 repo_path, 
                 codebase_reasoning, 
                 context_log,

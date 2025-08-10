@@ -548,8 +548,6 @@ async def curate_context(
             user_task=user_task,
             output_path=output_path,
             codebase_reasoning=codebase_reasoning,
-            ignore_file_path=ignore_file_path,
-            depth_limit=depth_limit,
             debug=debug,
             ctx=ctx,
         )
