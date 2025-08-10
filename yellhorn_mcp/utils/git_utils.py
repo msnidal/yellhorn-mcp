@@ -22,13 +22,41 @@ class YellhornMCPError(Exception):
     pass
 
 
-async def run_git_command(repo_path: Path, command: list[str]) -> str:
+def run_git_command_with_set_cwd(cwd: Path):
+    """
+    Create a lambda function that sets the cwd and calls run_git_command.
+    
+    Args:
+        cwd: Path to use as the current working directory.
+        
+    Returns:
+        A lambda function that takes repo_path and command and calls run_git_command with the set cwd.
+    """
+    return lambda _, command: run_git_command(repo_path=cwd, command=command)
+
+def run_github_command_with_set_cwd(cwd: Path):
+    """
+    Create a lambda function that sets the cwd and calls run_git_command.
+    
+    Args:
+        cwd: Path to use as the current working directory.
+        
+    Returns:
+        A lambda function that takes repo_path and command and calls run_git_command with the set cwd.
+    """
+    return lambda _, command: run_github_command(repo_path=cwd, command=command)
+
+
+async def run_git_command(
+    repo_path: Path, command: list[str], git_command_func: Callable | None = None
+) -> str:
     """
     Run a Git command in the repository.
 
     Args:
         repo_path: Path to the repository.
         command: Git command to run.
+        git_command_func: Optional Git command function (for mocking).
 
     Returns:
         Command output as string.
@@ -36,6 +64,11 @@ async def run_git_command(repo_path: Path, command: list[str]) -> str:
     Raises:
         YellhornMCPError: If the command fails.
     """
+    # Use the provided function if available (for mocking)
+    if git_command_func:
+        return await git_command_func(repo_path, command)
+    
+    # Otherwise use the default Git command
     try:
         proc = await asyncio.create_subprocess_exec(
             "git",
@@ -72,28 +105,28 @@ async def run_github_command(
     Raises:
         YellhornMCPError: If the command fails.
     """
+    # Use the provided function if available (for mocking)
+    if github_command_func:
+        return await github_command_func(repo_path, command)
+    
+    # Otherwise use the default GitHub CLI command
     try:
-        if github_command_func:
-            # Use the provided function for mocking
-            return await github_command_func(repo_path, command)
-        else:
-            # Use the default GitHub CLI command
-            env = os.environ.copy()
-            proc = await asyncio.create_subprocess_exec(
-                "gh",
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=repo_path,
-                env=env,
-            )
-            stdout, stderr = await proc.communicate()
+        env = os.environ.copy()
+        proc = await asyncio.create_subprocess_exec(
+            "gh",
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=repo_path,
+            env=env,
+        )
+        stdout, stderr = await proc.communicate()
 
-            if proc.returncode != 0:
-                error_msg = stderr.decode("utf-8").strip()
-                raise YellhornMCPError(f"GitHub CLI command failed: {error_msg}")
+        if proc.returncode != 0:
+            error_msg = stderr.decode("utf-8").strip()
+            raise YellhornMCPError(f"GitHub CLI command failed: {error_msg}")
 
-            return stdout.decode("utf-8").strip()
+        return stdout.decode("utf-8").strip()
     except FileNotFoundError:
         raise YellhornMCPError("GitHub CLI not found. Please ensure GitHub CLI is installed.")
 

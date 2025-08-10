@@ -16,6 +16,57 @@ from yellhorn_mcp.server import (
 )
 
 
+async def mock_git_command(repo_path: Path, command: list[str]) -> str:
+    """
+    Mock Git command that prints the command and returns mock responses.
+    
+    Args:
+        repo_path: Path to the repository
+        command: Git command to run
+        
+    Returns:
+        Mock response based on the command type
+    """
+    print(f"[MOCK Git] Running: git {' '.join(command)}")
+    print(f"[MOCK Git] In directory: {repo_path}")
+    
+    # Generate mock responses based on command type
+    if command[0] == "rev-parse":
+        # Mock commit hash
+        response = "abc123def456789012345678901234567890abcd"
+        print(f"[MOCK Git] Commit hash: {response}")
+        return response
+    elif command[0] == "diff":
+        # Mock diff output
+        if "--name-only" in command:
+            response = "file1.py\nfile2.py\nfile3.py"
+            print(f"[MOCK Git] Changed files: {response}")
+        else:
+            response = "diff --git a/file.py b/file.py\nindex 1234567..abcdefg 100644\n--- a/file.py\n+++ b/file.py\n@@ -1,3 +1,3 @@\n-old line\n+new line"
+            print(f"[MOCK Git] Diff output generated")
+        return response
+    elif command[0] == "ls-files":
+        # Mock file listing
+        response = "src/main.py\nsrc/utils.py\ntests/test_main.py\nREADME.md"
+        print(f"[MOCK Git] Files listed")
+        return response
+    elif command[0] == "show-ref":
+        # Mock ref check
+        response = "abc123def456789012345678901234567890abcd refs/heads/main"
+        print(f"[MOCK Git] Ref found")
+        return response
+    elif command[0] == "remote" and command[1] == "show":
+        # Mock remote info
+        response = "* remote origin\n  Fetch URL: https://github.com/mock/repo.git\n  Push  URL: https://github.com/mock/repo.git\n  HEAD branch: main"
+        print(f"[MOCK Git] Remote info")
+        return response
+    
+    # Default response for unknown commands
+    response = f"Mock git response for: {' '.join(command)}"
+    print(f"[MOCK Git] Response: {response}")
+    return response
+
+
 async def mock_github_command(repo_path: Path, command: list[str]) -> str:
     """
     Mock GitHub CLI command that prints the command and returns mock responses.
@@ -164,7 +215,8 @@ class MockLifespanContext:
         llm_manager: Any = None,
         model: str = "gemini-2.5-pro-preview-05-06",
         use_search_grounding: bool = False,
-        github_command_func: Callable = None
+        github_command_func: Callable = None,
+        git_command_func: Callable = None
     ):
         """
         Initialize mock lifespan context.
@@ -177,6 +229,7 @@ class MockLifespanContext:
             model: Model name to use
             use_search_grounding: Whether to use search grounding
             github_command_func: Function to use for GitHub CLI commands (can be mock or real)
+            git_command_func: Function to use for Git commands (can be mock or real)
         """
         self.repo_path = Path(repo_path or os.getcwd())
         self.gemini_client = gemini_client
@@ -185,6 +238,7 @@ class MockLifespanContext:
         self.model = model
         self.use_search_grounding = use_search_grounding
         self.github_command_func = github_command_func or mock_github_command
+        self.git_command_func = git_command_func or mock_git_command
         self.codebase_reasoning = "full"
         self._other_values = {}
         
@@ -204,6 +258,8 @@ class MockLifespanContext:
             return self.use_search_grounding
         elif key == "github_command_func":
             return self.github_command_func
+        elif key == "git_command_func":
+            return self.git_command_func
         elif key == "codebase_reasoning":
             return self.codebase_reasoning
         else:
@@ -225,6 +281,8 @@ class MockLifespanContext:
             self.use_search_grounding = value
         elif key == "github_command_func":
             self.github_command_func = value
+        elif key == "git_command_func":
+            self.git_command_func = value
         elif key == "codebase_reasoning":
             self.codebase_reasoning = value
         else:
@@ -263,6 +321,7 @@ class MockContext:
         model: str = "gemini-2.5-pro-preview-05-06",
         use_search_grounding: bool = False,
         github_command_func: Callable = None,
+        git_command_func: Callable = None,
         log_callback: Callable[[str, str], None] = None
     ):
         """
@@ -276,6 +335,7 @@ class MockContext:
             model: Model name to use
             use_search_grounding: Whether to use search grounding
             github_command_func: Function to use for GitHub CLI commands (can be mock or real)
+            git_command_func: Function to use for Git commands (can be mock or real)
             log_callback: Optional callback for log messages
         """
         self.lifespan_context = MockLifespanContext(
@@ -285,7 +345,8 @@ class MockContext:
             llm_manager=llm_manager,
             model=model,
             use_search_grounding=use_search_grounding,
-            github_command_func=github_command_func
+            github_command_func=github_command_func,
+            git_command_func=git_command_func
         )
         self.request_context = MockRequestContext(self.lifespan_context)
         self.log_callback = log_callback
@@ -308,16 +369,17 @@ class MockContext:
 async def run_create_workplan(
     title: str,
     detailed_description: str,
-    repo_path: str = None,
-    gemini_client: Any = None,
-    openai_client: Any = None,
-    llm_manager: Any = None,
-    model: str = "gemini-2.5-pro-preview-05-06",
-    codebase_reasoning: str = "none",
+    repo_path: str,
+    gemini_client: Any,
+    openai_client: Any,
+    llm_manager: Any,
+    model: str,
+    codebase_reasoning: str,
     debug: bool = False,
     disable_search_grounding: bool = False,
-    github_command_func: Callable = None,
-    log_callback: Callable[[str, str], None] = None,
+    github_command_func: Callable | None = None,
+    git_command_func: Callable | None = None,
+    log_callback: Callable[[str, str], None] | None = None,
     wait_for_background_tasks: bool = True,
     background_task_timeout: Optional[float] = 60.0
 ) -> Dict[str, str]:
@@ -336,6 +398,7 @@ async def run_create_workplan(
         debug: Debug mode
         disable_search_grounding: Whether to disable search grounding
         github_command_func: Function to use for GitHub CLI commands (None = use mock, or pass real run_github_command)
+        git_command_func: Function to use for Git commands (None = use mock, or pass real run_git_command)
         log_callback: Optional callback for log messages
         wait_for_background_tasks: Whether to wait for background tasks to complete
         background_task_timeout: Timeout for waiting on background tasks (seconds)
@@ -352,6 +415,7 @@ async def run_create_workplan(
         model=model,
         use_search_grounding=(not disable_search_grounding),
         github_command_func=github_command_func,
+        git_command_func=git_command_func,
         log_callback=log_callback
     )
     
@@ -386,6 +450,7 @@ async def run_create_workplan(
             _meta=_meta,
             ctx=ctx,
             github_command_func=github_command_func,
+            git_command_func=git_command_func,
         )
         
         # Create result dict similar to what the MCP tool would return
@@ -422,6 +487,7 @@ async def run_get_workplan(
     issue_number: str,
     repo_path: str = None,
     github_command_func: Callable = None,
+    git_command_func: Callable = None,
     log_callback: Callable[[str, str], None] = None
 ) -> str:
     """
@@ -432,6 +498,7 @@ async def run_get_workplan(
         issue_number: GitHub issue number
         repo_path: Repository path
         github_command_func: Function to use for GitHub CLI commands (None = use mock, or pass real run_github_command)
+        git_command_func: Function to use for Git commands (None = use mock, or pass real run_git_command)
         log_callback: Optional callback for log messages
         
     Returns:
@@ -441,6 +508,7 @@ async def run_get_workplan(
     ctx = MockContext(
         repo_path=repo_path,
         github_command_func=github_command_func,
+        git_command_func=git_command_func,
         log_callback=log_callback
     )
     
@@ -460,7 +528,9 @@ async def run_curate_context(
     output_path: str = ".yellhorncontext",
     depth_limit: int = 0,
     disable_search_grounding: bool = False,
+    debug: bool = False,
     github_command_func: Callable = None,
+    git_command_func: Callable = None,
     log_callback: Callable[[str, str], None] = None,
     wait_for_background_tasks: bool = True,
     background_task_timeout: Optional[float] = 60.0
@@ -480,7 +550,9 @@ async def run_curate_context(
         output_path: Path where the .yellhorncontext file will be created
         depth_limit: Maximum directory depth to analyze (0 means no limit)
         disable_search_grounding: Whether to disable search grounding
+        debug: Whether to log the full prompt sent to the LLM
         github_command_func: Function to use for GitHub CLI commands (None = use mock, or pass real run_github_command)
+        git_command_func: Function to use for Git commands (None = use mock, or pass real run_git_command)
         log_callback: Optional callback for log messages
         wait_for_background_tasks: Whether to wait for background tasks to complete
         background_task_timeout: Timeout for waiting on background tasks (seconds)
@@ -497,6 +569,7 @@ async def run_curate_context(
         model=model,
         use_search_grounding=(not disable_search_grounding),
         github_command_func=github_command_func,
+        git_command_func=git_command_func,
         log_callback=log_callback
     )
     
@@ -513,7 +586,8 @@ async def run_curate_context(
             ignore_file_path=ignore_file_path,
             output_path=output_path,
             depth_limit=depth_limit,
-            disable_search_grounding=disable_search_grounding
+            disable_search_grounding=disable_search_grounding,
+            debug=debug
         )
         
         # Wait for background tasks if requested
@@ -550,6 +624,7 @@ async def run_revise_workplan(
     debug: bool = False,
     disable_search_grounding: bool = False,
     github_command_func: Callable = None,
+    git_command_func: Callable = None,
     log_callback: Callable[[str, str], None] = None,
     wait_for_background_tasks: bool = True,
     background_task_timeout: Optional[float] = 60.0
@@ -586,6 +661,7 @@ async def run_revise_workplan(
         model=model,
         use_search_grounding=(not disable_search_grounding),
         github_command_func=github_command_func,
+        git_command_func=git_command_func,
         log_callback=log_callback
     )
     
@@ -613,7 +689,8 @@ async def run_revise_workplan(
             disable_search_grounding=disable_search_grounding,
             _meta=_meta,
             ctx=ctx,
-            github_command_func=github_command_func
+            github_command_func=github_command_func,
+            git_command_func=git_command_func
         )
         
         # Create result dict similar to what the MCP tool would return
@@ -663,6 +740,7 @@ async def run_judge_workplan(
     codebase_reasoning: str = "full",
     disable_search_grounding: bool = False,
     github_command_func: Callable = None,
+    git_command_func: Callable = None,
     log_callback: Callable[[str, str], None] = None,
     wait_for_background_tasks: bool = True,
     background_task_timeout: Optional[float] = 60.0
@@ -689,6 +767,7 @@ async def run_judge_workplan(
         codebase_reasoning: The mode for codebase reasoning ("full", "lsp", "file_structure", "none")
         disable_search_grounding: Whether to disable search grounding
         github_command_func: Function to use for GitHub CLI commands (None = use mock, or pass real run_github_command)
+        git_command_func: Function to use for Git commands (None = use mock, or pass real run_git_command)
         log_callback: Optional callback for log messages
         wait_for_background_tasks: Whether to wait for background tasks to complete
         background_task_timeout: Timeout for waiting on background tasks (seconds)
@@ -707,6 +786,7 @@ async def run_judge_workplan(
         model=model,
         use_search_grounding=(not disable_search_grounding),
         github_command_func=github_command_func,
+        git_command_func=git_command_func,
         log_callback=log_callback
     )
     
@@ -740,6 +820,7 @@ async def run_judge_workplan(
             _meta=_meta,
             ctx=ctx,
             github_command_func=github_command_func,
+            git_command_func=git_command_func,
         )
         
         # Wait for background tasks if requested

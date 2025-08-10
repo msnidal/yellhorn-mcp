@@ -28,7 +28,6 @@ from yellhorn_mcp.utils.comment_utils import (
     format_submission_comment,
 )
 from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
-from yellhorn_mcp.utils.git_utils import YellhornMCPError, run_git_command
 from yellhorn_mcp.formatters import (
     get_codebase_snapshot,
     build_file_structure_context,
@@ -54,6 +53,7 @@ async def _generate_and_update_issue(
     _meta: dict[str, Any] | None,
     ctx: Context | None,
     github_command_func: Callable | None = None,
+    git_command_func: Callable | None = None,
 ) -> None:
     """Generate content with AI and update the GitHub issue.
 
@@ -71,6 +71,7 @@ async def _generate_and_update_issue(
         _meta: Optional metadata from caller.
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
+        git_command_func: Optional Git command function (for mocking).
     """
     # Use LLM Manager for unified LLM calls
     if not llm_manager:
@@ -260,6 +261,7 @@ async def process_workplan_async(
     _meta: dict[str, Any] | None = None,
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
+    git_command_func: Callable | None = None,
 ) -> None:
     """Generate a workplan asynchronously and update the GitHub issue.
 
@@ -276,6 +278,7 @@ async def process_workplan_async(
         _meta: Optional metadata from the caller.
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
+        git_command_func: Optional Git command function (for mocking).
     """
     try:
         # Create a simple logging function that uses ctx if available
@@ -296,65 +299,141 @@ async def process_workplan_async(
             codebase_reasoning, 
             context_log, 
             token_limit=codebase_token_limit,
-            model=model
+            model=model,
+            git_command_func=git_command_func
         )
 
         # Construct prompt
-        prompt = f"""You are an expert software developer tasked with creating a detailed workplan that will be published as a GitHub issue.
+        prompt = f"""You are a senior software architect and technical writer.  
+Your task is to output a GitHub-issue–ready **work-plan** that fully complies with the “Strong Work-Plan Rules” and the “Gap-Fix Guidelines” below.  
+The answer you return will be copied verbatim into a GitHub issue, so structure, order and precision matter.
 
-# Task Title
-{title}
-
-# Task Details
-{detailed_description}
-
-# Codebase Context
+CONTEXT
+───────────────────
+Multi-file snippet of the current repo (trimmed for length)
 {codebase_info}
 
-# Instructions
-Create a comprehensive implementation plan with the following structure:
+One-line task title
+{title}
 
-## Summary
-Provide a concise high-level summary of what needs to be done.
+Product / feature description from the PM
+{detailed_description}
 
-## Implementation Steps
-Break down the implementation into clear, actionable steps. Each step should include:
-- What needs to be done
-- Which files need to be modified or created
-- Code snippets where helpful
-- Any potential challenges or considerations
+GLOBAL TONE & STYLE
+───────────────────
+• Write as one senior engineer explaining to another.  
+• Zero “TODO”, “placeholder”, or speculative wording—everything must be concrete and actionable.  
+• Be self-sufficient: an unfamiliar engineer can execute the plan end-to-end without additional guidance.  
+• All headings and check-box bullets must render correctly in GitHub Markdown.  
+• Keep line length ≤ 120 characters where feasible.
+
+TOP-LEVEL SECTIONS  (DO NOT ADD, REMOVE, OR RE-ORDER)
+──────────────────────────────────────────────────────
+## Summary  
+## Technical Details  
+## Architecture  
+## Completion Criteria & Metrics  
+## References  
+## Implementation Steps  
+## Global Test Strategy  
+## Files to Modify  
+## New Files to Create  
+
+MANDATORY CONTENT PER SECTION
+─────────────────────────────
+## Summary   (≤ 5 sentences)
+1 . Problem – one sentence that states the issue or feature.  
+2 . Proposed solution – what will be built.  
+3 . Why it matters – business or technical impact.  
+4 . Success criteria – concise, measurable, single sentence.  
+5 . Main subsystems touched.
 
 ## Technical Details
-Include specific technical information such as:
-- API endpoints to create/modify
-- Database schema changes
-- Configuration updates
-- Dependencies to add
+• Languages, frameworks, min versions.  
+• “External Dependencies” sub-section:  
+  – List every new third-party package AND specify how it will be introduced (e.g., `pyproject.toml` stanza, Dockerfile line).  
+• Dependency management & pinning strategy (poetry, npm, go-mods, etc.).  
+• Build, lint, formatting, type-checking commands.  
+• Logging & observability – logger names, redaction strategy, trace IDs, dashboards.  
+• Analytics/KPIs – event names, schema, when they fire.  
+• Testing frameworks & helpers (mention async helpers or fixtures unique to repo).
 
-## Testing Approach
-Describe how to test the implementation:
-- Unit tests to add
-- Integration tests needed
-- Manual testing steps
+## Architecture
+• “Existing Components Leveraged” bullet list (files / classes).  
+• “New Components Introduced” bullet list (fully enumerated).  
+• Control-flow & data-flow diagram (ASCII or Mermaid).  
+• State-management, retry/fallback, and error-handling patterns (e.g., three-strike fallback).
 
-## Files to Modify
-List all files that will need to be changed, organized by type of change (create, modify, delete).
-
-## Example Code Changes
-Provide concrete code examples for the most important changes.
+## Completion Criteria & Metrics
+• Engineering metrics – latency, SLA, test coverage ≥ X %, lint/type-check clean, etc.  
+• Business metrics – conversion, NPS, error-rate < Y %, etc.  
+• Code-state definition of done – all CI jobs green, new DAG registered, talk-suite passes, docs updated.
 
 ## References
-Include any relevant documentation, API references, or other resources.
+• Exact repo paths examined – include line numbers or symbols when helpful.  
+• External URLs (one per line).  
+• Commit hashes or tags if specific revisions were read.
 
-Include specific files to modify, new files to create, and detailed implementation steps.
-Respond directly with a clear, structured workplan with numbered steps, code snippets, and thorough explanations in Markdown. 
-Your response will be published directly to a GitHub issue without modification, so please include:
-- Detailed headers and Markdown sections
-- Code blocks with appropriate language syntax highlighting
-- Clear explanations that someone could follow step-by-step
-- Specific file paths and function names where applicable
-- Any configuration changes or dependencies needed
+## Implementation Steps
+Break work into atomic tasks suitable for individual PRs.  
+Use the sub-template **verbatim** for every task:
 
+### - [ ] Step <N>: <Concise Title>  
+**Description**: 1–2 sentences.  
+**Files**: list of files created/modified in this step.  
+**Reference(s)**: pointer(s) to rows in “## References”.  
+**Test(s)**: concrete test file names, fixtures/mocks, and the CI command that must pass.
+
+Granularity rules:  
+• One node/class/function per step unless trivial.  
+• No mixed concerns (e.g., “Implement X and refactor Y” must be two steps).  
+• Each step’s **Test(s)** must name at least one assertion or expected behaviour.
+
+## Global Test Strategy
+• Unit, integration, e2e, load – what’s covered where.  
+• How to run locally (`make test`, `python -m pytest`, etc.).  
+• Env-vars / secrets layout (`.env.test`).  
+• Async helpers, fixtures, sandbox accounts.  
+• Coverage enforcement rule (PR fails if coverage < threshold).  
+
+## Files to Modify / ## New Files to Create
+• Use Markdown tables or bullet lists.  
+• For **new files** provide:  
+  – One-line purpose.  
+  – Stub code block with signature(s).  
+  – Required exports (`__all__`) or module wiring.  
+  – Note if protobuf, OpenAPI, or YAML specs also added.
+
+GAP-FIX GUIDELINES (Always Apply)
+────────────────────────────────
+1. ALWAYS describe how dependencies are added/pinned (e.g., `pyproject.toml`, `poetry.lock`).  
+2. If repo has custom test helpers (e.g., async graph helpers), reference & use them.  
+3. Call out existing services or models to be injected instead of rebuilt.  
+4. Explicitly enumerate **every** new component – no omissions.  
+5. Include retry/fallback/strike logic if part of the design pattern.  
+6. “Completion Criteria” must state both code-state and operational success metrics.  
+7. Each Implementation Step must have: references, granular scope, concrete tests.  
+8. Provide GitHub check-box list ready for copy-paste.  
+9. If conversational or persona suites are required, add a task for them.
+
+PRE-FLIGHT QUALITY GATE (Auto-check before you answer)
+───────────────────────────────────────────────────────
+✔ All top-level sections present and in correct order.  
+✔ “Summary” ≤ 5 sentences and includes Problem + Success criteria.  
+✔ “Technical Details” contains “External Dependencies” + dependency pinning method.  
+✔ Architecture lists both Existing & New components.  
+✔ Completion Criteria includes code-state AND operational metrics.  
+✔ Implementation Steps use the exact sub-template and include tests.  
+✔ Global Test Strategy explains commands and coverage enforcement.  
+✔ New Files section provides stubs and export notes.  
+✔ No placeholders, “TODO”, or speculative language.  
+✔ All repo paths / URLs referenced are enumerated in “## References”.
+
+IF ANY ITEM IS MISSING, STOP, FIX, AND RE-EMIT THE ENTIRE PLAN.
+
+BEGIN OUTPUT
+────────────
+Return only the GitHub-Markdown for the issue body, starting with “## Summary”.
 The workplan should be comprehensive enough that a developer or AI assistant could implement it without additional context, and structured in a way that makes it easy for an LLM to quickly understand and work with the contained information.
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
@@ -383,6 +462,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             _meta,
             ctx,
             github_command_func,
+            git_command_func,
         )
 
     except Exception as e:
@@ -417,6 +497,7 @@ async def process_revision_async(
     _meta: dict[str, Any] | None = None,
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
+    git_command_func: Callable | None = None,
 ) -> None:
     """Revise an existing workplan asynchronously and update the GitHub issue.
 
@@ -433,6 +514,7 @@ async def process_revision_async(
         _meta: Optional metadata from the caller.
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
+        git_command_func: Optional Git command function (for mocking).
     """
     try:
         # Create a simple logging function that uses ctx if available
@@ -453,7 +535,8 @@ async def process_revision_async(
             codebase_reasoning, 
             context_log, 
             token_limit=codebase_token_limit,
-            model=model
+            model=model,
+            git_command_func=git_command_func
         )
 
         # Extract title from original workplan (assumes first line is # Title)
@@ -510,6 +593,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             _meta,
             ctx,
             github_command_func,
+            git_command_func,
         )
 
     except Exception as e:

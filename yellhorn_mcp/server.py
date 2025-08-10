@@ -293,6 +293,9 @@ async def create_workplan(
                     github_command_func=ctx.request_context.lifespan_context.get(
                         "github_command_func"
                     ),
+                    git_command_func=ctx.request_context.lifespan_context.get(
+                        "git_command_func"
+                    ),
                 )
             )
         else:
@@ -442,6 +445,7 @@ async def revise_workplan(
                 },
                 ctx=ctx,
                 github_command_func=ctx.request_context.lifespan_context.get("github_command_func"),
+                git_command_func=ctx.request_context.lifespan_context.get("git_command_func"),
             )
         )
 
@@ -451,7 +455,8 @@ async def revise_workplan(
 
         # Get issue URL
         get_issue_url_cmd = await run_github_command(
-            repo_path, ["issue", "view", issue_number, "--json", "url"]
+            repo_path, ["issue", "view", issue_number, "--json", "url"],
+            github_command_func=ctx.request_context.lifespan_context.get("github_command_func")
         )
         issue_data = json.loads(get_issue_url_cmd)
         issue_url = issue_data["url"]
@@ -490,6 +495,7 @@ async def curate_context(
     output_path: str = ".yellhorncontext",
     depth_limit: int = 0,
     disable_search_grounding: bool = False,
+    debug: bool = False,
 ) -> str:
     """Analyzes codebase structure and creates a context curation file.
 
@@ -505,6 +511,7 @@ async def curate_context(
         output_path: Path where the .yellhorncontext file will be created.
         depth_limit: Maximum directory depth to analyze (0 means no limit).
         disable_search_grounding: If True, disables Google Search Grounding.
+        debug: If True, logs the full prompt sent to the LLM.
 
     Returns:
         Success message with the created file path.
@@ -543,6 +550,7 @@ async def curate_context(
             codebase_reasoning=codebase_reasoning,
             ignore_file_path=ignore_file_path,
             depth_limit=depth_limit,
+            debug=debug,
             ctx=ctx,
         )
 
@@ -682,10 +690,10 @@ async def judge_workplan(
             head_commit_hash = "pr_head"
         else:
             # Resolve git references to commit hashes
-            base_commit_hash = await run_git_command(repo_path, ["rev-parse", base_ref])
-            head_commit_hash = await run_git_command(repo_path, ["rev-parse", head_ref])
+            base_commit_hash = await run_git_command(repo_path, ["rev-parse", base_ref], ctx.request_context.lifespan_context.get("git_command_func"))
+            head_commit_hash = await run_git_command(repo_path, ["rev-parse", head_ref], ctx.request_context.lifespan_context.get("git_command_func"))
             # Generate diff for review
-            diff = await get_git_diff(repo_path, base_ref, head_ref, codebase_reasoning)
+            diff = await get_git_diff(repo_path, base_ref, head_ref, codebase_reasoning, ctx.request_context.lifespan_context.get("git_command_func"))
 
         # Check if diff is empty or only contains the header for file_structure mode
         is_empty = not diff.strip() or (
@@ -780,6 +788,7 @@ async def judge_workplan(
                 },
                 ctx=ctx,
                 github_command_func=ctx.request_context.lifespan_context.get("github_command_func"),
+                git_command_func=ctx.request_context.lifespan_context.get("git_command_func"),
             )
         )
 

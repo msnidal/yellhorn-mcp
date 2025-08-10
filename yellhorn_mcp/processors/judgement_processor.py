@@ -34,7 +34,7 @@ from yellhorn_mcp.utils.git_utils import YellhornMCPError, run_git_command
 
 
 async def get_git_diff(
-    repo_path: Path, base_ref: str, head_ref: str, codebase_reasoning: str = "full"
+    repo_path: Path, base_ref: str, head_ref: str, codebase_reasoning: str = "full", git_command_func=None
 ) -> str:
     """Get the diff content between two git references.
 
@@ -43,6 +43,7 @@ async def get_git_diff(
         base_ref: Base reference (branch/commit).
         head_ref: Head reference (branch/commit).
         codebase_reasoning: Mode for diff generation.
+        git_command_func: Optional Git command function (for mocking).
 
     Returns:
         The diff content as a string.
@@ -54,7 +55,7 @@ async def get_git_diff(
         if codebase_reasoning in ["file_structure", "none"]:
             # For file_structure or none, just list changed files
             changed_files = await run_git_command(
-                repo_path, ["diff", "--name-only", f"{base_ref}...{head_ref}"]
+                repo_path, ["diff", "--name-only", f"{base_ref}...{head_ref}"], git_command_func
             )
             if changed_files:
                 return f"Changed files between {base_ref} and {head_ref}:\n{changed_files}"
@@ -67,20 +68,20 @@ async def get_git_diff(
 
             # For lsp mode, get changed files and create LSP diff
             changed_files_output = await run_git_command(
-                repo_path, ["diff", "--name-only", f"{base_ref}...{head_ref}"]
+                repo_path, ["diff", "--name-only", f"{base_ref}...{head_ref}"], git_command_func
             )
             changed_files = changed_files_output.strip().split("\n") if changed_files_output else []
 
             if changed_files:
                 # Get LSP diff which shows signatures of changed functions and full content of changed files
-                lsp_diff = await get_lsp_diff(repo_path, base_ref, head_ref, changed_files)
+                lsp_diff = await get_lsp_diff(repo_path, base_ref, head_ref, changed_files, git_command_func)
                 return lsp_diff
             else:
                 return ""
 
         else:
             # Default: full diff content
-            diff = await run_git_command(repo_path, ["diff", "--patch", f"{base_ref}...{head_ref}"])
+            diff = await run_git_command(repo_path, ["diff", "--patch", f"{base_ref}...{head_ref}"], git_command_func)
             return diff if diff else ""
 
     except Exception as e:
@@ -105,6 +106,7 @@ async def process_judgement_async(
     _meta: dict[str, Any] | None = None,
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
+    git_command_func: Callable | None = None,
 ) -> None:
     """Judge a code diff against a workplan asynchronously.
 
@@ -126,6 +128,7 @@ async def process_judgement_async(
         _meta: Optional metadata from the caller.
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
+        git_command_func: Optional Git command function (for mocking).
     """
     try:
         # Get codebase info based on reasoning mode
@@ -150,7 +153,8 @@ async def process_judgement_async(
                 codebase_reasoning, 
                 context_log,
                 token_limit=codebase_token_limit,
-                model=model
+                model=model,
+                git_command_func=git_command_func
             )
 
         # Construct prompt
@@ -344,7 +348,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             )
 
             # Construct the URL for the updated issue
-            repo_info = await run_git_command(repo_path, ["remote", "get-url", "origin"])
+            repo_info = await run_git_command(repo_path, ["remote", "get-url", "origin"], git_command_func)
             # Clean up the repo URL to get the proper format
             if repo_info.endswith(".git"):
                 repo_info = repo_info[:-4]

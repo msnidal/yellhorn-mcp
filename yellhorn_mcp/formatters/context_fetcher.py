@@ -63,7 +63,8 @@ async def get_codebase_context(
     reasoning_mode: str, 
     log_function: Optional[Callable[[str], None]] =print,
     token_limit: Optional[int] = None,
-    model: Optional[str] = None
+    model: Optional[str] = None,
+    git_command_func: Optional[Callable] = None
 ) -> str:
     """Fetches and formats the codebase context based on the reasoning mode.
 
@@ -73,12 +74,13 @@ async def get_codebase_context(
         log_function: Function to use for logging.
         token_limit: Optional maximum number of tokens to include in the context.
         model: Optional model name for token counting (required if token_limit is set).
+        git_command_func: Optional Git command function (for mocking).
 
     Returns:
         Formatted codebase context string, possibly truncated to fit token limit.
     """
     file_paths, file_contents = await get_codebase_snapshot(
-        repo_path, just_paths=(reasoning_mode!="full"), log_function=log_function
+        repo_path, just_paths=(reasoning_mode!="full"), log_function=log_function, git_command_func=git_command_func
     )
     codebase_prompt_content = ""
     if reasoning_mode == "lsp":

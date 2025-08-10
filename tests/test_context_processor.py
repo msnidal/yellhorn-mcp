@@ -14,6 +14,15 @@ from yellhorn_mcp.utils.git_utils import YellhornMCPError
 class TestProcessContextCurationAsync:
     """Test suite for process_context_curation_async function."""
 
+    async def mock_git_command(self, repo_path, command):
+        """Mock git command for tests."""
+        if command == ["ls-files"]:
+            # Return test files based on the repo structure
+            return "src/main.py\nsrc/utils.py\ntests/test_main.py\nREADME.md\nconfig.yaml"
+        elif command == ["ls-files", "--others", "--exclude-standard"]:
+            return ""
+        return ""
+
     @pytest.mark.asyncio
     async def test_process_context_curation_success(self, tmp_path):
         """Test successful context curation."""
@@ -40,7 +49,9 @@ tests
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         result = await process_context_curation_async(
             repo_path=repo_path,
@@ -97,7 +108,9 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -134,7 +147,10 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {"codebase_reasoning": "lsp"}
+        mock_ctx.request_context.lifespan_context = {
+            "codebase_reasoning": "lsp",
+            "git_command_func": self.mock_git_command
+        }
 
         with patch("yellhorn_mcp.utils.lsp_utils.get_lsp_snapshot") as mock_lsp:
             mock_lsp.return_value = (["src/main.py"], {"src/main.py": "def main(): pass"})
@@ -172,7 +188,9 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -211,7 +229,9 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -239,7 +259,9 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         with pytest.raises(YellhornMCPError, match="LLM Manager not initialized"):
             await process_context_curation_async(
@@ -268,7 +290,9 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         result = await process_context_curation_async(
             repo_path=repo_path,
@@ -305,7 +329,9 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         result = await process_context_curation_async(
             repo_path=repo_path,
@@ -351,7 +377,9 @@ These contain the core application code and tests.
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         result = await process_context_curation_async(
             repo_path=repo_path,
@@ -388,7 +416,9 @@ These contain the core application code and tests.
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         custom_output = ".custom_context"
         result = await process_context_curation_async(
@@ -422,7 +452,9 @@ These contain the core application code and tests.
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         # Try to write to an invalid path (directory instead of file)
         invalid_output = "/"  # Root directory, should cause permission error
@@ -486,7 +518,9 @@ These contain the core application code and tests.
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         # Very long task description
         long_task = (
@@ -548,7 +582,9 @@ tests
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -589,7 +625,9 @@ tests
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -652,7 +690,9 @@ yellhorn_mcp/integrations
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {
+            "git_command_func": self.mock_git_command
+        }
 
         await process_context_curation_async(
             repo_path=repo_path,

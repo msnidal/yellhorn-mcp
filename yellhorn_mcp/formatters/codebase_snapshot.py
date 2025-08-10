@@ -396,7 +396,7 @@ def matches_pattern(path: str, pattern: str) -> bool:
         return fnmatch.fnmatch(path, pattern)
 
 async def get_codebase_snapshot(
-    repo_path: Path, just_paths: bool = False, log_function=print
+    repo_path: Path, just_paths: bool = False, log_function=print, git_command_func=None
 ) -> tuple[list[str], dict[str, str]]:
     """Get a snapshot of the codebase.
 
@@ -404,6 +404,7 @@ async def get_codebase_snapshot(
         repo_path: Path to the repository.
         just_paths: If True, return only file paths without contents.
         log_function: Function to use for logging.
+        git_command_func: Optional Git command function (for mocking).
 
     Returns:
         Tuple of (file_paths, file_contents).
@@ -423,12 +424,12 @@ async def get_codebase_snapshot(
         log_function(f"Found .gitignore with {len(gitignore_patterns)} patterns")
 
     # Get tracked files
-    tracked_files = await run_git_command(repo_path, ["ls-files"])
+    tracked_files = await run_git_command(repo_path, ["ls-files"], git_command_func)
     tracked_file_list = tracked_files.strip().split("\n") if tracked_files else []
 
     # Get untracked files (not ignored by .gitignore)
     untracked_files = await run_git_command(
-        repo_path, ["ls-files", "--others", "--exclude-standard"]
+        repo_path, ["ls-files", "--others", "--exclude-standard"], git_command_func
     )
     untracked_file_list = untracked_files.strip().split("\n") if untracked_files else []
 

@@ -16,8 +16,10 @@ from mcp.server.fastmcp import Context
 
 from yellhorn_mcp.llm_manager import LLMManager
 from yellhorn_mcp.formatters.codebase_snapshot import get_codebase_snapshot
+from yellhorn_mcp.formatters.context_fetcher import get_codebase_context
 from yellhorn_mcp.formatters.prompt_formatter import format_codebase_for_prompt, build_file_structure_context
 from yellhorn_mcp.utils.git_utils import YellhornMCPError
+from yellhorn_mcp.token_counter import TokenCounter
 
 
 async def process_context_curation_async(
@@ -30,6 +32,7 @@ async def process_context_curation_async(
     ignore_file_path: str = ".yellhornignore",
     depth_limit: int = 0,
     disable_search_grounding: bool = False,
+    debug: bool = False,
     ctx: Context | None = None,
 ) -> str:
     """Analyze codebase and create a context curation file.
@@ -44,6 +47,7 @@ async def process_context_curation_async(
         ignore_file_path: Path to the ignore file.
         depth_limit: Maximum directory depth to analyze (0 = no limit).
         disable_search_grounding: Whether to disable search grounding.
+        debug: Whether to log the full prompt sent to the LLM.
         ctx: Optional context for logging.
 
     Returns:
@@ -64,51 +68,91 @@ async def process_context_curation_async(
         if ctx:
             await ctx.log(level="info", message="Starting context curation process")
 
-        # Get all files in the repository
-        all_file_paths = []
-        for root, dirs, files in os.walk(repo_path):
-            # Skip hidden directories and common ignore patterns
-            dirs[:] = [
-                d
-                for d in dirs
-                if not d.startswith(".") and d not in ["node_modules", "__pycache__", "venv", "env"]
-            ]
+        # Define log function for get_codebase_context (synchronous function required)
+        def sync_context_log(msg: str):
+            if ctx:
+                # Create async task for logging but don't await it
+                asyncio.create_task(ctx.log(level="info", message=msg))
 
-            for file in files:
-                if not file.startswith(".") and not file.endswith(".pyc"):
-                    file_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_path, repo_path)
-                    all_file_paths.append(relative_path)
+        # Get git command function from context if available
+        git_command_func = (
+            ctx.request_context.lifespan_context.get("git_command_func")
+            if ctx
+            else None
+        )
 
-        if ctx:
-            await ctx.log(level="info", message=f"Found {len(all_file_paths)} files in repository")
+        # Determine the codebase reasoning mode to use
+        codebase_reasoning_mode = (
+            ctx.request_context.lifespan_context.get("codebase_reasoning", codebase_reasoning)
+            if ctx
+            else codebase_reasoning
+        )
 
-        # Use all files without ignore filtering
-        filtered_file_paths = all_file_paths.copy()
+        # Delete existing .yellhorncontext file to prevent it from influencing file filtering
+        context_file_path = repo_path / output_path
+        if context_file_path.exists():
+            try:
+                context_file_path.unlink()
+                if ctx:
+                    await ctx.log(
+                        level="info",
+                        message=f"Deleted existing {output_path} file before analysis",
+                    )
+            except Exception as e:
+                if ctx:
+                    await ctx.log(
+                        level="warning",
+                        message=f"Could not delete existing {output_path} file: {e}",
+                    )
 
+        # Use get_codebase_context to get properly filtered codebase content
         if ctx:
             await ctx.log(
                 level="info",
-                message=f"Using all {len(filtered_file_paths)} files without ignore filtering",
+                message=f"Getting codebase context using {codebase_reasoning_mode} mode",
             )
+
+        # Get the codebase context which handles all file filtering, ignore patterns, etc.
+        directory_context = await get_codebase_context(
+            repo_path=repo_path,
+            reasoning_mode=codebase_reasoning_mode,
+            log_function=sync_context_log if ctx else None,
+            git_command_func=git_command_func,
+        )
+        
+        # Log key metrics: file count and token size
+        if ctx:
+            token_counter = TokenCounter()
+            token_count = token_counter.count_tokens(directory_context, model)
+            file_count = len(directory_context.split("\n")) if directory_context else 0
+            await ctx.log(
+                level="info",
+                message=f"Codebase context metrics: {file_count} lines, {token_count} tokens ({model})"
+            )
+
+        # Extract file paths from the codebase snapshot to get directory structure
+        # We need the file paths to extract directories, so we'll call get_codebase_snapshot separately
+        file_paths, _ = await get_codebase_snapshot(
+            repo_path, just_paths=True, log_function=lambda msg: None, git_command_func=git_command_func
+        )
 
         # Apply depth limit if specified
         if depth_limit > 0:
             depth_filtered_paths = []
-            for file_path in filtered_file_paths:
+            for file_path in file_paths:
                 depth = file_path.count("/")
                 if depth < depth_limit:
                     depth_filtered_paths.append(file_path)
-            filtered_file_paths = depth_filtered_paths
+            file_paths = depth_filtered_paths
             if ctx:
                 await ctx.log(
                     level="info",
-                    message=f"Applied depth limit {depth_limit}, now have {len(filtered_file_paths)} files",
+                    message=f"Applied depth limit {depth_limit}, now have {len(file_paths)} files",
                 )
 
         # Extract and analyze directories from filtered files
         all_dirs = set()
-        for file_path in filtered_file_paths:
+        for file_path in file_paths:
             # Get all parent directories of this file
             parts = file_path.split("/")
             for i in range(1, len(parts)):
@@ -117,7 +161,7 @@ async def process_context_curation_async(
                     all_dirs.add(dir_path)
 
         # Add root directory ('.') if there are files at the root level
-        if any("/" not in f for f in filtered_file_paths):
+        if any("/" not in f for f in file_paths):
             all_dirs.add(".")
 
         # Sort directories for consistent output
@@ -126,68 +170,8 @@ async def process_context_curation_async(
         if ctx:
             await ctx.log(
                 level="info",
-                message=f"Extracted {len(sorted_dirs)} directories from {len(filtered_file_paths)} filtered files",
+                message=f"Extracted {len(sorted_dirs)} directories from {len(file_paths)} filtered files",
             )
-
-        # Build the codebase context based on reasoning mode
-        codebase_reasoning_mode = (
-            ctx.request_context.lifespan_context.get("codebase_reasoning", codebase_reasoning)
-            if ctx
-            else codebase_reasoning
-        )
-
-        if codebase_reasoning_mode == "lsp":
-            # Use LSP mode to get detailed code structure
-            if ctx:
-                await ctx.log(
-                    level="info",
-                    message="Using LSP mode for codebase analysis",
-                )
-            # Get LSP snapshot of the codebase
-            from yellhorn_mcp.utils.lsp_utils import get_lsp_snapshot
-
-            lsp_file_paths, lsp_file_contents = await get_lsp_snapshot(repo_path)
-
-            # Use all LSP results without filtering
-            filtered_lsp_paths = lsp_file_paths
-            filtered_lsp_contents = lsp_file_contents
-
-            # Format with LSP structure
-            directory_context = await format_codebase_for_prompt(
-                filtered_lsp_paths, filtered_lsp_contents
-            )
-
-        elif codebase_reasoning_mode == "full":
-            # Use full mode with file contents
-            if ctx:
-                await ctx.log(
-                    level="info",
-                    message="Using full mode with file contents for codebase analysis",
-                )
-
-            # Get file contents for filtered files
-            file_contents = {}
-            for file_path in filtered_file_paths:
-                full_path = repo_path / file_path
-                if full_path.is_file():
-                    try:
-                        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
-                            file_contents[file_path] = f.read()
-                    except Exception:
-                        # Skip files that can't be read
-                        pass
-
-            # Format with full file contents
-            directory_context = await format_codebase_for_prompt(filtered_file_paths, file_contents)
-
-        else:
-            # Default to file structure mode
-            if ctx:
-                await ctx.log(
-                    level="info",
-                    message="Using file structure mode for codebase analysis",
-                )
-            directory_context = build_file_structure_context(filtered_file_paths)
 
         # Log peek of directory_context
         if ctx:
@@ -230,10 +214,6 @@ Don't include explanations for your choices, just return the list in the specifi
         # Construct the prompt with user task and directory context
         prompt = f"""{directory_context}"""
 
-        # Use LLMManager for unified LLM calls
-        if not llm_manager:
-            raise YellhornMCPError("LLM Manager not initialized")
-
         # Additional kwargs for the LLM call
         llm_kwargs = {}
 
@@ -241,6 +221,17 @@ Don't include explanations for your choices, just return the list in the specifi
             await ctx.log(
                 level="info",
                 message=f"Analyzing directory structure with {model}",
+            )
+            
+        # Debug logging: log the full prompt if requested
+        if debug and ctx:
+            await ctx.log(
+                level="info",
+                message=f"[DEBUG] System message: {system_message}..."
+            )
+            await ctx.log(
+                level="info",
+                message=f"[DEBUG] User prompt ({len(prompt)} chars): {prompt[:1500]}..."
             )
 
         # Track important directories
@@ -341,10 +332,10 @@ Don't include explanations for your choices, just return the list in the specifi
                 has_files = False
                 if dir_path == ".":
                     # Root directory - check for files at root level
-                    has_files = any("/" not in f for f in filtered_file_paths)
+                    has_files = any("/" not in f for f in file_paths)
                 else:
                     # Check if any filtered files are within this directory
-                    has_files = any(f.startswith(dir_path + "/") for f in filtered_file_paths)
+                    has_files = any(f.startswith(dir_path + "/") for f in file_paths)
 
                 if dir_path == ".":
                     # Root directory is a special case
@@ -385,6 +376,22 @@ Don't include explanations for your choices, just return the list in the specifi
         # Reverse back to original order and join
         unique_lines.reverse()
         final_content = "\n".join(unique_lines)
+        
+        # Log preview of final content before writing
+        if ctx:
+            preview_content = final_content[:500] + "..." if len(final_content) > 500 else final_content
+            await ctx.log(
+                level="info",
+                message=f"Final content preview ({len(final_content)} chars):\n{preview_content}"
+            )
+            
+            # Count actual directory entries (non-comment, non-empty lines)
+            dir_lines = [line.strip() for line in final_content.split('\n') 
+                        if line.strip() and not line.strip().startswith('#')]
+            await ctx.log(
+                level="info",
+                message=f"Directory entries in final content: {len(dir_lines)} ({', '.join(dir_lines[:5])}{'...' if len(dir_lines) > 5 else ''})"
+            )
 
         # Write the file to the specified path
         output_file_path = repo_path / output_path
