@@ -131,31 +131,6 @@ async def process_judgement_async(
         git_command_func: Optional Git command function (for mocking).
     """
     try:
-        # Get codebase info based on reasoning mode
-        codebase_info = ""
-
-        # Create a simple logging function
-        def context_log(msg: str):
-            if ctx:
-                asyncio.create_task(ctx.log(level="info", message=msg))
-
-        # Use get_codebase_context for all reasoning modes
-        if codebase_reasoning in ["lsp", "file_structure", "full"]:
-            # Calculate token limit for codebase context
-            token_counter = TokenCounter()
-            model_limit = token_counter.get_model_limit(model)
-            # Reserve tokens for prompt template, workplan, diff, and response
-            # Estimate: prompt template ~1000, workplan ~2000, diff ~2000, safety margin ~4000
-            codebase_token_limit = int((model_limit - 9000) * 0.7)
-            
-            codebase_info, _ = await get_codebase_context(
-                repo_path, 
-                codebase_reasoning, 
-                context_log,
-                token_limit=codebase_token_limit,
-                model=model,
-                git_command_func=git_command_func
-            )
 
         # Construct prompt
         prompt = f"""You are an expert software reviewer tasked with judging whether a code diff successfully implements a given workplan.
@@ -165,9 +140,6 @@ async def process_judgement_async(
 
 # Code Diff
 {diff_content}
-
-# Codebase Context
-{codebase_info}
 
 # Task
 Review the code diff against the original workplan and provide a detailed judgement. Consider:
@@ -246,7 +218,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         if is_openai_model:
             # OpenAI models don't support citations
             response_data = await llm_manager.call_llm_with_usage(
-                prompt=prompt, model=model, temperature=0.0, **llm_kwargs
+                prompt=prompt, model=model, temperature=0.0, ctx=ctx, **llm_kwargs
             )
             judgement_content = response_data["content"]
             usage_metadata = response_data["usage_metadata"]
@@ -262,7 +234,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         else:
             # Gemini models - use citation-aware call
             response_data = await llm_manager.call_llm_with_citations(
-                prompt=prompt, model=model, temperature=0.0, **llm_kwargs
+                prompt=prompt, model=model, temperature=0.0, ctx=ctx, **llm_kwargs
             )
 
             judgement_content = response_data["content"]

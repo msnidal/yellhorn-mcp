@@ -84,7 +84,7 @@ tests
 
         # Verify success message
         assert "Successfully created .yellhorncontext file" in result
-        assert "2 important directories" in result
+        assert "2 directories" in result
 
         # Verify file was created
         context_file = repo_path / ".yellhorncontext"

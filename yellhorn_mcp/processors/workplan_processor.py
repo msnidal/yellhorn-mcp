@@ -129,7 +129,7 @@ async def _generate_and_update_issue(
         if is_openai_model:
             # OpenAI models don't support citations
             response_data = await llm_manager.call_llm_with_usage(
-                prompt=prompt, model=model, temperature=0.0, **llm_kwargs
+                prompt=prompt, model=model, temperature=0.0, ctx=ctx, **llm_kwargs
             )
             workplan_content = response_data["content"]
             usage_metadata = response_data["usage_metadata"]
@@ -145,7 +145,7 @@ async def _generate_and_update_issue(
         else:
             # Gemini models - use citation-aware call
             response_data = await llm_manager.call_llm_with_citations(
-                prompt=prompt, model=model, temperature=0.0, tools=search_tools, **llm_kwargs
+                prompt=prompt, model=model, temperature=0.0, tools=search_tools, ctx=ctx, **llm_kwargs
             )
 
             workplan_content = response_data["content"]
@@ -573,9 +573,6 @@ Respond directly with the complete revised workplan in Markdown format.
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
 
-        # Add the title as header prefix
-        content_prefix = f"# {title}\n\n"
-
         # llm_manager is now passed as a parameter
 
         # Generate and update issue using the helper
@@ -586,7 +583,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             prompt,
             issue_number,
             title,
-            content_prefix,
+            "",
             disable_search_grounding,
             debug,
             codebase_reasoning,

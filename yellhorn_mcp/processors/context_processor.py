@@ -169,6 +169,7 @@ Don't include explanations for your choices, just return the list in the specifi
         prompt=prompt,
         system_message=system_message,
         temperature=0.0,
+        ctx=ctx,
     )
 
     return result if isinstance(result, str) else str(result)

@@ -429,6 +429,7 @@ class LLMManager:
         temperature: float = 0.7,
         system_message: Optional[str] = None,
         response_format: Optional[str] = None,
+        ctx: Optional[Any] = None,
         **kwargs,
     ) -> Union[str, Dict[str, Any]]:
         """
@@ -440,20 +441,45 @@ class LLMManager:
             temperature: Temperature for generation
             system_message: Optional system message
             response_format: Optional response format (e.g., "json")
+            ctx: Optional context for logging
             **kwargs: Additional model-specific parameters
 
         Returns:
             Generated response (string or dict if JSON format)
         """
+        # Calculate token counts
+        prompt_tokens = self.token_counter.count_tokens(prompt, model)
+        system_tokens = self.token_counter.count_tokens(system_message or "", model)
+        total_input_tokens = prompt_tokens + system_tokens
+        model_limit = self.token_counter.get_model_limit(model)
+
+        # Log initial call info
+        if ctx:
+            await ctx.log(
+                level="info",
+                message=f"LLM call initiated - Model: {model}, Input tokens: {total_input_tokens}, Model limit: {model_limit}, Temperature: {temperature}",
+            )
+
         # Check if chunking is needed
-        if not self.token_counter.can_fit_in_context(prompt, model, self.safety_margin):
+        needs_chunking = not self.token_counter.can_fit_in_context(
+            prompt, model, self.safety_margin
+        )
+
+        if needs_chunking:
+            if ctx:
+                chunks_needed = (total_input_tokens // (model_limit - self.safety_margin)) + 1
+                await ctx.log(
+                    level="info",
+                    message=f"Input exceeds model context limit. Chunking required: {chunks_needed} chunks estimated",
+                )
+
             return await self._chunked_call(
-                prompt, model, temperature, system_message, response_format, **kwargs
+                prompt, model, temperature, system_message, response_format, ctx=ctx, **kwargs
             )
 
         # Single call
         return await self._single_call(
-            prompt, model, temperature, system_message, response_format, **kwargs
+            prompt, model, temperature, system_message, response_format, ctx=ctx, **kwargs
         )
 
     async def _single_call(
@@ -463,19 +489,44 @@ class LLMManager:
         temperature: float,
         system_message: Optional[str],
         response_format: Optional[str],
+        ctx: Optional[Any] = None,
         **kwargs,
     ) -> Union[str, Dict[str, Any]]:
         """Make a single LLM call."""
+        import time
+
+        start_time = time.time()
+
         if self._is_openai_model(model):
-            return await self._call_openai(
+            result = await self._call_openai(
                 prompt, model, temperature, system_message, response_format, **kwargs
             )
         elif self._is_gemini_model(model):
-            return await self._call_gemini(
+            result = await self._call_gemini(
                 prompt, model, temperature, system_message, response_format, **kwargs
             )
         else:
             raise ValueError(f"Unknown model type: {model}")
+
+        # Log completion metadata
+        elapsed_time = time.time() - start_time
+        if ctx and self._last_usage_metadata:
+            await ctx.log(
+                level="info",
+                message=(
+                    f"LLM call completed - Model: {model}, "
+                    f"Completion tokens: {self._last_usage_metadata.completion_tokens}, "
+                    f"Total tokens: {self._last_usage_metadata.total_tokens}, "
+                    f"Time: {elapsed_time:.2f}s"
+                ),
+            )
+        elif ctx:
+            await ctx.log(
+                level="info",
+                message=f"LLM call completed - Model: {model}, Time: {elapsed_time:.2f}s (no usage metadata available)",
+            )
+
+        return result
 
     @api_retry
     async def _call_openai(
@@ -689,6 +740,7 @@ class LLMManager:
         temperature: float,
         system_message: Optional[str],
         response_format: Optional[str],
+        ctx: Optional[Any] = None,
         **kwargs,
     ) -> Union[str, Dict[str, Any]]:
         """Make chunked LLM calls and aggregate results with rate limit handling.
@@ -699,11 +751,16 @@ class LLMManager:
             temperature: Temperature for generation
             system_message: Optional system message
             response_format: Optional response format (e.g., "json")
+            ctx: Optional context for logging
             **kwargs: Additional parameters for the LLM API
 
         Returns:
             Aggregated response (string or dict if JSON format)
         """
+        import time
+
+        start_time = time.time()
+
         # Calculate available tokens for content
         model_limit = self.token_counter.get_model_limit(model)
         system_tokens = self.token_counter.count_tokens(system_message or "", model)
@@ -714,6 +771,11 @@ class LLMManager:
 
         # Log the number of chunks created
         logger.info(f"Split prompt into {len(chunks)} chunks for model {model}")
+        if ctx:
+            await ctx.log(
+                level="info",
+                message=f"Processing {len(chunks)} chunks for model {model}, chunk size limit: {available_tokens} tokens",
+            )
 
         # Process chunks
         responses = []
@@ -727,13 +789,21 @@ class LLMManager:
                 if i > 0:
                     chunk_prompt = f"[Continuing from previous chunk...]\n\n{chunk_prompt}"
 
+            # Log chunk processing
+            if ctx:
+                chunk_tokens = self.token_counter.count_tokens(chunk_prompt, model)
+                await ctx.log(
+                    level="info",
+                    message=f"Processing chunk {i+1}/{len(chunks)}, tokens: {chunk_tokens}",
+                )
+
             # Debug log for each LLM call
             logger.debug(
                 f"Making LLM call {i+1}/{len(chunks)} to model {model} with chunk size: {len(chunk_prompt)} characters"
             )
 
             response = await self._single_call(
-                chunk_prompt, model, temperature, system_message, response_format, **kwargs
+                chunk_prompt, model, temperature, system_message, response_format, ctx=ctx, **kwargs
             )
             responses.append(response)
 
@@ -750,6 +820,20 @@ class LLMManager:
 
         # Store aggregated usage
         self._last_usage_metadata = total_usage
+
+        # Log final aggregated results
+        elapsed_time = time.time() - start_time
+        if ctx:
+            await ctx.log(
+                level="info",
+                message=(
+                    f"Chunked processing completed - Chunks: {len(chunks)}, "
+                    f"Total prompt tokens: {total_usage.prompt_tokens}, "
+                    f"Total completion tokens: {total_usage.completion_tokens}, "
+                    f"Total tokens: {total_usage.total_tokens}, "
+                    f"Time: {elapsed_time:.2f}s"
+                ),
+            )
 
         # Aggregate responses
         return self._aggregate_responses(responses, response_format)
@@ -812,6 +896,7 @@ class LLMManager:
         temperature: float = 0.7,
         system_message: Optional[str] = None,
         response_format: Optional[str] = None,
+        ctx: Optional[Any] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -825,6 +910,7 @@ class LLMManager:
             temperature: Temperature for generation
             system_message: Optional system message
             response_format: Optional response format (e.g., "json")
+            ctx: Optional context for logging
             **kwargs: Additional arguments passed to the LLM
 
         Returns:
@@ -841,6 +927,7 @@ class LLMManager:
             temperature=temperature,
             system_message=system_message,
             response_format=response_format,
+            ctx=ctx,
             **kwargs,
         )
 
@@ -878,6 +965,7 @@ class LLMManager:
         temperature: float = 0.7,
         system_message: Optional[str] = None,
         response_format: Optional[str] = None,
+        ctx: Optional[Any] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -889,6 +977,7 @@ class LLMManager:
             temperature: Temperature for generation
             system_message: Optional system message
             response_format: Optional response format (e.g., "json")
+            ctx: Optional context for logging
             **kwargs: Additional arguments passed to the LLM
 
         Returns:
@@ -904,6 +993,7 @@ class LLMManager:
             temperature=temperature,
             system_message=system_message,
             response_format=response_format,
+            ctx=ctx,
             **kwargs,
         )
 

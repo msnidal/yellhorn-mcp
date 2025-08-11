@@ -180,4 +180,6 @@ cython_debug/
 notebooks/
 !notebooks/llm_manager.ipynb
 !notebooks/file_structure.ipynb
+!notebooks/test_curate_context_v2.ipynb
+
 .claude/settings.local.json
