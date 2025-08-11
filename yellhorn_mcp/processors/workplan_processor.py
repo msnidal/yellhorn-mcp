@@ -87,10 +87,19 @@ async def _generate_and_update_issue(
 
     # Add debug comment if requested
     if debug:
-        debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
-        await add_issue_comment(
-            repo_path, issue_number, debug_comment, github_command_func=github_command_func
-        )
+        try:
+            debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
+            await add_issue_comment(
+                repo_path, issue_number, debug_comment, github_command_func=github_command_func
+            )
+            if ctx:
+                await ctx.log(level="info", message="Debug comment added successfully")
+        except Exception as e:
+            # Don't let debug comment failures block workplan generation
+            if ctx:
+                await ctx.log(level="warning", message=f"Failed to add debug comment: {str(e)}")
+            else:
+                print(f"Warning: Failed to add debug comment: {str(e)}")
 
     # Check if we should use search grounding
     use_search_grounding = not disable_search_grounding

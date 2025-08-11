@@ -492,10 +492,59 @@ class LLMManager:
         ctx: Optional[Any] = None,
         **kwargs,
     ) -> Union[str, Dict[str, Any]]:
-        """Make a single LLM call."""
+        """Make a single LLM call with token limit failsafe."""
         import time
 
         start_time = time.time()
+        
+        # Failsafe: Check token limits and truncate if necessary
+        prompt_tokens = self.token_counter.count_tokens(prompt, model)
+        system_tokens = self.token_counter.count_tokens(system_message or "", model)
+        total_input_tokens = prompt_tokens + system_tokens
+        model_limit = self.token_counter.get_model_limit(model)
+        
+        # Reserve tokens for response generation and safety margin
+        available_tokens = model_limit - self.safety_margin
+        
+        if total_input_tokens > available_tokens:
+            if ctx:
+                await ctx.log(
+                    level="warning",
+                    message=f"Token limit exceeded in _single_call: {total_input_tokens} > {available_tokens}. Truncating prompt."
+                )
+            
+            # Calculate how much we need to truncate
+            excess_tokens = total_input_tokens - available_tokens
+            
+            # Truncate the prompt (preserve system message if possible)
+            if system_tokens < available_tokens // 2:  # If system message is reasonable size
+                # Truncate only the prompt
+                max_prompt_tokens = available_tokens - system_tokens
+                truncated_prompt = self._truncate_text_to_tokens(prompt, max_prompt_tokens, model)
+                
+                if ctx:
+                    await ctx.log(
+                        level="info",
+                        message=f"Truncated prompt from {prompt_tokens} to ~{max_prompt_tokens} tokens"
+                    )
+                prompt = truncated_prompt
+            else:
+                # Both system message and prompt are too large - truncate both proportionally
+                system_ratio = system_tokens / total_input_tokens
+                prompt_ratio = prompt_tokens / total_input_tokens
+                
+                max_system_tokens = int(available_tokens * system_ratio * 0.8)  # Give system message priority
+                max_prompt_tokens = available_tokens - max_system_tokens
+                
+                if system_message:
+                    system_message = self._truncate_text_to_tokens(system_message, max_system_tokens, model)
+                prompt = self._truncate_text_to_tokens(prompt, max_prompt_tokens, model)
+                
+                if ctx:
+                    await ctx.log(
+                        level="info",
+                        message=f"Truncated both system message and prompt to fit {available_tokens} token limit"
+                    )
 
         if self._is_openai_model(model):
             result = await self._call_openai(
@@ -848,6 +897,57 @@ class LLMManager:
             return ChunkingStrategy.split_by_sentences(
                 prompt, max_tokens, self.token_counter, model, self.overlap_ratio
             )
+    
+    def _truncate_text_to_tokens(self, text: str, max_tokens: int, model: str) -> str:
+        """Truncate text to fit within max_tokens, preserving sentence boundaries when possible.
+        
+        Args:
+            text: Text to truncate
+            max_tokens: Maximum number of tokens allowed
+            model: Model name for token counting
+            
+        Returns:
+            Truncated text that fits within max_tokens
+        """
+        if not text.strip():
+            return text
+            
+        # Check if text already fits
+        current_tokens = self.token_counter.count_tokens(text, model)
+        if current_tokens <= max_tokens:
+            return text
+            
+        # Use binary search to find the maximum text that fits
+        low = 0
+        high = len(text)
+        best_length = 0
+        
+        while low <= high:
+            mid = (low + high) // 2
+            chunk = text[:mid]
+            tokens = self.token_counter.count_tokens(chunk, model)
+            
+            if tokens <= max_tokens:
+                best_length = mid
+                low = mid + 1
+            else:
+                high = mid - 1
+        
+        if best_length == 0:
+            # Even a single character exceeds the limit - return empty or minimal text
+            return ""
+            
+        truncated = text[:best_length]
+        
+        # Try to find a good break point (sentence, paragraph, or word boundary)
+        # Look backwards from the cut point for natural boundaries
+        for boundary in ['.', '!', '?', '\n\n', '\n', ' ']:
+            last_boundary = truncated.rfind(boundary)
+            if last_boundary > best_length * 0.8:  # Only use if we don't lose too much text
+                return truncated[:last_boundary + (1 if boundary in '.!?' else 0)].strip()
+        
+        # No good boundary found, return the truncated text
+        return truncated.strip()
 
     def _aggregate_responses(
         self, responses: List[Union[str, Dict]], response_format: Optional[str]

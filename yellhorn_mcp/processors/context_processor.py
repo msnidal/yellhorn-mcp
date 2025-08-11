@@ -145,7 +145,8 @@ dir2/
 dir3/subdir3/file3.filetype
 ```
 
-Prefer to include directories, and not just file paths but include just file paths when appropriate.
+Prefer to include directories, and not just file paths but include just file paths when appropriate. 
+IMPORTANT: Select only the most relevant directories or files.
 Don't include explanations for your choices, just return the list in the specified format."""
 
     prompt = f"""{directory_context}"""

@@ -88,6 +88,12 @@ class TestLLMManagerLogging:
         large_prompt = "Test " * 5000  # Will exceed typical token limits
 
         # Mock token counter to force chunking
+        # We need enough count_tokens calls for the entire flow:
+        # 1. Initial prompt tokens count (in call_llm)
+        # 2. System message tokens count (in call_llm)
+        # 3. System tokens again (in _chunked_call)
+        # 4. Chunk 1 token count for logging
+        # 5. Chunk 2 token count for logging
         with patch.object(
             llm_manager.token_counter,
             "can_fit_in_context",
@@ -96,7 +102,7 @@ class TestLLMManagerLogging:
             with patch.object(
                 llm_manager.token_counter,
                 "count_tokens",
-                side_effect=[10000, 0, 1000, 1000],  # prompt, system, chunk1, chunk2
+                side_effect=[10000, 0, 0, 500, 500],  # prompt, system, system_again, chunk1_log, chunk2_log
             ):
                 with patch.object(
                     llm_manager.token_counter,
@@ -165,15 +171,21 @@ class TestLLMManagerLogging:
         """Test logging with Gemini models."""
         # Mock Gemini client
         mock_gemini_client = MagicMock()
+        
+        # Create a proper mock response with usage_metadata
+        mock_response = MagicMock()
+        mock_response.text = "Gemini response"
+        
+        # Create usage metadata mock that looks like Gemini's format
+        # Use spec to prevent MagicMock from creating attributes we don't want
+        mock_usage = MagicMock(spec=['prompt_token_count', 'candidates_token_count', 'total_token_count'])
+        mock_usage.prompt_token_count = 80
+        mock_usage.candidates_token_count = 40
+        mock_usage.total_token_count = 120
+        mock_response.usage_metadata = mock_usage
+        
         mock_gemini_client.aio.models.generate_content = AsyncMock(
-            return_value=MagicMock(
-                text="Gemini response",
-                usage_metadata=MagicMock(
-                    prompt_token_count=80,
-                    candidates_token_count=40,
-                    total_token_count=120,
-                ),
-            )
+            return_value=mock_response
         )
 
         # Create LLM Manager
@@ -190,7 +202,7 @@ class TestLLMManagerLogging:
             temperature=0.7,
             ctx=mock_ctx,
         )
-
+        
         # Verify result
         assert result == "Gemini response"
 
@@ -200,6 +212,7 @@ class TestLLMManagerLogging:
 
         # Should have model-specific info
         assert any("gemini-1.5-flash" in msg for msg in log_messages)
+        # Check for completion logging
         assert any("Completion tokens: 40" in msg for msg in log_messages)
         assert any("Total tokens: 120" in msg for msg in log_messages)
 
