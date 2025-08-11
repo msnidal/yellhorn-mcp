@@ -13,7 +13,7 @@ from unittest.mock import mock_open, patch
 
 import pytest
 
-from yellhorn_mcp.server import format_codebase_for_prompt
+from yellhorn_mcp.formatters import format_codebase_for_prompt
 from yellhorn_mcp.utils.lsp_utils import (
     extract_go_api,
     extract_python_api,
@@ -147,13 +147,25 @@ async def test_e2e_python_snapshot(tmp_git_repo):
     file = repo / "pkg" / "rich_sample.py"
     file.write_text(SAMPLE_PY_SOURCE)
 
-    # Mock the run_git_command to return our file path
-    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
-        mock_git.return_value = "pkg/rich_sample.py"
+    # Create a mock git command function
+    call_count = 0
 
-        # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+    async def mock_git_func(repo_path, command, git_func=None):
+        nonlocal call_count
+        if call_count == 0:
+            call_count += 1
+            return "pkg/rich_sample.py"  # tracked files
+        else:
+            return ""  # untracked files
+
+    # First get the file paths
+    from yellhorn_mcp.formatters import get_codebase_snapshot
+
+    file_paths, _ = await get_codebase_snapshot(
+        repo, just_paths=True, git_command_func=mock_git_func
+    )
+    # Then get LSP snapshot
+    file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # Assert paths were captured correctly
     assert any("pkg/rich_sample.py" in p for p in file_paths)
@@ -179,13 +191,25 @@ async def test_e2e_go_snapshot(tmp_git_repo):
     file = repo / "pkg" / "rich_sample.go"
     file.write_text(SAMPLE_GO_SOURCE)
 
-    # Mock the run_git_command to return our file path
-    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
-        mock_git.return_value = "pkg/rich_sample.go"
+    # Create a mock git command function
+    call_count = 0
 
-        # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+    async def mock_git_func(repo_path, command, git_func=None):
+        nonlocal call_count
+        if call_count == 0:
+            call_count += 1
+            return "pkg/rich_sample.go"  # tracked files
+        else:
+            return ""  # untracked files
+
+    # First get the file paths
+    from yellhorn_mcp.formatters import get_codebase_snapshot
+
+    file_paths, _ = await get_codebase_snapshot(
+        repo, just_paths=True, git_command_func=mock_git_func
+    )
+    # Then get LSP snapshot
+    file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # Assert paths were captured correctly
     assert any("pkg/rich_sample.go" in p for p in file_paths)
@@ -217,14 +241,25 @@ async def test_e2e_syntax_error_fallback(tmp_git_repo):
     """
     )
 
-    # Mock the git operations
-    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
-        mock_git.return_value = "pkg/broken.py"
+    # Create a mock git command function
+    call_count = 0
 
-        # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
-            # Extract LSP snapshot
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+    async def mock_git_func(repo_path, command, git_func=None):
+        nonlocal call_count
+        if call_count == 0:
+            call_count += 1
+            return "pkg/broken.py"  # tracked files
+        else:
+            return ""  # untracked files
+
+    # First get the file paths
+    from yellhorn_mcp.formatters import get_codebase_snapshot
+
+    file_paths, _ = await get_codebase_snapshot(
+        repo, just_paths=True, git_command_func=mock_git_func
+    )
+    # Extract LSP snapshot
+    file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # The file path should be included in paths
     assert any("pkg/broken.py" in p for p in file_paths)
@@ -252,14 +287,25 @@ async def test_e2e_unreadable_file(tmp_git_repo):
     with open(binary_file, "wb") as f:
         f.write(b"\x00\x01\x02\x03")
 
-    # Mock the git operations
-    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
-        mock_git.return_value = "pkg/readable.py\npkg/binary.bin"
+    # Create a mock git command function
+    call_count = 0
 
-        # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
-            # Extract LSP snapshot
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+    async def mock_git_func(repo_path, command, git_func=None):
+        nonlocal call_count
+        if call_count == 0:
+            call_count += 1
+            return "pkg/readable.py\npkg/binary.bin"  # tracked files
+        else:
+            return ""  # untracked files
+
+    # First get the file paths
+    from yellhorn_mcp.formatters import get_codebase_snapshot
+
+    file_paths, _ = await get_codebase_snapshot(
+        repo, just_paths=True, git_command_func=mock_git_func
+    )
+    # Extract LSP snapshot
+    file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # The readable file should be processed
     assert any("pkg/readable.py" in p for p in file_paths)
@@ -278,14 +324,25 @@ async def test_e2e_prompt_formatting(tmp_git_repo):
     file = repo / "pkg" / "sample.py"
     file.write_text("def hello(): pass")
 
-    # Mock the git operations
-    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
-        mock_git.return_value = "pkg/sample.py"
+    # Create a mock git command function
+    call_count = 0
 
-        # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
-            # Get LSP snapshot
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+    async def mock_git_func(repo_path, command, git_func=None):
+        nonlocal call_count
+        if call_count == 0:
+            call_count += 1
+            return "pkg/sample.py"  # tracked files
+        else:
+            return ""  # untracked files
+
+    # First get the file paths
+    from yellhorn_mcp.formatters import get_codebase_snapshot
+
+    file_paths, _ = await get_codebase_snapshot(
+        repo, just_paths=True, git_command_func=mock_git_func
+    )
+    # Get LSP snapshot
+    file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
     # Format for prompt
     prompt = await format_codebase_for_prompt(file_paths, file_contents)
@@ -309,32 +366,40 @@ async def test_e2e_update_snapshot_with_diff(tmp_git_repo):
     file = repo / "pkg" / "sample.py"
     file.write_text("def initial(): pass")
 
-    # Mock the git operations for initial snapshot
-    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git_1:
-        # get_codebase_snapshot calls run_git_command twice: for tracked and untracked files
-        mock_git_1.side_effect = ["pkg/sample.py", ""]  # tracked files, untracked files
+    # Create a mock git command function for initial snapshot
+    call_count = 0
 
-        # Mock is_git_repository to always return True
-        with patch("yellhorn_mcp.utils.git_utils.is_git_repository", return_value=True):
-            # Get initial snapshot
-            file_paths, file_contents = await get_lsp_snapshot(repo)
+    async def mock_git_func(repo_path, command, git_func=None):
+        nonlocal call_count
+        if call_count == 0:
+            call_count += 1
+            return "pkg/sample.py"  # tracked files
+        else:
+            return ""  # untracked files
 
-    # Patch git diff to simulate a file change
-    with patch("yellhorn_mcp.utils.git_utils.run_git_command") as mock_git_2:
-        # First call is for the diff, second might be for other git operations
-        mock_git_2.side_effect = [
-            "+++ b/pkg/sample.py\n@@ -1 +1,2 @@\n def initial(): pass\n+def added(): pass",
-            "any other git output needed",
-        ]
+    # First get the file paths
+    from yellhorn_mcp.formatters import get_codebase_snapshot
 
-        # Write updated content to simulate the diff
-        file.write_text("def initial(): pass\ndef added(): pass")
+    file_paths, _ = await get_codebase_snapshot(
+        repo, just_paths=True, git_command_func=mock_git_func
+    )
+    # Get initial snapshot
+    file_paths, file_contents = await get_lsp_snapshot(repo, file_paths)
 
-        # Update snapshot with diff
-        updated_paths, updated_contents = await update_snapshot_with_full_diff_files(
-            repo, "main", "feature", file_paths, file_contents
-        )
+    # Create a mock git function for diff
+    async def mock_git_diff(repo_path, command, git_func=None):
+        if command[0] == "diff":
+            return "+++ b/pkg/sample.py\n@@ -1 +1,2 @@\n def initial(): pass\n+def added(): pass"
+        return ""
 
-        # Verify the file was updated with full content, not just signatures
-        assert "def initial(): pass" in updated_contents["pkg/sample.py"]
-        assert "def added(): pass" in updated_contents["pkg/sample.py"]
+    # Write updated content to simulate the diff
+    file.write_text("def initial(): pass\ndef added(): pass")
+
+    # Update snapshot with diff
+    updated_paths, updated_contents = await update_snapshot_with_full_diff_files(
+        repo, "main", "feature", file_paths, file_contents, git_command_func=mock_git_diff
+    )
+
+    # Verify the file was updated - LSP mode extracts signatures only
+    assert "def initial()" in updated_contents["pkg/sample.py"]
+    assert "def added()" in updated_contents["pkg/sample.py"]

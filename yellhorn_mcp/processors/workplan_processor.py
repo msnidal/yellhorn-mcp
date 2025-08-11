@@ -15,383 +15,25 @@ from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
 from yellhorn_mcp import __version__
+from yellhorn_mcp.formatters import (
+    build_file_structure_context,
+    format_codebase_for_prompt,
+    get_codebase_context,
+    get_codebase_snapshot,
+)
 from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment,
     update_issue_with_workplan,
 )
 from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
+from yellhorn_mcp.token_counter import TokenCounter
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
     format_submission_comment,
 )
 from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
-from yellhorn_mcp.utils.git_utils import YellhornMCPError, run_git_command
-
-
-async def get_codebase_snapshot(
-    repo_path: Path, _mode: str = "full", log_function=print
-) -> tuple[list[str], dict[str, str]]:
-    """Get a snapshot of the codebase.
-
-    Args:
-        repo_path: Path to the repository.
-        _mode: Snapshot mode ("full" or "paths").
-        log_function: Function to use for logging.
-
-    Returns:
-        Tuple of (file_paths, file_contents).
-    """
-    log_function(f"Getting codebase snapshot in mode: {_mode}")
-
-    # Get the .gitignore patterns
-    gitignore_patterns = []
-    gitignore_path = repo_path / ".gitignore"
-    if gitignore_path.exists():
-        gitignore_patterns = [
-            line.strip()
-            for line in gitignore_path.read_text().strip().split("\n")
-            if line.strip() and not line.strip().startswith("#")
-        ]
-        log_function(f"Found .gitignore with {len(gitignore_patterns)} patterns")
-
-    # Get tracked files
-    tracked_files = await run_git_command(repo_path, ["ls-files"])
-    tracked_file_list = tracked_files.strip().split("\n") if tracked_files else []
-
-    # Get untracked files (not ignored by .gitignore)
-    untracked_files = await run_git_command(
-        repo_path, ["ls-files", "--others", "--exclude-standard"]
-    )
-    untracked_file_list = untracked_files.strip().split("\n") if untracked_files else []
-
-    # Combine all files
-    all_files = set(tracked_file_list + untracked_file_list)
-
-    # Filter out empty strings
-    all_files = {f for f in all_files if f}
-
-    # Check for additional ignore files (.yellhornignore and .yellhorncontext)
-    yellhornignore_path = repo_path / ".yellhornignore"
-    yellhornignore_patterns = []
-    if yellhornignore_path.exists():
-        yellhornignore_patterns = [
-            line.strip()
-            for line in yellhornignore_path.read_text().strip().split("\n")
-            if line.strip() and not line.strip().startswith("#")
-        ]
-        log_function(f"Found .yellhornignore with {len(yellhornignore_patterns)} patterns")
-
-    # Parse .yellhorncontext patterns (supports blacklist, whitelist, and negation)
-    yellhorncontext_path = repo_path / ".yellhorncontext"
-    context_blacklist_patterns = []
-    context_whitelist_patterns = []
-    context_negation_patterns = []
-
-    if yellhorncontext_path.exists():
-        lines = [
-            line.strip()
-            for line in yellhorncontext_path.read_text().strip().split("\n")
-            if line.strip() and not line.strip().startswith("#")
-        ]
-
-        # Separate patterns by type
-        for line in lines:
-            if line.startswith("!"):
-                # Blacklist pattern (exclude this directory/file)
-                context_blacklist_patterns.append(line[1:])  # Remove the '!' prefix
-            else:
-                # All other patterns are whitelist (directories/files to include)
-                context_whitelist_patterns.append(line)
-
-        log_function(
-            f"Found .yellhorncontext with {len(context_whitelist_patterns)} whitelist, "
-            f"{len(context_blacklist_patterns)} blacklist, and {len(context_negation_patterns)} negation patterns"
-        )
-
-    def is_ignored(file_path: str) -> bool:
-        """Check if a file should be ignored based on patterns."""
-        import fnmatch
-
-        # Helper function to match patterns
-        def matches_pattern(path: str, pattern: str) -> bool:
-            if pattern.endswith("/"):
-                # Directory pattern - check if file is within this directory
-                return path.startswith(pattern) or fnmatch.fnmatch(path + "/", pattern)
-            else:
-                # File pattern
-                return fnmatch.fnmatch(path, pattern)
-
-        # Step 1: Check negation patterns from .yellhorncontext (these override everything)
-        for pattern in context_negation_patterns:
-            if matches_pattern(file_path, pattern):
-                return False  # Explicitly included
-
-        # Step 2: If we have .yellhorncontext whitelist patterns, check them
-        if context_whitelist_patterns:
-            # Check if file matches any whitelist pattern
-            for pattern in context_whitelist_patterns:
-                if matches_pattern(file_path, pattern):
-                    # File is whitelisted, but still check context blacklist
-                    break
-            else:
-                # File doesn't match any whitelist pattern, ignore it
-                return True
-
-        # Step 3: Check .yellhorncontext blacklist patterns
-        for pattern in context_blacklist_patterns:
-            if matches_pattern(file_path, pattern):
-                return True
-
-        # Step 4: Check .yellhornignore patterns (fallback)
-        for pattern in yellhornignore_patterns:
-            if matches_pattern(file_path, pattern):
-                return True
-
-        return False
-
-    # Apply filtering with detailed logging
-    filtered_files = []
-    total_files = len(all_files)
-
-    # Counters for debugging
-    negation_override_count = 0
-    whitelist_miss_count = 0
-    context_blacklist_count = 0
-    yellhornignore_count = 0
-    kept_count = 0
-
-    # Sample a few files for debugging
-    sample_files = list(sorted(all_files))[:10] if all_files else []
-    log_function(f"Sample file paths: {sample_files}")
-
-    if context_whitelist_patterns:
-        sample_patterns = context_whitelist_patterns[:5]
-        log_function(f"Sample whitelist patterns: {sample_patterns}")
-
-    def is_ignored_with_logging(file_path: str) -> tuple[bool, str]:
-        """Check if a file should be ignored and return reason."""
-        import fnmatch
-
-        # Helper function to match patterns
-        def matches_pattern(path: str, pattern: str) -> bool:
-            if pattern.endswith("/"):
-                # Directory pattern - check if file is within this directory
-                return path.startswith(pattern) or fnmatch.fnmatch(path + "/", pattern)
-            else:
-                # File pattern
-                return fnmatch.fnmatch(path, pattern)
-
-        # Step 1: Check negation patterns from .yellhorncontext (these override everything)
-        for pattern in context_negation_patterns:
-            if matches_pattern(file_path, pattern):
-                return False, "negation_override"  # Explicitly included
-
-        # Step 2: If we have .yellhorncontext whitelist patterns, check them
-        if context_whitelist_patterns:
-            # Check if file matches any whitelist pattern
-            for pattern in context_whitelist_patterns:
-                if matches_pattern(file_path, pattern):
-                    # File is whitelisted, but still check context blacklist
-                    break
-            else:
-                # File doesn't match any whitelist pattern, ignore it
-                return True, "whitelist_miss"
-
-        # Step 3: Check .yellhorncontext blacklist patterns
-        for pattern in context_blacklist_patterns:
-            if matches_pattern(file_path, pattern):
-                return True, "context_blacklist"
-
-        # Step 4: Check .yellhornignore patterns (fallback)
-        for pattern in yellhornignore_patterns:
-            if matches_pattern(file_path, pattern):
-                return True, "yellhornignore"
-
-        return False, "kept"
-
-    for file_path in sorted(all_files):
-        ignored, reason = is_ignored_with_logging(file_path)
-
-        if reason == "negation_override":
-            negation_override_count += 1
-            filtered_files.append(file_path)
-        elif reason == "whitelist_miss":
-            whitelist_miss_count += 1
-        elif reason == "context_blacklist":
-            context_blacklist_count += 1
-        elif reason == "yellhornignore":
-            yellhornignore_count += 1
-        elif reason == "kept":
-            kept_count += 1
-            filtered_files.append(file_path)
-
-    # Log detailed filtering results
-    log_function(f"Filtering results out of {total_files} files:")
-    if negation_override_count > 0:
-        log_function(f"  - {negation_override_count} kept by negation override")
-    if whitelist_miss_count > 0:
-        log_function(f"  - {whitelist_miss_count} dropped (no whitelist match)")
-    if context_blacklist_count > 0:
-        log_function(f"  - {context_blacklist_count} dropped by context blacklist")
-    if yellhornignore_count > 0:
-        log_function(f"  - {yellhornignore_count} dropped by .yellhornignore")
-    if kept_count > 0:
-        log_function(f"  - {kept_count} kept (passed all filters)")
-
-    log_function(f"Total kept: {len(filtered_files)} files")
-
-    file_paths = filtered_files
-
-    # If mode is "paths", return empty file contents
-    if _mode == "paths":
-        return file_paths, {}
-
-    # Read file contents for full mode
-    file_contents = {}
-    MAX_FILE_SIZE = 1024 * 1024  # 1MB limit per file
-    skipped_large_files = 0
-
-    for file_path in file_paths:
-        full_path = repo_path / file_path
-        try:
-            # Check file size first
-            if full_path.stat().st_size > MAX_FILE_SIZE:
-                skipped_large_files += 1
-                continue
-
-            # Try to read as text
-            content = full_path.read_text(encoding="utf-8", errors="ignore")
-            file_contents[file_path] = content
-        except Exception:
-            # Skip files that can't be read
-            continue
-
-    if skipped_large_files > 0:
-        log_function(f"Skipped {skipped_large_files} files larger than 1MB")
-
-    log_function(f"Read contents of {len(file_contents)} files")
-
-    return file_paths, file_contents
-
-
-def build_file_structure_context(file_paths: list[str]) -> str:
-    """Build a codebase info string containing only the file structure.
-
-    Args:
-        file_paths: List of file paths to include.
-
-    Returns:
-        Formatted string with directory tree structure.
-    """
-    from collections import defaultdict
-
-    # Group files by directory
-    dir_structure = defaultdict(list)
-    for path in file_paths:
-        parts = path.split("/")
-        if len(parts) == 1:
-            # Root level file
-            dir_structure[""].append(parts[0])
-        else:
-            # File in subdirectory
-            dir_path = "/".join(parts[:-1])
-            filename = parts[-1]
-            dir_structure[dir_path].append(filename)
-
-    # Build tree representation
-    lines = ["<codebase_tree>"]
-    lines.append(".")
-
-    # Sort directories for consistent output
-    sorted_dirs = sorted(dir_structure.keys())
-
-    for dir_path in sorted_dirs:
-        if dir_path:  # Skip root (already shown as ".")
-            indent_level = dir_path.count("/")
-            indent = "│   " * indent_level
-            dir_name = dir_path.split("/")[-1]
-            lines.append(f"{indent}├── {dir_name}/")
-
-            # Add files in this directory
-            indent = "│   " * (indent_level + 1)
-            sorted_files = sorted(dir_structure[dir_path])
-            for i, filename in enumerate(sorted_files):
-                if i == len(sorted_files) - 1:
-                    lines.append(f"{indent}└── {filename}")
-                else:
-                    lines.append(f"{indent}├── {filename}")
-        else:
-            # Root level files
-            sorted_files = sorted(dir_structure[""])
-            for filename in sorted_files:
-                lines.append(f"├── {filename}")
-
-    lines.append("</codebase_tree>")
-    return "\n".join(lines)
-
-
-async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[str, str]) -> str:
-    """Format the codebase information for inclusion in the prompt.
-
-    Args:
-        file_paths: List of file paths.
-        file_contents: Dictionary mapping file paths to their contents.
-
-    Returns:
-        Formatted string with codebase structure and contents.
-    """
-    # Start with the file structure tree
-    codebase_info = build_file_structure_context(file_paths)
-
-    # Add file contents if available
-    if file_contents:
-        codebase_info += "\n\n<file_contents>\n"
-        for file_path in sorted(file_contents.keys()):
-            content = file_contents[file_path]
-            # Skip empty files
-            if not content.strip():
-                continue
-
-            # Add file header and content
-            codebase_info += f"\n--- File: {file_path} ---\n"
-            codebase_info += content
-            if not content.endswith("\n"):
-                codebase_info += "\n"
-
-        codebase_info += "</file_contents>"
-
-    return codebase_info
-
-
-async def _get_codebase_context(repo_path: Path, reasoning_mode: str, log_function) -> str:
-    """Fetches and formats the codebase context based on the reasoning mode.
-
-    Args:
-        repo_path: Path to the repository.
-        reasoning_mode: Mode for codebase analysis ("full", "lsp", "file_structure", "none").
-        log_function: Function to use for logging.
-
-    Returns:
-        Formatted codebase context string.
-    """
-    if reasoning_mode == "lsp":
-        from yellhorn_mcp.utils.lsp_utils import get_lsp_snapshot
-
-        file_paths, file_contents = await get_lsp_snapshot(repo_path)
-        return await format_codebase_for_prompt(file_paths, file_contents)
-    elif reasoning_mode == "file_structure":
-        file_paths, _ = await get_codebase_snapshot(
-            repo_path, _mode="paths", log_function=log_function
-        )
-        return build_file_structure_context(file_paths)
-    elif reasoning_mode == "full":
-        file_paths, file_contents = await get_codebase_snapshot(
-            repo_path, log_function=log_function
-        )
-        return await format_codebase_for_prompt(file_paths, file_contents)
-    return ""  # For 'none' mode
 
 
 async def _generate_and_update_issue(
@@ -408,6 +50,7 @@ async def _generate_and_update_issue(
     _meta: dict[str, Any] | None,
     ctx: Context | None,
     github_command_func: Callable | None = None,
+    git_command_func: Callable | None = None,
 ) -> None:
     """Generate content with AI and update the GitHub issue.
 
@@ -425,6 +68,7 @@ async def _generate_and_update_issue(
         _meta: Optional metadata from caller.
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
+        git_command_func: Optional Git command function (for mocking).
     """
     # Use LLM Manager for unified LLM calls
     if not llm_manager:
@@ -440,10 +84,19 @@ async def _generate_and_update_issue(
 
     # Add debug comment if requested
     if debug:
-        debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
-        await add_issue_comment(
-            repo_path, issue_number, debug_comment, github_command_func=github_command_func
-        )
+        try:
+            debug_comment = f"<details>\n<summary>Debug: Full prompt used for generation</summary>\n\n```\n{prompt}\n```\n</details>"
+            await add_issue_comment(
+                repo_path, issue_number, debug_comment, github_command_func=github_command_func
+            )
+            if ctx:
+                await ctx.log(level="info", message="Debug comment added successfully")
+        except Exception as e:
+            # Don't let debug comment failures block workplan generation
+            if ctx:
+                await ctx.log(level="warning", message=f"Failed to add debug comment: {str(e)}")
+            else:
+                print(f"Warning: Failed to add debug comment: {str(e)}")
 
     # Check if we should use search grounding
     use_search_grounding = not disable_search_grounding
@@ -482,7 +135,7 @@ async def _generate_and_update_issue(
         if is_openai_model:
             # OpenAI models don't support citations
             response_data = await llm_manager.call_llm_with_usage(
-                prompt=prompt, model=model, temperature=0.0, **llm_kwargs
+                prompt=prompt, model=model, temperature=0.0, ctx=ctx, **llm_kwargs
             )
             workplan_content = response_data["content"]
             usage_metadata = response_data["usage_metadata"]
@@ -498,7 +151,12 @@ async def _generate_and_update_issue(
         else:
             # Gemini models - use citation-aware call
             response_data = await llm_manager.call_llm_with_citations(
-                prompt=prompt, model=model, temperature=0.0, tools=search_tools, **llm_kwargs
+                prompt=prompt,
+                model=model,
+                temperature=0.0,
+                tools=search_tools,
+                ctx=ctx,
+                **llm_kwargs,
             )
 
             workplan_content = response_data["content"]
@@ -614,6 +272,7 @@ async def process_workplan_async(
     _meta: dict[str, Any] | None = None,
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
+    git_command_func: Callable | None = None,
 ) -> None:
     """Generate a workplan asynchronously and update the GitHub issue.
 
@@ -630,6 +289,7 @@ async def process_workplan_async(
         _meta: Optional metadata from the caller.
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
+        git_command_func: Optional Git command function (for mocking).
     """
     try:
         # Create a simple logging function that uses ctx if available
@@ -638,64 +298,153 @@ async def process_workplan_async(
                 asyncio.create_task(ctx.log(level="info", message=msg))
 
         # Get codebase info based on reasoning mode
-        codebase_info = await _get_codebase_context(repo_path, codebase_reasoning, context_log)
+        # Calculate token limit for codebase context (70% of model's context window)
+        token_counter = TokenCounter()
+        model_limit = token_counter.get_model_limit(model)
+        # Reserve tokens for prompt template, task details, and response
+        # Estimate: prompt template ~1000, task details ~500, safety margin for response ~4000
+        codebase_token_limit = int((model_limit - 5500) * 0.7)
+
+        codebase_info, _ = await get_codebase_context(
+            repo_path,
+            codebase_reasoning,
+            context_log,
+            token_limit=codebase_token_limit,
+            model=model,
+            git_command_func=git_command_func,
+        )
 
         # Construct prompt
-        prompt = f"""You are an expert software developer tasked with creating a detailed workplan that will be published as a GitHub issue.
+        prompt = f"""You are a senior software architect and technical writer.  
+Your task is to output a GitHub-issue–ready **work-plan** that fully complies with the “Strong Work-Plan Rules” and the “Gap-Fix Guidelines” below.  
+The answer you return will be copied verbatim into a GitHub issue, so structure, order and precision matter.
 
-# Task Title
-{title}
-
-# Task Details
-{detailed_description}
-
-# Codebase Context
+CONTEXT
+───────────────────
+Multi-file snippet of the current repo (trimmed for length)
 {codebase_info}
 
-# Instructions
-Create a comprehensive implementation plan with the following structure:
+One-line task title
+{title}
 
-## Summary
-Provide a concise high-level summary of what needs to be done.
+Product / feature description from the PM
+{detailed_description}
 
-## Implementation Steps
-Break down the implementation into clear, actionable steps. Each step should include:
-- What needs to be done
-- Which files need to be modified or created
-- Code snippets where helpful
-- Any potential challenges or considerations
+GLOBAL TONE & STYLE
+───────────────────
+• Write as one senior engineer explaining to another.  
+• Zero “TODO”, “placeholder”, or speculative wording—everything must be concrete and actionable.  
+• Be self-sufficient: an unfamiliar engineer can execute the plan end-to-end without additional guidance.  
+• All headings and check-box bullets must render correctly in GitHub Markdown.  
+• Keep line length ≤ 120 characters where feasible.
+
+TOP-LEVEL SECTIONS  (DO NOT ADD, REMOVE, OR RE-ORDER)
+──────────────────────────────────────────────────────
+## Summary  
+## Technical Details  
+## Architecture  
+## Completion Criteria & Metrics  
+## References  
+## Implementation Steps  
+## Global Test Strategy  
+## Files to Modify  
+## New Files to Create  
+
+MANDATORY CONTENT PER SECTION
+─────────────────────────────
+## Summary   (≤ 5 sentences)
+1 . Problem – one sentence that states the issue or feature.  
+2 . Proposed solution – what will be built.  
+3 . Why it matters – business or technical impact.  
+4 . Success criteria – concise, measurable, single sentence.  
+5 . Main subsystems touched.
 
 ## Technical Details
-Include specific technical information such as:
-- API endpoints to create/modify
-- Database schema changes
-- Configuration updates
-- Dependencies to add
+• Languages, frameworks, min versions.  
+• “External Dependencies” sub-section:  
+  – List every new third-party package AND specify how it will be introduced (e.g., `pyproject.toml` stanza, Dockerfile line).  
+• Dependency management & pinning strategy (poetry, npm, go-mods, etc.).  
+• Build, lint, formatting, type-checking commands.  
+• Logging & observability – logger names, redaction strategy, trace IDs, dashboards.  
+• Analytics/KPIs – event names, schema, when they fire.  
+• Testing frameworks & helpers (mention async helpers or fixtures unique to repo).
 
-## Testing Approach
-Describe how to test the implementation:
-- Unit tests to add
-- Integration tests needed
-- Manual testing steps
+## Architecture
+• “Existing Components Leveraged” bullet list (files / classes).  
+• “New Components Introduced” bullet list (fully enumerated).  
+• Control-flow & data-flow diagram (ASCII or Mermaid).  
+• State-management, retry/fallback, and error-handling patterns (e.g., three-strike fallback).
 
-## Files to Modify
-List all files that will need to be changed, organized by type of change (create, modify, delete).
-
-## Example Code Changes
-Provide concrete code examples for the most important changes.
+## Completion Criteria & Metrics
+• Engineering metrics – latency, SLA, test coverage ≥ X %, lint/type-check clean, etc.  
+• Business metrics – conversion, NPS, error-rate < Y %, etc.  
+• Code-state definition of done – all CI jobs green, new DAG registered, talk-suite passes, docs updated.
 
 ## References
-Include any relevant documentation, API references, or other resources.
+• Exact repo paths examined – include line numbers or symbols when helpful.  
+• External URLs (one per line).  
+• Commit hashes or tags if specific revisions were read.
 
-Include specific files to modify, new files to create, and detailed implementation steps.
-Respond directly with a clear, structured workplan with numbered steps, code snippets, and thorough explanations in Markdown. 
-Your response will be published directly to a GitHub issue without modification, so please include:
-- Detailed headers and Markdown sections
-- Code blocks with appropriate language syntax highlighting
-- Clear explanations that someone could follow step-by-step
-- Specific file paths and function names where applicable
-- Any configuration changes or dependencies needed
+## Implementation Steps
+Break work into atomic tasks suitable for individual PRs.  
+Use the sub-template **verbatim** for every task:
 
+### - [ ] Step <N>: <Concise Title>  
+**Description**: 1–2 sentences.  
+**Files**: list of files created/modified in this step.  
+**Reference(s)**: pointer(s) to rows in “## References”.  
+**Test(s)**: concrete test file names, fixtures/mocks, and the CI command that must pass.
+
+Granularity rules:  
+• One node/class/function per step unless trivial.  
+• No mixed concerns (e.g., “Implement X and refactor Y” must be two steps).  
+• Each step’s **Test(s)** must name at least one assertion or expected behaviour.
+
+## Global Test Strategy
+• Unit, integration, e2e, load – what’s covered where.  
+• How to run locally (`make test`, `python -m pytest`, etc.).  
+• Env-vars / secrets layout (`.env.test`).  
+• Async helpers, fixtures, sandbox accounts.  
+• Coverage enforcement rule (PR fails if coverage < threshold).  
+
+## Files to Modify / ## New Files to Create
+• Use Markdown tables or bullet lists.  
+• For **new files** provide:  
+  – One-line purpose.  
+  – Stub code block with signature(s).  
+  – Required exports (`__all__`) or module wiring.  
+  – Note if protobuf, OpenAPI, or YAML specs also added.
+
+GAP-FIX GUIDELINES (Always Apply)
+────────────────────────────────
+1. ALWAYS describe how dependencies are added/pinned (e.g., `pyproject.toml`, `poetry.lock`).  
+2. If repo has custom test helpers (e.g., async graph helpers), reference & use them.  
+3. Call out existing services or models to be injected instead of rebuilt.  
+4. Explicitly enumerate **every** new component – no omissions.  
+5. Include retry/fallback/strike logic if part of the design pattern.  
+6. “Completion Criteria” must state both code-state and operational success metrics.  
+7. Each Implementation Step must have: references, granular scope, concrete tests.  
+8. Provide GitHub check-box list ready for copy-paste.  
+9. If conversational or persona suites are required, add a task for them.
+
+PRE-FLIGHT QUALITY GATE (Auto-check before you answer)
+───────────────────────────────────────────────────────
+✔ All top-level sections present and in correct order.  
+✔ “Summary” ≤ 5 sentences and includes Problem + Success criteria.  
+✔ “Technical Details” contains “External Dependencies” + dependency pinning method.  
+✔ Architecture lists both Existing & New components.  
+✔ Completion Criteria includes code-state AND operational metrics.  
+✔ Implementation Steps use the exact sub-template and include tests.  
+✔ Global Test Strategy explains commands and coverage enforcement.  
+✔ New Files section provides stubs and export notes.  
+✔ No placeholders, “TODO”, or speculative language.  
+✔ All repo paths / URLs referenced are enumerated in “## References”.
+
+IF ANY ITEM IS MISSING, STOP, FIX, AND RE-EMIT THE ENTIRE PLAN.
+
+BEGIN OUTPUT
+────────────
+Return only the GitHub-Markdown for the issue body, starting with “## Summary”.
 The workplan should be comprehensive enough that a developer or AI assistant could implement it without additional context, and structured in a way that makes it easy for an LLM to quickly understand and work with the contained information.
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
@@ -724,6 +473,7 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             _meta,
             ctx,
             github_command_func,
+            git_command_func,
         )
 
     except Exception as e:
@@ -758,6 +508,7 @@ async def process_revision_async(
     _meta: dict[str, Any] | None = None,
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
+    git_command_func: Callable | None = None,
 ) -> None:
     """Revise an existing workplan asynchronously and update the GitHub issue.
 
@@ -774,6 +525,7 @@ async def process_revision_async(
         _meta: Optional metadata from the caller.
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
+        git_command_func: Optional Git command function (for mocking).
     """
     try:
         # Create a simple logging function that uses ctx if available
@@ -782,7 +534,21 @@ async def process_revision_async(
                 asyncio.create_task(ctx.log(level="info", message=msg))
 
         # Get codebase info based on reasoning mode
-        codebase_info = await _get_codebase_context(repo_path, codebase_reasoning, context_log)
+        # Calculate token limit for codebase context (70% of model's context window)
+        token_counter = TokenCounter()
+        model_limit = token_counter.get_model_limit(model)
+        # Reserve tokens for prompt template, task details, and response
+        # Estimate: prompt template ~1000, task details ~500, safety margin for response ~4000
+        codebase_token_limit = int((model_limit - 5500) * 0.7)
+
+        codebase_info, _ = await get_codebase_context(
+            repo_path,
+            codebase_reasoning,
+            context_log,
+            token_limit=codebase_token_limit,
+            model=model,
+            git_command_func=git_command_func,
+        )
 
         # Extract title from original workplan (assumes first line is # Title)
         title_line = original_workplan.split("\n")[0] if original_workplan else ""
@@ -818,9 +584,6 @@ Respond directly with the complete revised workplan in Markdown format.
 IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. Do *not* wrap your entire response in a single Markdown code block (```). Start directly with the '## Summary' heading.
 """
 
-        # Add the title as header prefix
-        content_prefix = f"# {title}\n\n"
-
         # llm_manager is now passed as a parameter
 
         # Generate and update issue using the helper
@@ -831,13 +594,14 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             prompt,
             issue_number,
             title,
-            content_prefix,
+            "",
             disable_search_grounding,
             debug,
             codebase_reasoning,
             _meta,
             ctx,
             github_command_func,
+            git_command_func,
         )
 
     except Exception as e:

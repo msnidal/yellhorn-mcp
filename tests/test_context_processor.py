@@ -14,6 +14,35 @@ from yellhorn_mcp.utils.git_utils import YellhornMCPError
 class TestProcessContextCurationAsync:
     """Test suite for process_context_curation_async function."""
 
+    async def mock_git_command(self, repo_path, command):
+        """Mock git command for tests."""
+        if command == ["ls-files"]:
+            # Return test files based on the repo structure
+            # Check which files actually exist in the test repo
+            files = []
+            if (repo_path / "src" / "main.py").exists():
+                files.append("src/main.py")
+            if (repo_path / "src" / "utils.py").exists():
+                files.append("src/utils.py")
+            if (repo_path / "tests" / "test_main.py").exists():
+                files.append("tests/test_main.py")
+            if (repo_path / "README.md").exists():
+                files.append("README.md")
+            if (repo_path / "config.yaml").exists():
+                files.append("config.yaml")
+            if (repo_path / "config.py").exists():
+                files.append("config.py")
+            if (repo_path / "yellhorn_mcp" / "integrations" / "github_integration.py").exists():
+                files.append("yellhorn_mcp/integrations/github_integration.py")
+            return (
+                "\n".join(files)
+                if files
+                else "src/main.py\nsrc/utils.py\ntests/test_main.py\nREADME.md\nconfig.yaml"
+            )
+        elif command == ["ls-files", "--others", "--exclude-standard"]:
+            return ""
+        return ""
+
     @pytest.mark.asyncio
     async def test_process_context_curation_success(self, tmp_path):
         """Test successful context curation."""
@@ -40,7 +69,7 @@ tests
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         result = await process_context_curation_async(
             repo_path=repo_path,
@@ -49,15 +78,13 @@ tests
             user_task="Implement user authentication system",
             output_path=".yellhorncontext",
             codebase_reasoning="file_structure",
-            ignore_file_path=".yellhornignore",
-            depth_limit=0,
             disable_search_grounding=False,
             ctx=mock_ctx,
         )
 
         # Verify success message
         assert "Successfully created .yellhorncontext file" in result
-        assert "2 important directories" in result
+        assert "2 directories" in result
 
         # Verify file was created
         context_file = repo_path / ".yellhorncontext"
@@ -97,7 +124,7 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -134,9 +161,13 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {"codebase_reasoning": "lsp"}
+        mock_ctx.request_context.lifespan_context = {
+            "codebase_reasoning": "lsp",
+            "git_command_func": self.mock_git_command,
+        }
 
-        with patch("yellhorn_mcp.utils.lsp_utils.get_lsp_snapshot") as mock_lsp:
+        # Patch at the module level where it's imported
+        with patch("yellhorn_mcp.formatters.context_fetcher.get_lsp_snapshot") as mock_lsp:
             mock_lsp.return_value = (["src/main.py"], {"src/main.py": "def main(): pass"})
 
             await process_context_curation_async(
@@ -150,7 +181,7 @@ src
             )
 
             # Verify LSP snapshot was used
-            mock_lsp.assert_called_once_with(repo_path)
+            mock_lsp.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_process_context_curation_full_mode(self, tmp_path):
@@ -172,7 +203,7 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -211,7 +242,7 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -220,16 +251,15 @@ src
             user_task="Test task",
             output_path=".yellhorncontext",
             codebase_reasoning="file_structure",
-            depth_limit=2,  # Limit depth to 2
             ctx=mock_ctx,
         )
 
-        # Verify files at depth > 2 were excluded
+        # Verify nested structure is properly handled
         call_args = mock_llm_manager.call_llm.call_args[1]
         prompt = call_args["prompt"]
         # Check for file patterns in the tree structure
-        assert "main.py" in prompt  # Should be included
-        assert "handlers/auth.py" not in prompt  # Depth 3, should be excluded
+        assert "main.py" in prompt
+        assert "src" in prompt  # Directory structure should be included
 
     @pytest.mark.asyncio
     async def test_process_context_curation_no_llm_manager(self, tmp_path):
@@ -239,7 +269,7 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         with pytest.raises(YellhornMCPError, match="LLM Manager not initialized"):
             await process_context_curation_async(
@@ -268,7 +298,7 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         result = await process_context_curation_async(
             repo_path=repo_path,
@@ -305,7 +335,7 @@ src
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         result = await process_context_curation_async(
             repo_path=repo_path,
@@ -351,7 +381,7 @@ These contain the core application code and tests.
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         result = await process_context_curation_async(
             repo_path=repo_path,
@@ -388,7 +418,7 @@ These contain the core application code and tests.
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         custom_output = ".custom_context"
         result = await process_context_curation_async(
@@ -422,7 +452,7 @@ These contain the core application code and tests.
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         # Try to write to an invalid path (directory instead of file)
         invalid_output = "/"  # Root directory, should cause permission error
@@ -454,7 +484,10 @@ These contain the core application code and tests.
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {"use_search_grounding": True}
+        mock_ctx.request_context.lifespan_context = {
+            "use_search_grounding": True,
+            "git_command_func": self.mock_git_command,
+        }
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -486,7 +519,7 @@ These contain the core application code and tests.
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         # Very long task description
         long_task = (
@@ -548,7 +581,7 @@ tests
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -589,7 +622,7 @@ tests
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -652,7 +685,7 @@ yellhorn_mcp/integrations
 
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
-        mock_ctx.request_context.lifespan_context = {}
+        mock_ctx.request_context.lifespan_context = {"git_command_func": self.mock_git_command}
 
         await process_context_curation_async(
             repo_path=repo_path,
@@ -679,7 +712,9 @@ yellhorn_mcp/integrations
         assert "yellhorn_mcp/" in content
         assert "yellhorn_mcp/**" not in content
 
-        assert "yellhorn_mcp/integrations/" in content
+        # yellhorn_mcp/integrations/ should NOT be in content because yellhorn_mcp/ already covers it
+        # (consolidation removes child directories when parent is included)
+        assert "yellhorn_mcp/integrations/" not in content
         assert "yellhorn_mcp/integrations/**" not in content
 
         # Root directory has files, should get simple pattern
@@ -705,5 +740,5 @@ yellhorn_mcp/integrations
 
         # Verify we have the expected number of patterns
         assert (
-            len(pattern_lines) == 4
-        )  # './', 'src/', 'yellhorn_mcp/', 'yellhorn_mcp/integrations/'
+            len(pattern_lines) == 3
+        )  # './', 'src/', 'yellhorn_mcp/' (integrations is consolidated under yellhorn_mcp)

@@ -54,11 +54,11 @@ async def test_openai_gemini_errors():
     mock_ctx.log = AsyncMock()
 
     # Test OpenAI API error in process_judgement_async
-    with patch("yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.formatters.codebase_snapshot.get_codebase_snapshot") as mock_snapshot:
         mock_snapshot.return_value = (["file1.py"], {"file1.py": "content"})
 
         with patch(
-            "yellhorn_mcp.processors.workplan_processor.format_codebase_for_prompt",
+            "yellhorn_mcp.formatters.prompt_formatter.format_codebase_for_prompt",
             return_value="formatted",
         ):
             # Create a mock OpenAI client that raises an error

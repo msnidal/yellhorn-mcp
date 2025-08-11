@@ -4,14 +4,20 @@
 
 A Model Context Protocol (MCP) server that provides functionality to create detailed workplans to implement a task or feature. These workplans are generated with a large, powerful model (such as gemini 2.5 pro or even the o3 deep research API), insert your entire codebase into the context window by default, and can also access URL context and do web search depending on the model used. This pattern of creating workplans using a powerful reasoning model is highly useful for defining work to be done by code assistants like Claude Code or other MCP compatible coding agents, as well as providing a reference to reviewing the output of such coding models and ensure they meet the exactly specified original requirements.
 
-## What's New in v0.7.0
+## What's New in v0.7.1
 
-- **🔄 Unified LLM Manager**: New centralized LLM management system with automatic retry logic and rate limit handling
-- **🧩 Smart Chunking**: Automatic prompt chunking for large codebases that exceed model context limits
-- **📊 Enhanced Token Counting**: Improved token counting with support for latest models (o3, o4-mini, gemini-2.5-pro)
-- **💰 Cost Tracking**: Comprehensive cost estimation and usage tracking across all supported models
-- **🔧 Reliability Improvements**: Exponential backoff retry for rate limits and transient failures
-- **⚡ Performance Optimizations**: Better handling of large prompts and improved response aggregation
+- **📁 Advanced File Filtering**: Multi-layer file filtering system with `.gitignore`, `.yellhornignore`, and `.yellhorncontext` support
+- **🎯 Smart Context Curation**: Improved context curation with directory consolidation and better LLM integration
+- **🔒 Token Safety**: Enhanced token limit enforcement with 10% safety margins and clear truncation notices
+- **🛠️ Better Organization**: Refactored codebase with cleaner module separation (formatters, utils, processors)
+- **✅ Test Reliability**: Fixed 54+ test failures and improved test infrastructure
+- **🔄 Git Integration**: Consolidated git command handling with dependency injection for better testability
+
+### Previous Release (v0.7.0)
+- **🔄 Unified LLM Manager**: Centralized LLM management with automatic retry logic
+- **🧩 Smart Chunking**: Automatic prompt chunking for large codebases
+- **📊 Enhanced Token Counting**: Support for latest models (o3, o4-mini, gemini-2.5-pro)
+- **💰 Cost Tracking**: Comprehensive cost estimation and usage tracking
 
 ## Features
 
@@ -223,6 +229,63 @@ Any URLs mentioned in the workplan will be extracted and preserved in a Referenc
   - `message`: Confirmation that the judgement task has been initiated
   - `subissue_url`: URL to the created placeholder sub-issue where results will be posted
   - `subissue_number`: The GitHub issue number of the placeholder sub-issue
+
+## File Filtering System
+
+Yellhorn MCP provides a sophisticated multi-layer file filtering system to control which files are included in the AI context. The system follows a priority order to determine file inclusion:
+
+### Filter Layers (in priority order)
+
+1. **`.yellhorncontext` whitelist**: If this file exists and contains patterns, ONLY files matching these patterns are included
+2. **`.yellhorncontext` blacklist**: Files matching blacklist patterns (starting with `!`) are excluded
+3. **`.yellhornignore` whitelist**: Files matching whitelist patterns (starting with `!`) are explicitly included
+4. **`.yellhornignore` blacklist**: Files matching these patterns are excluded
+5. **`.gitignore` blacklist**: Files ignored by git are automatically excluded
+
+### Always Ignored Patterns
+
+The following patterns are always ignored regardless of other settings:
+- `.git/` - Git metadata
+- `__pycache__/` - Python cache files
+- `node_modules/` - Node.js dependencies
+- `*.pyc` - Python compiled files
+- `.venv/`, `venv/` - Python virtual environments
+
+### File Format
+
+Both `.yellhornignore` and `.yellhorncontext` files follow a gitignore-like syntax:
+- One pattern per line
+- Lines starting with `#` are comments
+- Empty lines are ignored
+- Use `!` prefix for whitelist patterns (include explicitly)
+- Directory patterns should end with `/`
+
+### Example `.yellhornignore`
+
+```
+# Exclude test files
+tests/
+*.test.js
+
+# Exclude build artifacts
+dist/
+build/
+
+# But include important test utilities
+!tests/utils/
+```
+
+### Example `.yellhorncontext`
+
+```
+# Only include source code and documentation
+src/
+docs/
+README.md
+
+# Exclude generated files even in src
+!src/generated/
+```
 
 ## Resource Access
 

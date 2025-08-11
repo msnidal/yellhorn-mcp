@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2025-08-11
+
+### Added
+
+- **File Filtering System**: Comprehensive file filtering with multiple layers of control:
+  - `.gitignore` blacklist filtering (files excluded by git are ignored)
+  - `.yellhornignore` whitelist/blacklist filtering (custom patterns for Yellhorn)
+  - `.yellhorncontext` whitelist filtering (explicit inclusion list)
+  - Always ignored patterns (e.g., `.git/`, `__pycache__/`, `node_modules/`)
+  - Priority order: yellhorncontext whitelist > yellhorncontext blacklist > yellhornignore whitelist > yellhornignore blacklist > gitignore blacklist
+
+- **Token Limit Enforcement**: Improved token limit handling:
+  - 10% safety margin applied to all token limits
+  - Basic file ordering for consistent truncation behavior
+  - Clear truncation notices when content exceeds limits
+
+- **Context Curation Enhancement**: Improved context curation process:
+  - Split into three distinct parts: building context, calling LLM, parsing output
+  - Better directory consolidation (child directories removed when parent included)
+  - Improved error handling and fallback behavior
+
+### Fixed
+
+- **File Structure Parsing**: Fixed accuracy issues in file structure parsing
+- **Module Refactoring**: Fixed test failures caused by module reorganization:
+  - Updated import paths from `processors` to `formatters` and `utils`
+  - Fixed function signatures to return tuples instead of strings
+  - Corrected mock implementations for git operations
+
+- **Git Command Consolidation**: Consolidated git command handling:
+  - All git operations now use unified `git_command_func` parameter
+  - Consistent error handling across git operations
+  - Better testability through dependency injection
+
+### Changed
+
+- **Code Organization**: Refactored codebase structure:
+  - Moved formatting functions to `formatters` package
+  - Moved utility functions to appropriate `utils` modules
+  - Better separation of concerns between modules
+
+- **Test Infrastructure**: Improved test reliability:
+  - Fixed 54 test failures related to module refactoring
+  - Updated all mock patches to use correct module paths
+  - Improved async test handling
+
 ## [0.7.0] - 2025-07-18
 
 ### Added

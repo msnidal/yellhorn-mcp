@@ -49,20 +49,53 @@ async def create_github_issue(
     else:
         labels_list = labels
 
-    # Ensure all labels exist (only if using real GitHub CLI)
+    # Try to ensure all labels exist (only if using real GitHub CLI)
+    # This is non-critical - issues can be created without labels
     if github_command_func is None:
+        existing_labels = []
         for label in labels_list:
-            await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP")
+            if await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP"):
+                existing_labels.append(label)
+            else:
+                print(f"Warning: Will create issue without label '{label}' due to creation failure")
+
+        # Use only the labels that exist or were successfully created
+        labels_list = existing_labels
 
     # Build command with multiple labels
-    command = ["issue", "create", "--title", title, "--body", body]
+    # Use --body-file for large content to avoid "Argument list too long" error
+    import os
+    import tempfile
 
-    # Add each label as a separate --label argument
-    for label in labels_list:
-        command.extend(["--label", label])
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+        tmp.write(body)
+        tmp_path = tmp.name
 
-    # Create the issue - gh issue create outputs the URL directly
-    result = await command_func(repo_path, command)
+    try:
+        command = ["issue", "create", "--title", title, "--body-file", tmp_path]
+
+        # Add each label as a separate --label argument
+        for label in labels_list:
+            command.extend(["--label", label])
+
+        # Create the issue - gh issue create outputs the URL directly
+        try:
+            result = await command_func(repo_path, command)
+        except YellhornMCPError as e:
+            # Re-raise with additional context about what we were trying to do
+            error_msg = str(e)
+            if (
+                "repository not found" in error_msg.lower()
+                or "could not resolve" in error_msg.lower()
+            ):
+                raise YellhornMCPError(
+                    f"Failed to create GitHub issue in repository.\n\n{error_msg}"
+                )
+            else:
+                raise
+    finally:
+        # Clean up the temporary file
+        os.unlink(tmp_path)
 
     # Parse the URL to extract issue number
     # Expected format: https://github.com/owner/repo/issues/123
@@ -106,10 +139,21 @@ async def update_issue_with_workplan(
     # Format the full issue body with workplan and metrics
     # (The metrics formatting will be handled by the caller)
     if github_command_func:
-        # For mock mode, use the provided command function
-        await github_command_func(
-            repo_path, ["issue", "edit", issue_number, "--body", workplan_text]
-        )
+        # For mock mode, use --body-file to avoid "Argument list too long" error
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+            tmp.write(workplan_text)
+            tmp_path = tmp.name
+
+        try:
+            await github_command_func(
+                repo_path, ["issue", "edit", issue_number, "--body-file", tmp_path]
+            )
+        finally:
+            # Clean up the temporary file
+            os.unlink(tmp_path)
     else:
         await update_github_issue(repo_path, issue_number, body=workplan_text)
 
@@ -168,8 +212,21 @@ async def add_issue_comment(
         github_command_func: Optional GitHub command function (for mocking).
     """
     if github_command_func:
-        # For mock mode, use the provided command function
-        await github_command_func(repo_path, ["issue", "comment", issue_number, "--body", comment])
+        # For mock mode, use --body-file to avoid "Argument list too long" error
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+            tmp.write(comment)
+            tmp_path = tmp.name
+
+        try:
+            await github_command_func(
+                repo_path, ["issue", "comment", issue_number, "--body-file", tmp_path]
+            )
+        finally:
+            # Clean up the temporary file
+            os.unlink(tmp_path)
     else:
         await add_github_issue_comment(repo_path, issue_number, comment)
 

@@ -16,6 +16,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from yellhorn_mcp.utils.git_utils import run_git_command
+
 
 def _class_attributes_from_ast(node: ast.ClassDef) -> list[str]:
     """
@@ -449,7 +451,9 @@ def _fence(lang: str, text: str) -> str:
     return f"```{lang}\n{text}\n```"
 
 
-async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
+async def get_lsp_snapshot(
+    repo_path: Path, file_paths: list[str]
+) -> tuple[list[str], dict[str, str]]:
     """
     Get an LSP-style snapshot of the codebase, extracting API information.
 
@@ -465,13 +469,6 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
         Tuple of (file list, file contents dictionary), where contents contain
         API signatures, class attributes, and docstrings as plain text (no code fences)
     """
-    from yellhorn_mcp.processors.workplan_processor import get_codebase_snapshot
-
-    # Reuse logic to get paths while respecting ignores
-    # The "_mode" parameter is internal and not documented, but used to
-    # only return file paths without reading contents
-    file_paths, _ = await get_codebase_snapshot(repo_path, _mode="paths")
-
     # Filter for supported files
     py_files = [p for p in file_paths if p.endswith(".py")]
     go_files = [p for p in file_paths if p.endswith(".go")]
@@ -503,7 +500,7 @@ async def get_lsp_snapshot(repo_path: Path) -> tuple[list[str], dict[str, str]]:
 
 
 async def get_lsp_diff(
-    repo_path: Path, base_ref: str, head_ref: str, changed_files: list[str]
+    repo_path: Path, base_ref: str, head_ref: str, changed_files: list[str], git_command_func=None
 ) -> str:
     """
     Create a lightweight LSP-focused diff between two git refs.
@@ -518,11 +515,11 @@ async def get_lsp_diff(
         base_ref: Base Git ref (commit SHA, branch name, tag) for comparison
         head_ref: Head Git ref (commit SHA, branch name, tag) for comparison
         changed_files: List of file paths that were changed between refs
+        git_command_func: Optional Git command function (for mocking)
 
     Returns:
         A formatted string containing the LSP-style diff focusing on API changes
     """
-    from yellhorn_mcp.utils.git_utils import run_git_command
 
     # Initialize result
     diff_parts = []
@@ -539,14 +536,18 @@ async def get_lsp_diff(
         try:
             # Get base version content if file existed in base_ref
             try:
-                base_content = await run_git_command(repo_path, ["show", f"{base_ref}:{file_path}"])
+                base_content = await run_git_command(
+                    repo_path, ["show", f"{base_ref}:{file_path}"], git_command_func
+                )
             except Exception:
                 # File didn't exist in base_ref
                 base_content = ""
 
             # Get head version content
             try:
-                head_content = await run_git_command(repo_path, ["show", f"{head_ref}:{file_path}"])
+                head_content = await run_git_command(
+                    repo_path, ["show", f"{head_ref}:{file_path}"], git_command_func
+                )
             except Exception:
                 # File was deleted in head_ref
                 head_content = ""
@@ -650,6 +651,7 @@ async def update_snapshot_with_full_diff_files(
     head_ref: str,
     file_paths: list[str],
     file_contents: dict[str, str],
+    git_command_func=None,
 ) -> tuple[list[str], dict[str, str]]:
     """
     Update an LSP snapshot with full contents of files included in a diff.
@@ -663,15 +665,17 @@ async def update_snapshot_with_full_diff_files(
         head_ref: Head Git ref for the diff
         file_paths: List of all file paths in the snapshot
         file_contents: Dictionary of file contents from the LSP snapshot
+        git_command_func: Optional Git command function (for mocking)
 
     Returns:
         Updated tuple of (file paths, file contents)
     """
-    from yellhorn_mcp.utils.git_utils import run_git_command
 
     try:
         # Get the diff to identify affected files
-        diff_output = await run_git_command(repo_path, ["diff", f"{base_ref}..{head_ref}"])
+        diff_output = await run_git_command(
+            repo_path, ["diff", f"{base_ref}..{head_ref}"], git_command_func
+        )
 
         # Extract file paths from the diff
         affected_files = set()
