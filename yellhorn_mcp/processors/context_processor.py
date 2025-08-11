@@ -282,7 +282,23 @@ async def parse_llm_directories(
             )
         all_important_dirs = set(all_dirs)
 
-    return all_important_dirs
+    # Consolidate directories: remove child directories if their parent is already included
+    consolidated_dirs = set()
+    sorted_dirs = sorted(all_important_dirs, key=len)  # Sort by length to process parents first
+
+    for dir_path in sorted_dirs:
+        # Check if any existing directory in consolidated_dirs is a parent of this directory
+        is_child = False
+        for existing_dir in consolidated_dirs:
+            if dir_path.startswith(existing_dir + "/") or dir_path == existing_dir:
+                is_child = True
+                break
+
+        # Only add if it's not a child of an existing directory
+        if not is_child:
+            consolidated_dirs.add(dir_path)
+
+    return consolidated_dirs
 
 
 async def save_context_file(
@@ -318,7 +334,7 @@ async def save_context_file(
     # Separate files from directories
     important_dirs = set()
     important_files = set()
-    
+
     for item in all_important_dirs:
         # Check if this looks like a file (has extension or is a dot file)
         if "/" in item:
@@ -330,16 +346,17 @@ async def save_context_file(
                 and (last_part.count(".") == 1 or last_part.startswith("."))
             )
         else:
-            is_file = (
-                "." in item
-                and (item.count(".") == 1 or item.startswith("."))
-            )
-            
+            # Special case: "." alone means root directory, not a file
+            if item == ".":
+                is_file = False
+            else:
+                is_file = "." in item and (item.count(".") == 1 or item.startswith("."))
+
         if is_file:
             important_files.add(item)
         else:
             important_dirs.add(item)
-    
+
     sorted_important_dirs = sorted(list(important_dirs))
     sorted_important_files = sorted(list(important_files))
 
@@ -347,7 +364,7 @@ async def save_context_file(
     if sorted_important_dirs or sorted_important_files:
         final_content += "# Important directories to specifically include\n"
         dir_includes = []
-        
+
         # Add specific files first
         for file_path in sorted_important_files:
             dir_includes.append(file_path)

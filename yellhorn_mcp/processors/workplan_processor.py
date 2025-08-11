@@ -15,6 +15,12 @@ from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
 from yellhorn_mcp import __version__
+from yellhorn_mcp.formatters import (
+    build_file_structure_context,
+    format_codebase_for_prompt,
+    get_codebase_context,
+    get_codebase_snapshot,
+)
 from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment,
     update_issue_with_workplan,
@@ -28,15 +34,6 @@ from yellhorn_mcp.utils.comment_utils import (
     format_submission_comment,
 )
 from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
-from yellhorn_mcp.formatters import (
-    get_codebase_snapshot,
-    build_file_structure_context,
-    format_codebase_for_prompt,
-    get_codebase_context,
-)
-
-
-
 
 
 async def _generate_and_update_issue(
@@ -154,7 +151,12 @@ async def _generate_and_update_issue(
         else:
             # Gemini models - use citation-aware call
             response_data = await llm_manager.call_llm_with_citations(
-                prompt=prompt, model=model, temperature=0.0, tools=search_tools, ctx=ctx, **llm_kwargs
+                prompt=prompt,
+                model=model,
+                temperature=0.0,
+                tools=search_tools,
+                ctx=ctx,
+                **llm_kwargs,
             )
 
             workplan_content = response_data["content"]
@@ -302,14 +304,14 @@ async def process_workplan_async(
         # Reserve tokens for prompt template, task details, and response
         # Estimate: prompt template ~1000, task details ~500, safety margin for response ~4000
         codebase_token_limit = int((model_limit - 5500) * 0.7)
-        
+
         codebase_info, _ = await get_codebase_context(
-            repo_path, 
-            codebase_reasoning, 
-            context_log, 
+            repo_path,
+            codebase_reasoning,
+            context_log,
             token_limit=codebase_token_limit,
             model=model,
-            git_command_func=git_command_func
+            git_command_func=git_command_func,
         )
 
         # Construct prompt
@@ -538,14 +540,14 @@ async def process_revision_async(
         # Reserve tokens for prompt template, task details, and response
         # Estimate: prompt template ~1000, task details ~500, safety margin for response ~4000
         codebase_token_limit = int((model_limit - 5500) * 0.7)
-        
+
         codebase_info, _ = await get_codebase_context(
-            repo_path, 
-            codebase_reasoning, 
-            context_log, 
+            repo_path,
+            codebase_reasoning,
+            context_log,
             token_limit=codebase_token_limit,
             model=model,
-            git_command_func=git_command_func
+            git_command_func=git_command_func,
         )
 
         # Extract title from original workplan (assumes first line is # Title)

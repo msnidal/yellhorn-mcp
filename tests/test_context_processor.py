@@ -712,7 +712,9 @@ yellhorn_mcp/integrations
         assert "yellhorn_mcp/" in content
         assert "yellhorn_mcp/**" not in content
 
-        assert "yellhorn_mcp/integrations/" in content
+        # yellhorn_mcp/integrations/ should NOT be in content because yellhorn_mcp/ already covers it
+        # (consolidation removes child directories when parent is included)
+        assert "yellhorn_mcp/integrations/" not in content
         assert "yellhorn_mcp/integrations/**" not in content
 
         # Root directory has files, should get simple pattern
@@ -738,5 +740,5 @@ yellhorn_mcp/integrations
 
         # Verify we have the expected number of patterns
         assert (
-            len(pattern_lines) == 4
-        )  # './', 'src/', 'yellhorn_mcp/', 'yellhorn_mcp/integrations/'
+            len(pattern_lines) == 3
+        )  # './', 'src/', 'yellhorn_mcp/' (integrations is consolidated under yellhorn_mcp)

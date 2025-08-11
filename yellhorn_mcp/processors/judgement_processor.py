@@ -15,6 +15,7 @@ from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
 from yellhorn_mcp import __version__
+from yellhorn_mcp.formatters.context_fetcher import get_codebase_context
 from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment,
     create_judgement_subissue,
@@ -23,7 +24,6 @@ from yellhorn_mcp.integrations.github_integration import (
 from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
 from yellhorn_mcp.token_counter import TokenCounter
-from yellhorn_mcp.formatters.context_fetcher import get_codebase_context
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
@@ -34,7 +34,11 @@ from yellhorn_mcp.utils.git_utils import YellhornMCPError, run_git_command
 
 
 async def get_git_diff(
-    repo_path: Path, base_ref: str, head_ref: str, codebase_reasoning: str = "full", git_command_func=None
+    repo_path: Path,
+    base_ref: str,
+    head_ref: str,
+    codebase_reasoning: str = "full",
+    git_command_func=None,
 ) -> str:
     """Get the diff content between two git references.
 
@@ -74,14 +78,18 @@ async def get_git_diff(
 
             if changed_files:
                 # Get LSP diff which shows signatures of changed functions and full content of changed files
-                lsp_diff = await get_lsp_diff(repo_path, base_ref, head_ref, changed_files, git_command_func)
+                lsp_diff = await get_lsp_diff(
+                    repo_path, base_ref, head_ref, changed_files, git_command_func
+                )
                 return lsp_diff
             else:
                 return ""
 
         else:
             # Default: full diff content
-            diff = await run_git_command(repo_path, ["diff", "--patch", f"{base_ref}...{head_ref}"], git_command_func)
+            diff = await run_git_command(
+                repo_path, ["diff", "--patch", f"{base_ref}...{head_ref}"], git_command_func
+            )
             return diff if diff else ""
 
     except Exception as e:
@@ -320,7 +328,9 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             )
 
             # Construct the URL for the updated issue
-            repo_info = await run_git_command(repo_path, ["remote", "get-url", "origin"], git_command_func)
+            repo_info = await run_git_command(
+                repo_path, ["remote", "get-url", "origin"], git_command_func
+            )
             # Clean up the repo URL to get the proper format
             if repo_info.endswith(".git"):
                 repo_info = repo_info[:-4]

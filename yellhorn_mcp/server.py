@@ -293,9 +293,7 @@ async def create_workplan(
                     github_command_func=ctx.request_context.lifespan_context.get(
                         "github_command_func"
                     ),
-                    git_command_func=ctx.request_context.lifespan_context.get(
-                        "git_command_func"
-                    ),
+                    git_command_func=ctx.request_context.lifespan_context.get("git_command_func"),
                 )
             )
         else:
@@ -455,8 +453,9 @@ async def revise_workplan(
 
         # Get issue URL
         get_issue_url_cmd = await run_github_command(
-            repo_path, ["issue", "view", issue_number, "--json", "url"],
-            github_command_func=ctx.request_context.lifespan_context.get("github_command_func")
+            repo_path,
+            ["issue", "view", issue_number, "--json", "url"],
+            github_command_func=ctx.request_context.lifespan_context.get("github_command_func"),
         )
         issue_data = json.loads(get_issue_url_cmd)
         issue_url = issue_data["url"]
@@ -687,10 +686,24 @@ async def judge_workplan(
             head_commit_hash = "pr_head"
         else:
             # Resolve git references to commit hashes
-            base_commit_hash = await run_git_command(repo_path, ["rev-parse", base_ref], ctx.request_context.lifespan_context.get("git_command_func"))
-            head_commit_hash = await run_git_command(repo_path, ["rev-parse", head_ref], ctx.request_context.lifespan_context.get("git_command_func"))
+            base_commit_hash = await run_git_command(
+                repo_path,
+                ["rev-parse", base_ref],
+                ctx.request_context.lifespan_context.get("git_command_func"),
+            )
+            head_commit_hash = await run_git_command(
+                repo_path,
+                ["rev-parse", head_ref],
+                ctx.request_context.lifespan_context.get("git_command_func"),
+            )
             # Generate diff for review
-            diff = await get_git_diff(repo_path, base_ref, head_ref, codebase_reasoning, ctx.request_context.lifespan_context.get("git_command_func"))
+            diff = await get_git_diff(
+                repo_path,
+                base_ref,
+                head_ref,
+                codebase_reasoning,
+                ctx.request_context.lifespan_context.get("git_command_func"),
+            )
 
         # Check if diff is empty or only contains the header for file_structure mode
         is_empty = not diff.strip() or (
@@ -808,16 +821,16 @@ async def judge_workplan(
         raise YellhornMCPError(f"Failed to create judgement: {str(e)}")
 
 
-from yellhorn_mcp.integrations.gemini_integration import async_generate_content_with_config
-from yellhorn_mcp.integrations.github_integration import (
-    add_issue_comment as add_github_issue_comment,
-)
-from yellhorn_mcp.processors.judgement_processor import get_git_diff
 from yellhorn_mcp.formatters import (
     build_file_structure_context,
     format_codebase_for_prompt,
     get_codebase_snapshot,
 )
+from yellhorn_mcp.integrations.gemini_integration import async_generate_content_with_config
+from yellhorn_mcp.integrations.github_integration import (
+    add_issue_comment as add_github_issue_comment,
+)
+from yellhorn_mcp.processors.judgement_processor import get_git_diff
 from yellhorn_mcp.utils.comment_utils import format_completion_comment, format_submission_comment
 
 # Re-export for backward compatibility with tests

@@ -27,57 +27,62 @@ async def test_yellhornignore_file_reading():
             "dist/\n"
         )
 
-        # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
-            # First call is for tracked files, second is for untracked files
-            mock_git.side_effect = [
-                # First call: tracked files
-                "\n".join(
+        # Create a mock git command function
+        call_count = 0
+
+        async def mock_git_func(repo_path, command, git_func=None):
+            nonlocal call_count
+            if call_count == 0:
+                # First call: tracked files (ls-files)
+                call_count += 1
+                return "\n".join(
                     [
                         "file1.py",
                         "file2.js",
                         "src/components/Button.js",
                     ]
-                ),
+                )
+            else:
                 # Second call: untracked files
-                "\n".join(
+                return "\n".join(
                     [
                         "file3.log",
                         "node_modules/package.json",
                         "dist/bundle.js",
                     ]
-                ),
-            ]
+                )
 
-            # Create a test file that can be read
-            (tmp_path / "file1.py").write_text("# Test file 1")
-            (tmp_path / "file2.js").write_text("// Test file 2")
-            # Create directory structure for testing
-            os.makedirs(tmp_path / "node_modules")
-            os.makedirs(tmp_path / "dist")
-            os.makedirs(tmp_path / "src/components")
-            (tmp_path / "node_modules/package.json").write_text("{}")
-            (tmp_path / "dist/bundle.js").write_text("/* bundle */")
-            (tmp_path / "src/components/Button.js").write_text("// Button component")
-            (tmp_path / "file3.log").write_text("log data")
+        # Create a test file that can be read
+        (tmp_path / "file1.py").write_text("# Test file 1")
+        (tmp_path / "file2.js").write_text("// Test file 2")
+        # Create directory structure for testing
+        os.makedirs(tmp_path / "node_modules")
+        os.makedirs(tmp_path / "dist")
+        os.makedirs(tmp_path / "src/components")
+        (tmp_path / "node_modules/package.json").write_text("{}")
+        (tmp_path / "dist/bundle.js").write_text("/* bundle */")
+        (tmp_path / "src/components/Button.js").write_text("// Button component")
+        (tmp_path / "file3.log").write_text("log data")
 
-            # Call get_codebase_snapshot
-            file_paths, file_contents = await get_codebase_snapshot(tmp_path)
+        # Call get_codebase_snapshot with the mock function
+        file_paths, file_contents = await get_codebase_snapshot(
+            tmp_path, git_command_func=mock_git_func
+        )
 
-            # Verify that ignored files are not in results
-            assert "file1.py" in file_paths
-            assert "file2.js" in file_paths
-            assert "src/components/Button.js" in file_paths
-            assert "file3.log" not in file_paths  # Ignored by *.log
-            assert "node_modules/package.json" not in file_paths  # Ignored by node_modules/
-            assert "dist/bundle.js" not in file_paths  # Ignored by dist/
+        # Verify that ignored files are not in results
+        assert "file1.py" in file_paths
+        assert "file2.js" in file_paths
+        assert "src/components/Button.js" in file_paths
+        assert "file3.log" not in file_paths  # Ignored by *.log
+        assert "node_modules/package.json" not in file_paths  # Ignored by node_modules/
+        assert "dist/bundle.js" not in file_paths  # Ignored by dist/
 
-            # Verify contents
-            assert "file1.py" in file_contents
-            assert "file2.js" in file_contents
-            assert "file3.log" not in file_contents
-            assert "node_modules/package.json" not in file_contents
-            assert "dist/bundle.js" not in file_contents
+        # Verify contents
+        assert "file1.py" in file_contents
+        assert "file2.js" in file_contents
+        assert "file3.log" not in file_contents
+        assert "node_modules/package.json" not in file_contents
+        assert "dist/bundle.js" not in file_contents
 
 
 @pytest.mark.asyncio
@@ -90,33 +95,38 @@ async def test_yellhornignore_file_error_handling():
         yellhornignore_path = tmp_path / ".yellhornignore"
         yellhornignore_path.write_text("*.log\nnode_modules/")
 
-        # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
-            # First call is for tracked files, second is for untracked files
-            mock_git.side_effect = [
-                "file1.py\nfile2.js",  # tracked files
-                "file3.log",  # untracked files
-            ]
+        # Create a mock git command function
+        call_count = 0
 
-            # Mock Path.read_text to raise an exception when reading .yellhornignore
-            original_read_text = Path.read_text
+        async def mock_git_func(repo_path, command, git_func=None):
+            nonlocal call_count
+            if call_count == 0:
+                call_count += 1
+                return "file1.py\nfile2.js"  # tracked files
+            else:
+                return "file3.log"  # untracked files
 
-            def mock_read_text(self, *args, **kwargs):
-                if str(self).endswith(".yellhornignore"):
-                    raise PermissionError("Permission denied")
-                # For other files, use the real read_text
-                return original_read_text(self, *args, **kwargs)
+        # Mock Path.read_text to raise an exception when reading .yellhornignore
+        original_read_text = Path.read_text
 
-            with patch.object(Path, "read_text", mock_read_text):
+        def mock_read_text(self, *args, **kwargs):
+            if str(self).endswith(".yellhornignore"):
+                raise PermissionError("Permission denied")
+            # For other files, use the real read_text
+            return original_read_text(self, *args, **kwargs)
 
-                # Create test files
-                (tmp_path / "file1.py").write_text("# Test file 1")
-                (tmp_path / "file2.js").write_text("// Test file 2")
-                (tmp_path / "file3.log").write_text("log data")
+        with patch.object(Path, "read_text", mock_read_text):
 
-                # Call get_codebase_snapshot and expect it to raise an exception
-                with pytest.raises(PermissionError, match="Permission denied"):
-                    file_paths, file_contents = await get_codebase_snapshot(tmp_path)
+            # Create test files
+            (tmp_path / "file1.py").write_text("# Test file 1")
+            (tmp_path / "file2.js").write_text("// Test file 2")
+            (tmp_path / "file3.log").write_text("log data")
+
+            # Call get_codebase_snapshot and expect it to raise an exception
+            with pytest.raises(PermissionError, match="Permission denied"):
+                file_paths, file_contents = await get_codebase_snapshot(
+                    tmp_path, git_command_func=mock_git_func
+                )
 
 
 @pytest.mark.asyncio
@@ -128,43 +138,48 @@ async def test_get_codebase_snapshot_directory_handling():
         # Create directory structure
         os.makedirs(tmp_path / "src")
 
-        # Mock run_git_command to return file paths including a directory
-        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
-            # First call is for tracked files, second is for untracked files
-            mock_git.side_effect = [
-                "file1.py",  # tracked files
-                "src",  # untracked files (directory)
-            ]
+        # Create a mock git command function
+        call_count = 0
 
-            # Create test file
-            (tmp_path / "file1.py").write_text("# Test file 1")
+        async def mock_git_func(repo_path, command, git_func=None):
+            nonlocal call_count
+            if call_count == 0:
+                call_count += 1
+                return "file1.py"  # tracked files
+            else:
+                return "src"  # untracked files (directory)
 
-            # Create a mock implementation for Path.is_dir
-            original_is_dir = Path.is_dir
+        # Create test file
+        (tmp_path / "file1.py").write_text("# Test file 1")
 
-            def mock_is_dir(self):
-                # Check if the path ends with 'src'
-                if str(self).endswith("/src"):
-                    return True
-                # Otherwise call the original
-                return original_is_dir(self)
+        # Create a mock implementation for Path.is_dir
+        original_is_dir = Path.is_dir
 
-            # Apply the patch
-            with patch.object(Path, "is_dir", mock_is_dir):
-                # Make sure .yellhornignore doesn't exist
-                with patch.object(Path, "exists", return_value=False):
-                    # Call get_codebase_snapshot
-                    file_paths, file_contents = await get_codebase_snapshot(tmp_path)
+        def mock_is_dir(self):
+            # Check if the path ends with 'src'
+            if str(self).endswith("/src") or str(self).endswith("src"):
+                return True
+            # Otherwise call the original
+            return original_is_dir(self)
 
-                    # Verify directory handling
-                    assert len(file_paths) == 2
-                    assert "file1.py" in file_paths
-                    assert "src" in file_paths
+        # Apply the patch
+        with patch.object(Path, "is_dir", mock_is_dir):
+            # Make sure .yellhornignore doesn't exist
+            with patch.object(Path, "exists", return_value=False):
+                # Call get_codebase_snapshot
+                file_paths, file_contents = await get_codebase_snapshot(
+                    tmp_path, git_command_func=mock_git_func
+                )
 
-                    # Only the file should be in contents, directories are skipped
-                    assert len(file_contents) == 1
-                    assert "file1.py" in file_contents
-                    assert "src" not in file_contents
+                # Verify directory handling
+                assert len(file_paths) == 2
+                assert "file1.py" in file_paths
+                assert "src" in file_paths
+
+                # Only the file should be in contents, directories are skipped
+                assert len(file_contents) == 1
+                assert "file1.py" in file_contents
+                assert "src" not in file_contents
 
 
 @pytest.mark.asyncio
@@ -181,7 +196,7 @@ async def test_get_codebase_snapshot_binary_file_handling():
             f.write(b"\x89PNG\r\n\x1a\n")  # PNG file header
 
         # Mock run_git_command to return our test files
-        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.utils.git_utils.run_git_command") as mock_git:
             # First call is for tracked files, second is for untracked files
             mock_git.side_effect = [
                 "file1.py",  # tracked files
@@ -203,19 +218,21 @@ async def test_get_codebase_snapshot_binary_file_handling():
                     # Apply the patch to builtins.open
                     with patch("builtins.open", mock_open):
                         # Call get_codebase_snapshot
-                        file_paths, file_contents = await get_codebase_snapshot(tmp_path)
+                        file_paths, file_contents = await get_codebase_snapshot(
+                            tmp_path, git_command_func=mock_git
+                        )
 
-                        # Verify binary file handling
-                        assert len(file_paths) == 2
+                        # Verify binary file handling - binary files are filtered out
+                        assert len(file_paths) == 1
                         assert "file1.py" in file_paths
-                        assert "file2.jpg" in file_paths
+                        assert "file2.jpg" not in file_paths  # Binary files are filtered out
 
-                        # Both files should be in contents (binary files are read with errors='ignore')
-                        assert len(file_contents) == 2
+                        # Only text files should be in contents
+                        assert len(file_contents) == 1
                         assert "file1.py" in file_contents
-                        assert "file2.jpg" in file_contents
-                        # The binary file content will have replacement characters
-                        assert "PNG" in file_contents["file2.jpg"]
+                        assert "file2.jpg" not in file_contents  # Binary files are filtered out
+                        # The text file content should be readable
+                        assert "# Test file 1" in file_contents["file1.py"]
 
 
 @pytest.mark.skip(reason="Whitelist functionality with ! prefix is not implemented")
@@ -239,7 +256,7 @@ async def test_yellhornignore_whitelist_functionality():
         )
 
         # Mock run_git_command to return a list of files
-        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.utils.git_utils.run_git_command") as mock_git:
             # First call is for tracked files, second is for untracked files
             mock_git.side_effect = [
                 # First call: tracked files

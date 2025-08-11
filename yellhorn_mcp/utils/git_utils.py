@@ -162,7 +162,7 @@ async def run_github_command(
 async def ensure_label_exists(repo_path: Path, label: str, description: str = "") -> bool:
     """
     Ensure that a label exists in the GitHub repository.
-    
+
     This function attempts to create the label if it doesn't exist, but will not
     fail if label creation is unsuccessful (e.g., due to permissions).
 
@@ -184,7 +184,7 @@ async def ensure_label_exists(repo_path: Path, label: str, description: str = ""
         # If label exists, return True
         if labels:
             return True
-            
+
         # If label doesn't exist, try to create it
         color = "5fa46c"  # A nice green color
         await run_github_command(
@@ -218,15 +218,17 @@ async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str
         YellhornMCPError: If the command fails.
     """
     # Use --body-file for large content to avoid "Argument list too long" error
-    import tempfile
     import os
-    
+    import tempfile
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
         tmp.write(body)
         tmp_path = tmp.name
-    
+
     try:
-        await run_github_command(repo_path, ["issue", "comment", issue_number, "--body-file", tmp_path])
+        await run_github_command(
+            repo_path, ["issue", "comment", issue_number, "--body-file", tmp_path]
+        )
     finally:
         # Clean up the temporary file
         os.unlink(tmp_path)
@@ -389,7 +391,7 @@ async def create_github_subissue(
                 existing_labels.append(label)
             else:
                 print(f"Warning: Will create issue without label '{label}' due to creation failure")
-        
+
         # Use only the labels that exist or were successfully created
         labels_list = existing_labels
 

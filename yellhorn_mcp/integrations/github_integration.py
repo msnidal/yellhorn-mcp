@@ -58,34 +58,39 @@ async def create_github_issue(
                 existing_labels.append(label)
             else:
                 print(f"Warning: Will create issue without label '{label}' due to creation failure")
-        
+
         # Use only the labels that exist or were successfully created
         labels_list = existing_labels
 
     # Build command with multiple labels
     # Use --body-file for large content to avoid "Argument list too long" error
-    import tempfile
     import os
-    
+    import tempfile
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
         tmp.write(body)
         tmp_path = tmp.name
-    
+
     try:
         command = ["issue", "create", "--title", title, "--body-file", tmp_path]
-        
+
         # Add each label as a separate --label argument
         for label in labels_list:
             command.extend(["--label", label])
-        
+
         # Create the issue - gh issue create outputs the URL directly
         try:
             result = await command_func(repo_path, command)
         except YellhornMCPError as e:
             # Re-raise with additional context about what we were trying to do
             error_msg = str(e)
-            if "repository not found" in error_msg.lower() or "could not resolve" in error_msg.lower():
-                raise YellhornMCPError(f"Failed to create GitHub issue in repository.\n\n{error_msg}")
+            if (
+                "repository not found" in error_msg.lower()
+                or "could not resolve" in error_msg.lower()
+            ):
+                raise YellhornMCPError(
+                    f"Failed to create GitHub issue in repository.\n\n{error_msg}"
+                )
             else:
                 raise
     finally:
@@ -135,13 +140,13 @@ async def update_issue_with_workplan(
     # (The metrics formatting will be handled by the caller)
     if github_command_func:
         # For mock mode, use --body-file to avoid "Argument list too long" error
-        import tempfile
         import os
-        
+        import tempfile
+
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
             tmp.write(workplan_text)
             tmp_path = tmp.name
-        
+
         try:
             await github_command_func(
                 repo_path, ["issue", "edit", issue_number, "--body-file", tmp_path]
@@ -208,13 +213,13 @@ async def add_issue_comment(
     """
     if github_command_func:
         # For mock mode, use --body-file to avoid "Argument list too long" error
-        import tempfile
         import os
-        
+        import tempfile
+
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
             tmp.write(comment)
             tmp_path = tmp.name
-        
+
         try:
             await github_command_func(
                 repo_path, ["issue", "comment", issue_number, "--body-file", tmp_path]

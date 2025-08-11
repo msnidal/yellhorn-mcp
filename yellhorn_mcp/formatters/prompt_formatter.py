@@ -1,6 +1,5 @@
 """Prompt formatting utilities for combining codebase structure and contents."""
 
-
 from collections import defaultdict
 
 
@@ -35,7 +34,6 @@ async def format_codebase_for_prompt(file_paths: list[str], file_contents: dict[
         codebase_info += "</file_contents>"
 
     return codebase_info
-
 
 
 def build_file_structure_context(file_paths: list[str]) -> str:

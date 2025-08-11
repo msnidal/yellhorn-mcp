@@ -1,8 +1,9 @@
 """Codebase snapshot functionality for fetching and filtering repository files."""
 
-from pathlib import Path
-from yellhorn_mcp.utils.git_utils import run_git_command
 import fnmatch
+from pathlib import Path
+
+from yellhorn_mcp.utils.git_utils import run_git_command
 
 # Global set of file patterns and extensions to always ignore
 # These are files that should never be included in AI context as they are:
@@ -29,7 +30,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.elf",
     "*.dSYM/",
     "*.wasm",
-    
     # === Databases & model checkpoints ===
     # Large binary blobs, ML checkpoints, experiment tracking
     "*.db",
@@ -57,7 +57,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.parquet",
     "*.feather",
     "*.arrow",
-    
     # === Lock files & dependency manifests ===
     # Auto-generated to pin dependency versions
     "*.lock",
@@ -72,7 +71,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "Cargo.lock",
     "pubspec.lock",
     "mix.lock",
-    
     # === Environment & configuration files ===
     ".env",
     ".env.*",
@@ -82,7 +80,6 @@ ALWAYS_IGNORE_PATTERNS = {
     ".env.test",
     "*.local",
     "*local-only*",
-    
     # === Logs & run outputs ===
     # Ephemeral run or CI output
     "*.log",
@@ -97,7 +94,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.err",
     "nohup.out",
     "*.pid",
-    
     # === Test artifacts & outputs ===
     # Generated when running tests
     "*.test",
@@ -120,7 +116,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.gcno",
     "junit.xml",
     "test-report.xml",
-    
     # === Cache directories ===
     # Speed up tooling, never manually edited
     "__pycache__/",
@@ -148,7 +143,6 @@ ALWAYS_IGNORE_PATTERNS = {
     ".dynamodb/",
     ".yarn/cache/",
     ".yarn/install-state.gz",
-    
     # === Virtual environments ===
     "env/",
     "venv/",
@@ -157,7 +151,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "ENV/",
     "env.bak/",
     "venv.bak/",
-    
     # === IDE & editor files ===
     ".idea/",
     ".vscode/",
@@ -173,7 +166,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.sublime-workspace",
     ".kate-swp",
     ".ropeproject/",
-    
     # === Build artifacts & outputs ===
     "build/",
     "dist/",
@@ -196,7 +188,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.whl",
     "share/python-wheels/",
     "MANIFEST",
-    
     # === Node.js specific ===
     "node_modules/",
     "jspm_packages/",
@@ -204,7 +195,6 @@ ALWAYS_IGNORE_PATTERNS = {
     ".npm/",
     "web_modules/",
     ".pnp.*",
-    
     # === Container & infrastructure files ===
     "**/Dockerfile*",
     "docker-compose*.yml",
@@ -214,7 +204,6 @@ ALWAYS_IGNORE_PATTERNS = {
     ".dockerignore",
     "go/run",
     "go/runx.sh",
-    
     # === Terraform & IaC ===
     ".terraform/",
     ".terraform.lock.hcl",
@@ -223,7 +212,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.tfplan",
     "*.tfvars",
     "terraform.tfvars",
-    
     # === Generated documentation ===
     "site/",
     "docs/_build/",
@@ -233,7 +221,6 @@ ALWAYS_IGNORE_PATTERNS = {
     ".jekyll-metadata",
     "public/",
     "*.pdf",
-    
     # === Archive files ===
     "*.zip",
     "*.tar",
@@ -256,7 +243,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.jar",
     "*.war",
     "*.ear",
-    
     # === Media files ===
     # Images
     "*.png",
@@ -295,14 +281,12 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.m4a",
     "*.opus",
     "*.ape",
-    
     # === Fonts ===
     "*.ttf",
     "*.otf",
     "*.woff",
     "*.woff2",
     "*.eot",
-    
     # === OS specific files ===
     ".DS_Store",
     "Thumbs.db",
@@ -316,7 +300,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.stackdump",
     "[Dd]esktop.ini",
     "$RECYCLE.BIN/",
-    
     # === Temporary files ===
     "*.tmp",
     "*.temp",
@@ -329,7 +312,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "*.BASE.*",
     "*.LOCAL.*",
     "*.REMOTE.*",
-    
     # === Security & secrets ===
     "*.key",
     "*.pem",
@@ -345,7 +327,6 @@ ALWAYS_IGNORE_PATTERNS = {
     "id_dsa",
     "id_dsa.pub",
     "*.gpg",
-    
     # === Version control & tool config ===
     ".git/",
     ".gitignore",
@@ -366,7 +347,6 @@ ALWAYS_IGNORE_PATTERNS = {
     ".eslintrc*",
     ".stylelintrc*",
     ".markdownlint*",
-    
     # === Example & fixture files ===
     "example-*.yml",
     "example-*.yaml",
@@ -375,17 +355,16 @@ ALWAYS_IGNORE_PATTERNS = {
     "fixtures/",
     "examples/",
     "samples/",
-    
     # === Minified files ===
     "*.min.js",
     "*.min.css",
     "*.min.map",
-    
     # === Source maps ===
     "*.map",
     "*.js.map",
     "*.css.map",
 }
+
 
 def matches_pattern(path: str, pattern: str) -> bool:
     if pattern.endswith("/"):
@@ -394,6 +373,7 @@ def matches_pattern(path: str, pattern: str) -> bool:
     else:
         # File pattern
         return fnmatch.fnmatch(path, pattern)
+
 
 async def get_codebase_snapshot(
     repo_path: Path, just_paths: bool = False, log_function=print, git_command_func=None
@@ -477,10 +457,9 @@ async def get_codebase_snapshot(
             f"{len(context_blacklist_patterns)} blacklist, and {len(context_negation_patterns)} negation patterns"
         )
 
-
     # Categorize files by priority
     # Priority: yellhorncontext whitelist > yellhorncontext blacklist > yellhornignore whitelist > yellhornignore blacklist > gitignore blacklist
-    
+
     # Categories for files
     yellhorncontext_whitelist_files = []
     yellhorncontext_blacklist_files = []
@@ -489,11 +468,11 @@ async def get_codebase_snapshot(
     gitignore_blacklist_files = []
     other_files = []
     always_ignored_count = 0
-    
+
     # Parse .yellhornignore patterns to separate whitelist and blacklist
     yellhornignore_whitelist_patterns = []
     yellhornignore_blacklist_patterns = []
-    
+
     for pattern in yellhornignore_patterns:
         if pattern.startswith("!"):
             # Whitelist pattern in yellhornignore (negation)
@@ -501,7 +480,7 @@ async def get_codebase_snapshot(
         else:
             # Blacklist pattern in yellhornignore
             yellhornignore_blacklist_patterns.append(pattern)
-    
+
     # Process each file and categorize it (excluding always-ignored files)
     for file_path in sorted(all_files):
         # Skip files matching always-ignore patterns
@@ -510,20 +489,28 @@ async def get_codebase_snapshot(
             if matches_pattern(file_path, pattern):
                 should_ignore = True
                 break
-        
+
         if should_ignore:
             always_ignored_count += 1
             continue
         # Determine which category this file belongs to
-        is_context_whitelisted = any(matches_pattern(file_path, p) for p in context_whitelist_patterns)
-        is_context_blacklisted = any(matches_pattern(file_path, p) for p in context_blacklist_patterns)
-        is_ignore_whitelisted = any(matches_pattern(file_path, p) for p in yellhornignore_whitelist_patterns)
-        is_ignore_blacklisted = any(matches_pattern(file_path, p) for p in yellhornignore_blacklist_patterns)
-        
+        is_context_whitelisted = any(
+            matches_pattern(file_path, p) for p in context_whitelist_patterns
+        )
+        is_context_blacklisted = any(
+            matches_pattern(file_path, p) for p in context_blacklist_patterns
+        )
+        is_ignore_whitelisted = any(
+            matches_pattern(file_path, p) for p in yellhornignore_whitelist_patterns
+        )
+        is_ignore_blacklisted = any(
+            matches_pattern(file_path, p) for p in yellhornignore_blacklist_patterns
+        )
+
         # If we have context whitelist patterns, only include files that match them
         if context_whitelist_patterns and not is_context_whitelisted:
             continue  # Skip files not in whitelist
-        
+
         # Categorize based on priority
         if is_context_whitelisted and not is_context_blacklisted:
             yellhorncontext_whitelist_files.append(file_path)
@@ -538,36 +525,41 @@ async def get_codebase_snapshot(
         else:
             # File doesn't match any special patterns
             other_files.append(file_path)
-    
+
     # Files to include in priority order (excluding blacklisted files)
     # Priority: yellhorncontext whitelist > yellhornignore whitelist > other files (only if no .yellhorncontext)
     if yellhorncontext_path.exists():
         # If .yellhorncontext exists, only include whitelisted files
-        files_to_include = (
-            yellhorncontext_whitelist_files
-        )
+        files_to_include = yellhorncontext_whitelist_files
     else:
         # If no .yellhorncontext, include other files as well
-        files_to_include = (
-            yellhornignore_whitelist_files +
-            other_files
-        )
-    
+        files_to_include = yellhornignore_whitelist_files + other_files
+
     # Log filtering results
     total_files = len(all_files)
     log_function(f"File categorization results out of {total_files} files:")
     if always_ignored_count > 0:
         log_function(f"  - {always_ignored_count} always ignored (images, binaries, configs, etc.)")
-    log_function(f"  - {len(yellhorncontext_whitelist_files)} in yellhorncontext whitelist (included)")
-    log_function(f"  - {len(yellhorncontext_blacklist_files)} in yellhorncontext blacklist (excluded)")
-    log_function(f"  - {len(yellhornignore_whitelist_files)} in yellhornignore whitelist (included)")
-    log_function(f"  - {len(yellhornignore_blacklist_files)} in yellhornignore blacklist (excluded)")
+    log_function(
+        f"  - {len(yellhorncontext_whitelist_files)} in yellhorncontext whitelist (included)"
+    )
+    log_function(
+        f"  - {len(yellhorncontext_blacklist_files)} in yellhorncontext blacklist (excluded)"
+    )
+    log_function(
+        f"  - {len(yellhornignore_whitelist_files)} in yellhornignore whitelist (included)"
+    )
+    log_function(
+        f"  - {len(yellhornignore_blacklist_files)} in yellhornignore blacklist (excluded)"
+    )
     if yellhorncontext_path.exists():
         log_function(f"  - {len(other_files)} other files (excluded - .yellhorncontext exists)")
     else:
         log_function(f"  - {len(other_files)} other files (included - no .yellhorncontext)")
-    log_function(f"Total included: {len(files_to_include)} files (excluded {always_ignored_count} always-ignored files)")
-    
+    log_function(
+        f"Total included: {len(files_to_include)} files (excluded {always_ignored_count} always-ignored files)"
+    )
+
     # Use the prioritized list of files to include
     file_paths = files_to_include
 

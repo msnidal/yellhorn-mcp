@@ -15,7 +15,9 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+
 from yellhorn_mcp.utils.git_utils import run_git_command
+
 
 def _class_attributes_from_ast(node: ast.ClassDef) -> list[str]:
     """
@@ -449,7 +451,9 @@ def _fence(lang: str, text: str) -> str:
     return f"```{lang}\n{text}\n```"
 
 
-async def get_lsp_snapshot(repo_path: Path, file_paths: list[str]) -> tuple[list[str], dict[str, str]]:
+async def get_lsp_snapshot(
+    repo_path: Path, file_paths: list[str]
+) -> tuple[list[str], dict[str, str]]:
     """
     Get an LSP-style snapshot of the codebase, extracting API information.
 
@@ -532,14 +536,18 @@ async def get_lsp_diff(
         try:
             # Get base version content if file existed in base_ref
             try:
-                base_content = await run_git_command(repo_path, ["show", f"{base_ref}:{file_path}"], git_command_func)
+                base_content = await run_git_command(
+                    repo_path, ["show", f"{base_ref}:{file_path}"], git_command_func
+                )
             except Exception:
                 # File didn't exist in base_ref
                 base_content = ""
 
             # Get head version content
             try:
-                head_content = await run_git_command(repo_path, ["show", f"{head_ref}:{file_path}"], git_command_func)
+                head_content = await run_git_command(
+                    repo_path, ["show", f"{head_ref}:{file_path}"], git_command_func
+                )
             except Exception:
                 # File was deleted in head_ref
                 head_content = ""
@@ -665,7 +673,9 @@ async def update_snapshot_with_full_diff_files(
 
     try:
         # Get the diff to identify affected files
-        diff_output = await run_git_command(repo_path, ["diff", f"{base_ref}..{head_ref}"], git_command_func)
+        diff_output = await run_git_command(
+            repo_path, ["diff", f"{base_ref}..{head_ref}"], git_command_func
+        )
 
         # Extract file paths from the diff
         affected_files = set()

@@ -27,7 +27,7 @@ async def test_fence_function():
 @pytest.mark.asyncio
 async def test_lsp_snapshot_returns_plain_text():
     """Test that get_lsp_snapshot returns plain text without code fences."""
-    with patch("yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot") as mock_snapshot:
+    with patch("yellhorn_mcp.formatters.codebase_snapshot.get_codebase_snapshot") as mock_snapshot:
         mock_snapshot.return_value = (["file1.py", "file2.go"], {})
 
         with patch("yellhorn_mcp.utils.lsp_utils.extract_python_api") as mock_extract_py:
@@ -39,7 +39,9 @@ async def test_lsp_snapshot_returns_plain_text():
                 mock_extract_go.return_value = ["func Handler()", "struct Person"]
 
                 with patch("pathlib.Path.is_file", return_value=True):
-                    file_paths, file_contents = await get_lsp_snapshot(Path("/mock/repo"))
+                    file_paths, file_contents = await get_lsp_snapshot(
+                        Path("/mock/repo"), ["file1.py", "file2.go"]
+                    )
 
                     # Verify content does NOT contain code fences
                     assert "file1.py" in file_contents
