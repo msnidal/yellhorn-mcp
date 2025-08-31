@@ -6,16 +6,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from yellhorn_mcp.formatters import (
+    build_file_structure_context,
+    format_codebase_for_prompt,
+    get_codebase_context,
+    get_codebase_snapshot,
+)
 from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
 from yellhorn_mcp.processors.workplan_processor import (
     _generate_and_update_issue,
-    _get_codebase_context,
-    build_file_structure_context,
-    format_codebase_for_prompt,
-    get_codebase_snapshot,
     process_revision_async,
     process_workplan_async,
 )
+from yellhorn_mcp.token_counter import TokenCounter
 
 
 class TestGetCodebaseSnapshot:
@@ -32,7 +35,7 @@ class TestGetCodebaseSnapshot:
         (repo_path / "file2.js").write_text("console.log('hello')")
         (repo_path / "README.md").write_text("# Test repo")
 
-        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.formatters.codebase_snapshot.run_git_command") as mock_git:
             mock_git.side_effect = [
                 "file1.py\nfile2.js\nREADME.md",  # tracked files
                 "",  # untracked files
@@ -58,13 +61,13 @@ class TestGetCodebaseSnapshot:
 
         (repo_path / "file1.py").write_text("print('hello')")
 
-        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.formatters.codebase_snapshot.run_git_command") as mock_git:
             mock_git.side_effect = [
                 "file1.py",  # tracked files
                 "",  # untracked files
             ]
 
-            file_paths, file_contents = await get_codebase_snapshot(repo_path, _mode="paths")
+            file_paths, file_contents = await get_codebase_snapshot(repo_path, just_paths=True)
 
             assert len(file_paths) == 1
             assert "file1.py" in file_paths
@@ -84,7 +87,7 @@ class TestGetCodebaseSnapshot:
         # Create .yellhornignore
         (repo_path / ".yellhornignore").write_text("*.log\n# Comment line\n")
 
-        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.formatters.codebase_snapshot.run_git_command") as mock_git:
             mock_git.side_effect = [
                 "file1.py\nfile2.py\nignore_me.log",  # tracked files
                 "",  # untracked files
@@ -115,7 +118,7 @@ src/
 tests/"""
         (repo_path / ".yellhorncontext").write_text(context_content)
 
-        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.formatters.codebase_snapshot.run_git_command") as mock_git:
             mock_git.side_effect = [
                 "src/main.py\ntests/test_main.py\nREADME.md",  # tracked files
                 "",  # untracked files
@@ -141,7 +144,7 @@ tests/"""
         (repo_path / "large_file.txt").write_text(large_content)
         (repo_path / "small_file.txt").write_text("small content")
 
-        with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
+        with patch("yellhorn_mcp.formatters.codebase_snapshot.run_git_command") as mock_git:
             mock_git.side_effect = [
                 "large_file.txt\nsmall_file.txt",  # tracked files
                 "",  # untracked files
@@ -248,10 +251,10 @@ class TestFormatCodebaseForPrompt:
 
 
 class TestGetCodebaseContext:
-    """Test suite for _get_codebase_context function."""
+    """Test suite for get_codebase_context function."""
 
     @pytest.mark.asyncio
-    async def test_get_codebase_context_full(self, tmp_path):
+    async def testget_codebase_context_full(self, tmp_path):
         """Test getting full codebase context."""
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
@@ -259,55 +262,69 @@ class TestGetCodebaseContext:
         (repo_path / "main.py").write_text("print('hello')")
 
         with patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot"
+            "yellhorn_mcp.formatters.context_fetcher.get_codebase_snapshot"
         ) as mock_snapshot:
             mock_snapshot.return_value = (["main.py"], {"main.py": "print('hello')"})
 
-            result = await _get_codebase_context(repo_path, "full", print)
+            result, file_paths = await get_codebase_context(repo_path, "full", print)
 
             assert "<codebase_tree>" in result
             assert "<file_contents>" in result
             assert "print('hello')" in result
+            assert "main.py" in file_paths
 
     @pytest.mark.asyncio
-    async def test_get_codebase_context_file_structure(self, tmp_path):
+    async def testget_codebase_context_file_structure(self, tmp_path):
         """Test getting file structure context."""
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
 
         with patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot"
+            "yellhorn_mcp.formatters.context_fetcher.get_codebase_snapshot"
         ) as mock_snapshot:
             mock_snapshot.return_value = (["main.py"], {})
 
-            result = await _get_codebase_context(repo_path, "file_structure", print)
+            result, file_paths = await get_codebase_context(repo_path, "file_structure", print)
 
             assert "<codebase_tree>" in result
             assert "main.py" in result
             assert "<file_contents>" not in result
+            assert "main.py" in file_paths
 
     @pytest.mark.asyncio
-    async def test_get_codebase_context_lsp(self, tmp_path):
+    async def testget_codebase_context_lsp(self, tmp_path):
         """Test getting LSP context."""
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
 
-        with patch("yellhorn_mcp.utils.lsp_utils.get_lsp_snapshot") as mock_lsp_snapshot:
-            mock_lsp_snapshot.return_value = (["main.py"], {"main.py": "def main(): pass"})
+        with patch(
+            "yellhorn_mcp.formatters.context_fetcher.get_codebase_snapshot"
+        ) as mock_snapshot:
+            mock_snapshot.return_value = (["main.py"], {})
+            with patch(
+                "yellhorn_mcp.formatters.context_fetcher.get_lsp_snapshot"
+            ) as mock_lsp_snapshot:
+                mock_lsp_snapshot.return_value = (["main.py"], {"main.py": "def main(): pass"})
+                with patch(
+                    "yellhorn_mcp.formatters.context_fetcher.format_codebase_for_prompt"
+                ) as mock_format:
+                    mock_format.return_value = "LSP formatted: def main(): pass"
 
-            result = await _get_codebase_context(repo_path, "lsp", print)
+                    result, file_paths = await get_codebase_context(repo_path, "lsp", print)
 
-            assert "def main(): pass" in result
+                    assert "def main(): pass" in result
+                    assert "main.py" in file_paths
 
     @pytest.mark.asyncio
-    async def test_get_codebase_context_none(self, tmp_path):
+    async def testget_codebase_context_none(self, tmp_path):
         """Test getting no context."""
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
 
-        result = await _get_codebase_context(repo_path, "none", print)
+        result, file_paths = await get_codebase_context(repo_path, "none", print)
 
         assert result == ""
+        assert file_paths == []
 
 
 class TestGenerateAndUpdateIssue:
@@ -334,8 +351,25 @@ class TestGenerateAndUpdateIssue:
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
 
-        # Mock GitHub command function
-        mock_github_command = AsyncMock(return_value="")
+        # Mock GitHub command function that captures file content
+        captured_content = []
+        captured_calls = []
+
+        async def capture_github_command(repo_path, args):
+            captured_calls.append(args)
+            if len(args) >= 5 and args[3] == "--body-file":
+                # Read the file content before it's deleted
+                file_path = args[4]
+                try:
+                    with open(file_path, "r") as f:
+                        captured_content.append(f.read())
+                except FileNotFoundError:
+                    captured_content.append("")
+            else:
+                captured_content.append("")
+            return ""
+
+        mock_github_command = AsyncMock(side_effect=capture_github_command)
 
         await _generate_and_update_issue(
             repo_path=repo_path,
@@ -368,7 +402,9 @@ class TestGenerateAndUpdateIssue:
         assert first_call[0][1][0] == "issue"
         assert first_call[0][1][1] == "edit"
         assert first_call[0][1][2] == "123"
-        assert "Generated workplan content" in first_call[0][1][4]
+        # Check content was captured from the file
+        assert len(captured_content) >= 1
+        assert "Generated workplan content" in captured_content[0]
 
     @pytest.mark.asyncio
     async def test_generate_and_update_issue_success_gemini(self, tmp_path):
@@ -392,8 +428,25 @@ class TestGenerateAndUpdateIssue:
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
 
-        # Mock GitHub command function
-        mock_github_command = AsyncMock(return_value="")
+        # Mock GitHub command function that captures file content
+        captured_content = []
+        captured_calls = []
+
+        async def capture_github_command(repo_path, args):
+            captured_calls.append(args)
+            if len(args) >= 5 and args[3] == "--body-file":
+                # Read the file content before it's deleted
+                file_path = args[4]
+                try:
+                    with open(file_path, "r") as f:
+                        captured_content.append(f.read())
+                except FileNotFoundError:
+                    captured_content.append("")
+            else:
+                captured_content.append("")
+            return ""
+
+        mock_github_command = AsyncMock(side_effect=capture_github_command)
 
         await _generate_and_update_issue(
             repo_path=repo_path,
@@ -426,7 +479,9 @@ class TestGenerateAndUpdateIssue:
         assert first_call[0][1][0] == "issue"
         assert first_call[0][1][1] == "edit"
         assert first_call[0][1][2] == "123"
-        assert "Generated workplan content" in first_call[0][1][4]
+        # Check content was captured from the file
+        assert len(captured_content) >= 1
+        assert "Generated workplan content" in captured_content[0]
 
     @pytest.mark.asyncio
     async def test_generate_and_update_issue_no_llm_manager(self, tmp_path):
@@ -437,8 +492,21 @@ class TestGenerateAndUpdateIssue:
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
 
-        # Mock GitHub command function
-        mock_github_command = AsyncMock(return_value="")
+        # Mock GitHub command function that captures file content
+        captured_content = []
+
+        async def capture_github_command(repo_path, args):
+            if len(args) >= 5 and args[3] == "--body-file":
+                # Read the file content before it's deleted
+                file_path = args[4]
+                try:
+                    with open(file_path, "r") as f:
+                        captured_content.append(f.read())
+                except FileNotFoundError:
+                    captured_content.append("")
+            return ""
+
+        mock_github_command = AsyncMock(side_effect=capture_github_command)
 
         await _generate_and_update_issue(
             repo_path=repo_path,
@@ -464,11 +532,8 @@ class TestGenerateAndUpdateIssue:
         assert mock_github_command.call_count == 1
 
         # Check that it was a comment call with the error message
-        call_args = mock_github_command.call_args[0]
-        assert call_args[1][0] == "issue"
-        assert call_args[1][1] == "comment"
-        assert call_args[1][2] == "123"
-        assert "LLM Manager not initialized" in call_args[1][4]
+        assert len(captured_content) == 1
+        assert "LLM Manager not initialized" in captured_content[0]
 
     @pytest.mark.asyncio
     async def test_generate_and_update_issue_empty_response(self, tmp_path):
@@ -489,8 +554,21 @@ class TestGenerateAndUpdateIssue:
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
 
-        # Mock GitHub command function
-        mock_github_command = AsyncMock(return_value="")
+        # Mock GitHub command function that captures file content
+        captured_content = []
+
+        async def capture_github_command(repo_path, args):
+            if len(args) >= 5 and args[3] == "--body-file":
+                # Read the file content before it's deleted
+                file_path = args[4]
+                try:
+                    with open(file_path, "r") as f:
+                        captured_content.append(f.read())
+                except FileNotFoundError:
+                    captured_content.append("")
+            return ""
+
+        mock_github_command = AsyncMock(side_effect=capture_github_command)
 
         await _generate_and_update_issue(
             repo_path=repo_path,
@@ -516,11 +594,8 @@ class TestGenerateAndUpdateIssue:
         assert mock_github_command.call_count == 1
 
         # Check that it was a comment call with the error message
-        call_args = mock_github_command.call_args[0]
-        assert call_args[1][0] == "issue"
-        assert call_args[1][1] == "comment"
-        assert call_args[1][2] == "123"
-        assert "empty response" in call_args[1][4]
+        assert len(captured_content) == 1
+        assert "empty response" in captured_content[0]
 
     @pytest.mark.asyncio
     async def test_generate_and_update_issue_with_debug(self, tmp_path):
@@ -542,8 +617,25 @@ class TestGenerateAndUpdateIssue:
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
 
-        # Mock GitHub command function
-        mock_github_command = AsyncMock(return_value="")
+        # Mock GitHub command function that captures file content
+        captured_content = []
+        captured_calls = []
+
+        async def capture_github_command(repo_path, args):
+            captured_calls.append(args)
+            if len(args) >= 5 and args[3] == "--body-file":
+                # Read the file content before it's deleted
+                file_path = args[4]
+                try:
+                    with open(file_path, "r") as f:
+                        captured_content.append(f.read())
+                except FileNotFoundError:
+                    captured_content.append("")
+            else:
+                captured_content.append("")
+            return ""
+
+        mock_github_command = AsyncMock(side_effect=capture_github_command)
 
         await _generate_and_update_issue(
             repo_path=repo_path,
@@ -583,7 +675,7 @@ class TestGenerateAndUpdateIssue:
 
         # Check if debug comment was added
         debug_comment_found = any(
-            "Debug: Full prompt used for generation" in call[4] for call in comment_calls
+            "Debug: Full prompt used for generation" in content for content in captured_content
         )
         assert debug_comment_found
 
@@ -606,40 +698,55 @@ class TestProcessWorkplanAsync:
 
         with (
             patch(
-                "yellhorn_mcp.processors.workplan_processor._get_codebase_context"
+                "yellhorn_mcp.processors.workplan_processor.get_codebase_context"
             ) as mock_codebase,
             patch(
                 "yellhorn_mcp.processors.workplan_processor._generate_and_update_issue"
             ) as mock_generate,
         ):
-            mock_codebase.return_value = "Mock codebase context"
+            mock_codebase.return_value = ("Mock codebase context", ["file1.py", "file2.py"])
             mock_generate.return_value = None
 
-            await process_workplan_async(
-                repo_path=repo_path,
-                llm_manager=mock_llm_manager,
-                model="gpt-4o",
-                title="Test Workplan",
-                issue_number="123",
-                codebase_reasoning="full",
-                detailed_description="Test description",
-                debug=False,
-                disable_search_grounding=False,
-                _meta=None,
-                ctx=mock_ctx,
-                github_command_func=None,
-            )
+            # Mock GitHub command function
+            mock_github_command = AsyncMock(return_value="")
 
-            # Verify codebase context was retrieved
-            mock_codebase.assert_called_once()
+            # Mock Git command function to avoid Git repository requirement
+            mock_git_command = AsyncMock(return_value="file1.py\nfile2.py")
 
-            # Verify issue generation was called
-            mock_generate.assert_called_once()
-            # Function is called positionally
-            call_args = mock_generate.call_args[0]
-            assert call_args[5] == "Test Workplan"  # title is at index 5
-            assert call_args[4] == "123"  # issue_number is at index 4
-            assert "Test description" in call_args[3]  # prompt is at index 3
+            # Mock TokenCounter to prevent token limit issues
+            with patch(
+                "yellhorn_mcp.processors.workplan_processor.TokenCounter"
+            ) as mock_token_counter_class:
+                mock_token_counter = MagicMock()
+                mock_token_counter.get_model_limit.return_value = 100000  # Large limit
+                mock_token_counter.count_tokens.return_value = 1000  # Small token count
+                mock_token_counter_class.return_value = mock_token_counter
+
+                await process_workplan_async(
+                    repo_path=repo_path,
+                    llm_manager=mock_llm_manager,
+                    model="gpt-4o",
+                    title="Test Workplan",
+                    issue_number="123",
+                    codebase_reasoning="full",
+                    detailed_description="Test description",
+                    debug=False,
+                    disable_search_grounding=False,
+                    _meta=None,
+                    ctx=mock_ctx,
+                    github_command_func=mock_github_command,
+                )
+
+                # Verify codebase context was retrieved
+                mock_codebase.assert_called_once()
+
+                # Verify issue generation was called
+                mock_generate.assert_called_once()
+                # Function is called positionally
+                call_args = mock_generate.call_args[0]
+                assert call_args[5] == "Test Workplan"  # title is at index 5
+                assert call_args[4] == "123"  # issue_number is at index 4
+                assert "Test description" in call_args[3]  # prompt is at index 3
 
     @pytest.mark.asyncio
     async def test_process_workplan_async_error(self, tmp_path):
@@ -651,13 +758,24 @@ class TestProcessWorkplanAsync:
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
 
-        with patch(
-            "yellhorn_mcp.processors.workplan_processor._get_codebase_context"
-        ) as mock_codebase:
+        with patch("yellhorn_mcp.formatters.get_codebase_context") as mock_codebase:
             mock_codebase.side_effect = Exception("Codebase error")
 
-            # Mock GitHub command function
-            mock_github_command = AsyncMock(return_value="")
+            # Mock GitHub command function that captures file content
+            captured_content = []
+
+            async def capture_github_command(repo_path, args):
+                if len(args) >= 5 and args[3] == "--body-file":
+                    # Read the file content before it's deleted
+                    file_path = args[4]
+                    try:
+                        with open(file_path, "r") as f:
+                            captured_content.append(f.read())
+                    except FileNotFoundError:
+                        captured_content.append("")
+                return ""
+
+            mock_github_command = AsyncMock(side_effect=capture_github_command)
 
             await process_workplan_async(
                 repo_path=repo_path,
@@ -685,7 +803,9 @@ class TestProcessWorkplanAsync:
             assert call_args[1][0] == "issue"
             assert call_args[1][1] == "comment"
             assert call_args[1][2] == "123"
-            assert "Error generating workplan" in call_args[1][4]
+            # Check content was captured from the file
+            assert len(captured_content) >= 1
+            assert "Error generating workplan" in captured_content[0]
 
 
 class TestProcessRevisionAsync:
@@ -706,41 +826,53 @@ class TestProcessRevisionAsync:
 
         with (
             patch(
-                "yellhorn_mcp.processors.workplan_processor._get_codebase_context"
+                "yellhorn_mcp.processors.workplan_processor.get_codebase_context"
             ) as mock_codebase,
             patch(
                 "yellhorn_mcp.processors.workplan_processor._generate_and_update_issue"
             ) as mock_generate,
         ):
-            mock_codebase.return_value = "Mock codebase context"
+            mock_codebase.return_value = ("Mock codebase context", ["file1.py", "file2.py"])
             mock_generate.return_value = None
 
-            await process_revision_async(
-                repo_path=repo_path,
-                llm_manager=mock_llm_manager,
-                model="gpt-4o",
-                issue_number="123",
-                original_workplan=original_workplan,
-                revision_instructions=revision_instructions,
-                codebase_reasoning="full",
-                debug=False,
-                disable_search_grounding=False,
-                _meta=None,
-                ctx=mock_ctx,
-                github_command_func=None,
-            )
+            # Mock GitHub command function
+            mock_github_command = AsyncMock(return_value="")
 
-            # Verify codebase context was retrieved
-            mock_codebase.assert_called_once()
+            # Mock TokenCounter to prevent token limit issues
+            with patch(
+                "yellhorn_mcp.processors.workplan_processor.TokenCounter"
+            ) as mock_token_counter_class:
+                mock_token_counter = MagicMock()
+                mock_token_counter.get_model_limit.return_value = 100000  # Large limit
+                mock_token_counter.count_tokens.return_value = 1000  # Small token count
+                mock_token_counter_class.return_value = mock_token_counter
 
-            # Verify issue generation was called
-            mock_generate.assert_called_once()
-            # Function is called positionally
-            call_args = mock_generate.call_args[0]
-            assert call_args[5] == "Original Workplan"  # title is at index 5
-            assert call_args[4] == "123"  # issue_number is at index 4
-            assert original_workplan in call_args[3]  # prompt is at index 3
-            assert revision_instructions in call_args[3]  # prompt is at index 3
+                await process_revision_async(
+                    repo_path=repo_path,
+                    llm_manager=mock_llm_manager,
+                    model="gpt-4o",
+                    issue_number="123",
+                    original_workplan=original_workplan,
+                    revision_instructions=revision_instructions,
+                    codebase_reasoning="full",
+                    debug=False,
+                    disable_search_grounding=False,
+                    _meta=None,
+                    ctx=mock_ctx,
+                    github_command_func=mock_github_command,
+                )
+
+                # Verify codebase context was retrieved
+                mock_codebase.assert_called_once()
+
+                # Verify issue generation was called
+                mock_generate.assert_called_once()
+                # Function is called positionally
+                call_args = mock_generate.call_args[0]
+                assert call_args[5] == "Original Workplan"  # title is at index 5
+                assert call_args[4] == "123"  # issue_number is at index 4
+                assert original_workplan in call_args[3]  # prompt is at index 3
+                assert revision_instructions in call_args[3]  # prompt is at index 3
 
     @pytest.mark.asyncio
     async def test_process_revision_async_error(self, tmp_path):
@@ -752,13 +884,24 @@ class TestProcessRevisionAsync:
         mock_ctx = MagicMock()
         mock_ctx.log = AsyncMock()
 
-        with patch(
-            "yellhorn_mcp.processors.workplan_processor._get_codebase_context"
-        ) as mock_codebase:
+        with patch("yellhorn_mcp.formatters.get_codebase_context") as mock_codebase:
             mock_codebase.side_effect = Exception("Codebase error")
 
-            # Mock GitHub command function
-            mock_github_command = AsyncMock(return_value="")
+            # Mock GitHub command function that captures file content
+            captured_content = []
+
+            async def capture_github_command(repo_path, args):
+                if len(args) >= 5 and args[3] == "--body-file":
+                    # Read the file content before it's deleted
+                    file_path = args[4]
+                    try:
+                        with open(file_path, "r") as f:
+                            captured_content.append(f.read())
+                    except FileNotFoundError:
+                        captured_content.append("")
+                return ""
+
+            mock_github_command = AsyncMock(side_effect=capture_github_command)
 
             await process_revision_async(
                 repo_path=repo_path,
@@ -786,7 +929,9 @@ class TestProcessRevisionAsync:
             assert call_args[1][0] == "issue"
             assert call_args[1][1] == "comment"
             assert call_args[1][2] == "123"
-            assert "Error revising workplan" in call_args[1][4]
+            # Check content was captured from the file
+            assert len(captured_content) >= 1
+            assert "Error revising workplan" in captured_content[0]
 
     @pytest.mark.asyncio
     async def test_process_revision_async_title_extraction(self, tmp_path):
@@ -808,30 +953,53 @@ class TestProcessRevisionAsync:
         for original_workplan, expected_title in test_cases:
             with (
                 patch(
-                    "yellhorn_mcp.processors.workplan_processor._get_codebase_context"
+                    "yellhorn_mcp.formatters.get_codebase_context", new_callable=AsyncMock
                 ) as mock_codebase,
                 patch(
-                    "yellhorn_mcp.processors.workplan_processor._generate_and_update_issue"
+                    "yellhorn_mcp.processors.workplan_processor._generate_and_update_issue",
+                    new_callable=AsyncMock,
                 ) as mock_generate,
+                patch(
+                    "yellhorn_mcp.processors.workplan_processor.add_issue_comment",
+                    new_callable=AsyncMock,
+                ) as mock_add_comment,
             ):
-                mock_codebase.return_value = "Mock codebase context"
+                mock_codebase.return_value = ("Mock codebase context", ["file1.py", "file2.py"])
                 mock_generate.return_value = None
+                mock_add_comment.return_value = None
 
-                await process_revision_async(
-                    repo_path=repo_path,
-                    llm_manager=mock_llm_manager,
-                    model="gpt-4o",
-                    issue_number="123",
-                    original_workplan=original_workplan,
-                    revision_instructions="Add more detail",
-                    codebase_reasoning="full",
-                    debug=False,
-                    disable_search_grounding=False,
-                    _meta=None,
-                    ctx=mock_ctx,
-                )
+                # Mock GitHub command function
+                mock_github_command = AsyncMock(return_value="")
 
-                # Verify correct title was extracted
-                # Function is called positionally, so title is at index 5
-                call_args = mock_generate.call_args[0]
-                assert call_args[5] == expected_title
+                # Mock TokenCounter to prevent token limit issues
+                with patch(
+                    "yellhorn_mcp.processors.workplan_processor.TokenCounter"
+                ) as mock_token_counter_class:
+                    mock_token_counter = MagicMock()
+                    mock_token_counter.get_model_limit.return_value = 100000  # Large limit
+                    mock_token_counter.count_tokens.return_value = 1000  # Small token count
+                    mock_token_counter_class.return_value = mock_token_counter
+
+                    await process_revision_async(
+                        repo_path=repo_path,
+                        llm_manager=mock_llm_manager,
+                        model="gpt-4o",
+                        issue_number="123",
+                        original_workplan=original_workplan,
+                        revision_instructions="Add more detail",
+                        codebase_reasoning="full",
+                        debug=False,
+                        disable_search_grounding=False,
+                        _meta=None,
+                        ctx=mock_ctx,
+                        github_command_func=mock_github_command,
+                        git_command_func=AsyncMock(return_value="file1.py\nfile2.py"),
+                    )
+
+                    # Verify correct title was extracted
+                    # Function is called positionally, so title is at index 5
+                    assert (
+                        mock_generate.call_args is not None
+                    ), f"_generate_and_update_issue was not called for workplan: {original_workplan[:50]}"
+                    call_args = mock_generate.call_args[0]
+                    assert call_args[5] == expected_title

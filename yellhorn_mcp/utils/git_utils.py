@@ -22,13 +22,42 @@ class YellhornMCPError(Exception):
     pass
 
 
-async def run_git_command(repo_path: Path, command: list[str]) -> str:
+def run_git_command_with_set_cwd(cwd: Path):
+    """
+    Create a lambda function that sets the cwd and calls run_git_command.
+
+    Args:
+        cwd: Path to use as the current working directory.
+
+    Returns:
+        A lambda function that takes repo_path and command and calls run_git_command with the set cwd.
+    """
+    return lambda _, command: run_git_command(repo_path=cwd, command=command)
+
+
+def run_github_command_with_set_cwd(cwd: Path):
+    """
+    Create a lambda function that sets the cwd and calls run_git_command.
+
+    Args:
+        cwd: Path to use as the current working directory.
+
+    Returns:
+        A lambda function that takes repo_path and command and calls run_git_command with the set cwd.
+    """
+    return lambda _, command: run_github_command(repo_path=cwd, command=command)
+
+
+async def run_git_command(
+    repo_path: Path, command: list[str], git_command_func: Callable | None = None
+) -> str:
     """
     Run a Git command in the repository.
 
     Args:
         repo_path: Path to the repository.
         command: Git command to run.
+        git_command_func: Optional Git command function (for mocking).
 
     Returns:
         Command output as string.
@@ -36,6 +65,11 @@ async def run_git_command(repo_path: Path, command: list[str]) -> str:
     Raises:
         YellhornMCPError: If the command fails.
     """
+    # Use the provided function if available (for mocking)
+    if git_command_func:
+        return await git_command_func(repo_path, command)
+
+    # Otherwise use the default Git command
     try:
         proc = await asyncio.create_subprocess_exec(
             "git",
@@ -72,43 +106,73 @@ async def run_github_command(
     Raises:
         YellhornMCPError: If the command fails.
     """
-    try:
-        if github_command_func:
-            # Use the provided function for mocking
-            return await github_command_func(repo_path, command)
-        else:
-            # Use the default GitHub CLI command
-            env = os.environ.copy()
-            proc = await asyncio.create_subprocess_exec(
-                "gh",
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=repo_path,
-                env=env,
-            )
-            stdout, stderr = await proc.communicate()
+    # Use the provided function if available (for mocking)
+    if github_command_func:
+        return await github_command_func(repo_path, command)
 
-            if proc.returncode != 0:
-                error_msg = stderr.decode("utf-8").strip()
+    # Otherwise use the default GitHub CLI command
+    try:
+        env = os.environ.copy()
+        proc = await asyncio.create_subprocess_exec(
+            "gh",
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=repo_path,
+            env=env,
+        )
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            error_msg = stderr.decode("utf-8").strip()
+
+            # Check for specific GitHub authentication/repository errors
+            if "Could not resolve to a Repository" in error_msg:
+                raise YellhornMCPError(
+                    f"GitHub repository not found or not accessible: {error_msg}\n\n"
+                    "To fix this issue:\n"
+                    "1. Run 'gh auth login' to authenticate with GitHub\n"
+                    "2. Verify your remote is configured correctly: 'git remote -v'\n"
+                    "3. Ensure you have access to the repository\n"
+                    "4. Check that the repository exists on GitHub"
+                )
+            elif "gh auth login" in error_msg or "not authenticated" in error_msg.lower():
+                raise YellhornMCPError(
+                    f"GitHub authentication required: {error_msg}\n\n"
+                    "Please authenticate with GitHub CLI:\n"
+                    "  gh auth login"
+                )
+            elif "GraphQL" in error_msg:
+                # Generic GraphQL error with helpful message
+                raise YellhornMCPError(
+                    f"GitHub API error: {error_msg}\n\n"
+                    "This may be due to:\n"
+                    "1. Authentication issues - run 'gh auth login'\n"
+                    "2. Repository access - check your permissions\n"
+                    "3. Network connectivity - check your internet connection"
+                )
+            else:
                 raise YellhornMCPError(f"GitHub CLI command failed: {error_msg}")
 
-            return stdout.decode("utf-8").strip()
+        return stdout.decode("utf-8").strip()
     except FileNotFoundError:
         raise YellhornMCPError("GitHub CLI not found. Please ensure GitHub CLI is installed.")
 
 
-async def ensure_label_exists(repo_path: Path, label: str, description: str = "") -> None:
+async def ensure_label_exists(repo_path: Path, label: str, description: str = "") -> bool:
     """
     Ensure that a label exists in the GitHub repository.
+
+    This function attempts to create the label if it doesn't exist, but will not
+    fail if label creation is unsuccessful (e.g., due to permissions).
 
     Args:
         repo_path: Path to the repository.
         label: The label name.
         description: Optional description for the label.
 
-    Raises:
-        YellhornMCPError: If the command fails.
+    Returns:
+        True if label exists or was created successfully, False otherwise.
     """
     try:
         # Check if label exists
@@ -117,23 +181,28 @@ async def ensure_label_exists(repo_path: Path, label: str, description: str = ""
         )
         labels = json.loads(result)
 
-        # If label doesn't exist, create it
-        if not labels:
-            color = "5fa46c"  # A nice green color
-            await run_github_command(
-                repo_path,
-                [
-                    "label",
-                    "create",
-                    label,
-                    f"--color={color}",
-                    f"--description={description}",
-                ],
-            )
+        # If label exists, return True
+        if labels:
+            return True
+
+        # If label doesn't exist, try to create it
+        color = "5fa46c"  # A nice green color
+        await run_github_command(
+            repo_path,
+            [
+                "label",
+                "create",
+                label,
+                f"--color={color}",
+                f"--description={description}",
+            ],
+        )
+        return True
     except Exception as e:
         # Log but continue if there's an error with label creation
-        # This is non-critical functionality
+        # This is non-critical functionality - issues can be created without labels
         print(f"Warning: Unable to create label '{label}': {str(e)}")
+        return False
 
 
 async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str) -> None:
@@ -148,7 +217,21 @@ async def add_github_issue_comment(repo_path: Path, issue_number: str, body: str
     Raises:
         YellhornMCPError: If the command fails.
     """
-    await run_github_command(repo_path, ["issue", "comment", issue_number, "--body", body])
+    # Use --body-file for large content to avoid "Argument list too long" error
+    import os
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+        tmp.write(body)
+        tmp_path = tmp.name
+
+    try:
+        await run_github_command(
+            repo_path, ["issue", "comment", issue_number, "--body-file", tmp_path]
+        )
+    finally:
+        # Clean up the temporary file
+        os.unlink(tmp_path)
 
 
 async def update_github_issue(
@@ -301,9 +384,16 @@ async def create_github_subissue(
         else:
             labels_list = labels
 
-        # Ensure all labels exist
+        # Try to ensure all labels exist (non-critical - issues can be created without labels)
+        existing_labels = []
         for label in labels_list:
-            await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP")
+            if await ensure_label_exists(repo_path, label, "Created by Yellhorn MCP"):
+                existing_labels.append(label)
+            else:
+                print(f"Warning: Will create issue without label '{label}' due to creation failure")
+
+        # Use only the labels that exist or were successfully created
+        labels_list = existing_labels
 
         # Create temporary file for issue body
         import tempfile

@@ -14,13 +14,418 @@ from typing import Any, List, Optional, Set
 
 from mcp.server.fastmcp import Context
 
-from yellhorn_mcp.llm_manager import LLMManager
-from yellhorn_mcp.processors.workplan_processor import (
+from yellhorn_mcp.formatters.codebase_snapshot import get_codebase_snapshot
+from yellhorn_mcp.formatters.context_fetcher import get_codebase_context
+from yellhorn_mcp.formatters.prompt_formatter import (
     build_file_structure_context,
     format_codebase_for_prompt,
-    get_codebase_snapshot,
 )
+from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.token_counter import TokenCounter
 from yellhorn_mcp.utils.git_utils import YellhornMCPError
+
+
+async def build_codebase_context(
+    repo_path: Path,
+    codebase_reasoning_mode: str,
+    model: str,
+    ctx: Context | None = None,
+    git_command_func=None,
+) -> tuple[str, list[str], set[str]]:
+    """Build the codebase context for analysis.
+
+    Args:
+        repo_path: Path to the repository.
+        codebase_reasoning_mode: How to analyze the codebase.
+        model: Model name for token counting.
+        ctx: Optional context for logging.
+        git_command_func: Optional git command function.
+
+    Returns:
+        Tuple of (directory_context, file_paths, all_dirs)
+    """
+
+    # Define log function for get_codebase_context
+    def sync_context_log(msg: str):
+        if ctx:
+            asyncio.create_task(ctx.log(level="info", message=msg))
+
+    if ctx:
+        await ctx.log(
+            level="info",
+            message=f"Getting codebase context using {codebase_reasoning_mode} mode",
+        )
+
+    # Get the codebase context
+    directory_context, context_file_paths = await get_codebase_context(
+        repo_path=repo_path,
+        reasoning_mode=codebase_reasoning_mode,
+        log_function=sync_context_log if ctx else None,
+        git_command_func=git_command_func,
+    )
+
+    # Log key metrics
+    if ctx:
+        token_counter = TokenCounter()
+        token_count = token_counter.count_tokens(directory_context, model)
+        file_count = len(directory_context.split("\n")) if directory_context else 0
+        await ctx.log(
+            level="info",
+            message=f"Codebase context metrics: {file_count} files, {token_count} tokens based on ({model})",
+        )
+
+    # Extract directories from file paths
+    all_dirs = set()
+    for file_path in context_file_paths:
+        parts = file_path.split("/")
+        for i in range(1, len(parts)):
+            dir_path = "/".join(parts[:i])
+            if dir_path:
+                all_dirs.add(dir_path)
+
+    # Add root directory if there are root-level files
+    if any("/" not in f for f in context_file_paths):
+        all_dirs.add(".")
+
+    if ctx:
+        await ctx.log(
+            level="info",
+            message=f"Extracted {len(all_dirs)} directories from {len(context_file_paths)} filtered files",
+        )
+
+    return directory_context, context_file_paths, all_dirs
+
+
+async def analyze_with_llm(
+    llm_manager: LLMManager,
+    model: str,
+    directory_context: str,
+    user_task: str,
+    debug: bool = False,
+    ctx: Context | None = None,
+) -> str:
+    """Analyze the codebase with LLM to identify important directories.
+
+    Args:
+        llm_manager: LLM Manager instance.
+        model: Model name to use.
+        directory_context: The codebase context string.
+        user_task: Description of the task.
+        debug: Whether to log debug information.
+        ctx: Optional context for logging.
+
+    Returns:
+        LLM response containing directory analysis.
+    """
+    # Construct the system message
+    system_message = f"""You are an expert software developer tasked with analyzing a codebase structure to identify important directories for building and executing a workplan.
+
+Your goal is to identify the most important directories that should be included for the user's task.
+
+Analyze the directories and identify the ones that:
+1. Contain core application code relevant to the user's task
+2. Likely contain important business logic
+3. Would be essential for understanding the codebase architecture
+4. Are needed to implement the requested task
+5. Contain SDKs or libraries relevant to the user's task
+
+Ignore directories that:
+1. Contain only build artifacts or generated code
+2. Store dependencies or vendor code
+3. Contain temporary or cache files
+4. Probably aren't relevant to the user's specific task
+
+User Task: {user_task}
+
+Return your analysis as a list of important directories, one per line, without any additional text or formatting as below:
+
+```context
+dir1/subdir1/
+dir2/
+dir3/subdir3/file3.filetype
+```
+
+Prefer to include directories, and not just file paths but include just file paths when appropriate. 
+IMPORTANT: Select only the most relevant directories or files.
+Don't include explanations for your choices, just return the list in the specified format."""
+
+    prompt = f"""{directory_context}"""
+
+    if ctx:
+        await ctx.log(
+            level="info",
+            message=f"Analyzing directory structure with {model}",
+        )
+
+    # Debug logging
+    if debug and ctx:
+        await ctx.log(level="info", message=f"[DEBUG] System message: {system_message}")
+        await ctx.log(
+            level="info", message=f"[DEBUG] User prompt ({len(prompt)} chars): {prompt[:5000]}..."
+        )
+
+    # Call LLM
+    result = await llm_manager.call_llm(
+        model=model,
+        prompt=prompt,
+        system_message=system_message,
+        temperature=0.0,
+        ctx=ctx,
+    )
+
+    return result if isinstance(result, str) else str(result)
+
+
+async def parse_llm_directories(
+    llm_result: str,
+    all_dirs: set[str],
+    ctx: Context | None = None,
+) -> set[str]:
+    """Parse LLM output to extract important directories.
+
+    Args:
+        llm_result: The LLM response string.
+        all_dirs: Set of all available directories.
+        ctx: Optional context for logging.
+
+    Returns:
+        Set of important directories identified by the LLM.
+    """
+    all_important_dirs = set()
+
+    def match_path_to_directories(path: str, all_dirs: set[str]) -> set[str]:
+        """Match a path to directories it belongs to, or return the file path itself if it's a specific file.
+
+        For example:
+        - 'yellhorn_mcp/token_counter.py' matches 'yellhorn_mcp'
+        - 'yellhorn_mcp/processors/context.py' matches 'yellhorn_mcp/processors'
+        - 'tests' matches 'tests' if it exists as a directory
+        - '.python-version' returns '.python-version' as a specific file
+        """
+        matched = set()
+
+        # Direct match (exact directory)
+        if path in all_dirs or path == ".":
+            matched.add(path)
+            return matched
+
+        # Check if it's a specific file (can have slashes, detected by file characteristics)
+        # Look for file extensions or dot files
+        path_parts = path.split("/")
+        last_part = path_parts[-1]
+        # Check for common file extensions or dot files, but exclude prose text
+        if (
+            "." in last_part
+            and not last_part.endswith("/")
+            and (last_part.count(".") == 1 or last_part.startswith("."))
+            and not any(
+                word in path.lower()
+                for word in ["found", "error", "directory", "directories", "important"]
+            )
+        ):
+            # This looks like a file (has extension or is a dot file)
+            matched.add(path)
+            return matched
+
+        # Check if it's a file path that belongs to directories
+        if not matched and "/" in path:
+            # Split path and find the lowest (most specific) parent directory
+            parts = path.split("/")
+            # Start from the most specific (longest) path and work backwards
+            for i in range(len(parts), 0, -1):
+                parent_dir = "/".join(parts[:i])
+                if parent_dir in all_dirs:
+                    matched.add(parent_dir)
+                    break  # Found the most specific match, stop here
+
+        # Check if the path is a parent of any directory in all_dirs
+        # Only do this if no matches were found in the previous checks
+        if not matched:
+            for dir_path in all_dirs:
+                if dir_path.startswith(path + "/") or dir_path == path:
+                    matched.add(path if path in all_dirs else dir_path)
+
+        return matched
+
+    # Find all context blocks
+    context_blocks = re.findall(r"```context\n([\s\S]*?)\n```", llm_result, re.MULTILINE)
+
+    # Process each block
+    for block in context_blocks:
+        for line in block.split("\n"):
+            line = line.strip()
+            # Remove trailing slashes for consistency
+            line = line.rstrip("/")
+
+            if line and not line.startswith("#"):
+                # Try to match the line to directories
+                matched_dirs = match_path_to_directories(line, all_dirs)
+                if matched_dirs:
+                    all_important_dirs.update(matched_dirs)
+
+    # If no directories found in context blocks, try direct extraction
+    if not all_important_dirs:
+        for line in llm_result.split("\n"):
+            line = line.strip().rstrip("/")
+            if line and not line.startswith("```") and not line.startswith("#"):
+                # Try to match the line to directories
+                matched_dirs = match_path_to_directories(line, all_dirs)
+                if matched_dirs:
+                    all_important_dirs.update(matched_dirs)
+
+    # Fallback to all directories if none found
+    if not all_important_dirs:
+        if ctx:
+            await ctx.log(
+                level="warning",
+                message="No important directories identified, including all directories",
+            )
+        all_important_dirs = set(all_dirs)
+
+    # Consolidate directories: remove child directories if their parent is already included
+    consolidated_dirs = set()
+    sorted_dirs = sorted(all_important_dirs, key=len)  # Sort by length to process parents first
+
+    for dir_path in sorted_dirs:
+        # Check if any existing directory in consolidated_dirs is a parent of this directory
+        is_child = False
+        for existing_dir in consolidated_dirs:
+            if dir_path.startswith(existing_dir + "/") or dir_path == existing_dir:
+                is_child = True
+                break
+
+        # Only add if it's not a child of an existing directory
+        if not is_child:
+            consolidated_dirs.add(dir_path)
+
+    return consolidated_dirs
+
+
+async def save_context_file(
+    repo_path: Path,
+    output_path: str,
+    user_task: str,
+    all_important_dirs: set[str],
+    file_paths: list[str],
+    ctx: Context | None = None,
+) -> str:
+    """Save the context file with important directories.
+
+    Args:
+        repo_path: Path to the repository.
+        output_path: Path where the context file will be created.
+        user_task: Description of the task.
+        all_important_dirs: Set of important directories.
+        file_paths: List of all file paths.
+        ctx: Optional context for logging.
+
+    Returns:
+        Success message with the created file path.
+
+    Raises:
+        YellhornMCPError: If writing fails.
+    """
+    # Generate file content
+    final_content = "# Yellhorn Context File - AI context optimization\n"
+    final_content += f"# Generated by yellhorn-mcp curate_context tool\n"
+    final_content += f"# Based on task: {user_task[:80]}\n\n"
+
+    # Sort directories for consistent output
+    # Separate files from directories
+    important_dirs = set()
+    important_files = set()
+
+    for item in all_important_dirs:
+        # Check if this looks like a file (has extension or is a dot file)
+        if "/" in item:
+            parts = item.split("/")
+            last_part = parts[-1]
+            is_file = (
+                "." in last_part
+                and not last_part.endswith("/")
+                and (last_part.count(".") == 1 or last_part.startswith("."))
+            )
+        else:
+            # Special case: "." alone means root directory, not a file
+            if item == ".":
+                is_file = False
+            else:
+                is_file = "." in item and (item.count(".") == 1 or item.startswith("."))
+
+        if is_file:
+            important_files.add(item)
+        else:
+            important_dirs.add(item)
+
+    sorted_important_dirs = sorted(list(important_dirs))
+    sorted_important_files = sorted(list(important_files))
+
+    # Generate .yellhorncontext file content
+    if sorted_important_dirs or sorted_important_files:
+        final_content += "# Important directories to specifically include\n"
+        dir_includes = []
+
+        # Add specific files first
+        for file_path in sorted_important_files:
+            dir_includes.append(file_path)
+
+        # Add directories
+        for dir_path in sorted_important_dirs:
+            # Check if directory has files
+            has_files = False
+            if dir_path == ".":
+                has_files = any("/" not in f for f in file_paths)
+            else:
+                has_files = any(f.startswith(dir_path + "/") for f in file_paths)
+
+            if dir_path == ".":
+                if has_files:
+                    dir_includes.append("./")
+                else:
+                    dir_includes.append("./**")
+            else:
+                if has_files:
+                    dir_includes.append(f"{dir_path}/")
+                else:
+                    dir_includes.append(f"{dir_path}/**")
+
+        final_content += "\n".join(dir_includes) + "\n\n"
+
+    # Remove duplicate lines
+    content_lines = final_content.splitlines()
+    content_lines.reverse()
+
+    seen_lines = set()
+    unique_lines = []
+
+    for line in content_lines:
+        if line.strip() == "" or line.strip().startswith("#"):
+            unique_lines.append(line)
+            continue
+
+        if line not in seen_lines:
+            seen_lines.add(line)
+            unique_lines.append(line)
+
+    unique_lines.reverse()
+    final_content = "\n".join(unique_lines)
+
+    # Write the file
+    output_file_path = repo_path / output_path
+    try:
+        with open(output_file_path, "w", encoding="utf-8") as f:
+            f.write(final_content)
+
+        if ctx:
+            await ctx.log(
+                level="info",
+                message=f"Successfully wrote .yellhorncontext file to {output_file_path}",
+            )
+
+        return f"Successfully created .yellhorncontext file at {output_file_path} with {len(sorted_important_files)} files and {len(sorted_important_dirs)} directories."
+
+    except Exception as e:
+        raise YellhornMCPError(f"Failed to write .yellhorncontext file: {str(e)}")
 
 
 async def process_context_curation_async(
@@ -30,9 +435,8 @@ async def process_context_curation_async(
     user_task: str,
     output_path: str = ".yellhorncontext",
     codebase_reasoning: str = "file_structure",
-    ignore_file_path: str = ".yellhornignore",
-    depth_limit: int = 0,
     disable_search_grounding: bool = False,
+    debug: bool = False,
     ctx: Context | None = None,
 ) -> str:
     """Analyze codebase and create a context curation file.
@@ -45,8 +449,8 @@ async def process_context_curation_async(
         output_path: Path where the .yellhorncontext file will be created.
         codebase_reasoning: How to analyze the codebase.
         ignore_file_path: Path to the ignore file.
-        depth_limit: Maximum directory depth to analyze (0 = no limit).
         disable_search_grounding: Whether to disable search grounding.
+        debug: Whether to log the full prompt sent to the LLM.
         ctx: Optional context for logging.
 
     Returns:
@@ -55,6 +459,10 @@ async def process_context_curation_async(
     Raises:
         YellhornMCPError: If context curation fails.
     """
+    # Check if LLM manager is provided
+    if not llm_manager:
+        raise YellhornMCPError("LLM Manager not initialized")
+
     try:
         # Store original search grounding setting
         original_search_grounding = None
@@ -67,132 +475,45 @@ async def process_context_curation_async(
         if ctx:
             await ctx.log(level="info", message="Starting context curation process")
 
-        # Get all files in the repository
-        all_file_paths = []
-        for root, dirs, files in os.walk(repo_path):
-            # Skip hidden directories and common ignore patterns
-            dirs[:] = [
-                d
-                for d in dirs
-                if not d.startswith(".") and d not in ["node_modules", "__pycache__", "venv", "env"]
-            ]
+        # Get git command function from context if available
+        git_command_func = (
+            ctx.request_context.lifespan_context.get("git_command_func") if ctx else None
+        )
 
-            for file in files:
-                if not file.startswith(".") and not file.endswith(".pyc"):
-                    file_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_path, repo_path)
-                    all_file_paths.append(relative_path)
-
-        if ctx:
-            await ctx.log(level="info", message=f"Found {len(all_file_paths)} files in repository")
-
-        # Use all files without ignore filtering
-        filtered_file_paths = all_file_paths.copy()
-
-        if ctx:
-            await ctx.log(
-                level="info",
-                message=f"Using all {len(filtered_file_paths)} files without ignore filtering",
-            )
-
-        # Apply depth limit if specified
-        if depth_limit > 0:
-            depth_filtered_paths = []
-            for file_path in filtered_file_paths:
-                depth = file_path.count("/")
-                if depth < depth_limit:
-                    depth_filtered_paths.append(file_path)
-            filtered_file_paths = depth_filtered_paths
-            if ctx:
-                await ctx.log(
-                    level="info",
-                    message=f"Applied depth limit {depth_limit}, now have {len(filtered_file_paths)} files",
-                )
-
-        # Extract and analyze directories from filtered files
-        all_dirs = set()
-        for file_path in filtered_file_paths:
-            # Get all parent directories of this file
-            parts = file_path.split("/")
-            for i in range(1, len(parts)):
-                dir_path = "/".join(parts[:i])
-                if dir_path:  # Skip empty strings
-                    all_dirs.add(dir_path)
-
-        # Add root directory ('.') if there are files at the root level
-        if any("/" not in f for f in filtered_file_paths):
-            all_dirs.add(".")
-
-        # Sort directories for consistent output
-        sorted_dirs = sorted(list(all_dirs))
-
-        if ctx:
-            await ctx.log(
-                level="info",
-                message=f"Extracted {len(sorted_dirs)} directories from {len(filtered_file_paths)} filtered files",
-            )
-
-        # Build the codebase context based on reasoning mode
+        # Determine the codebase reasoning mode to use
         codebase_reasoning_mode = (
             ctx.request_context.lifespan_context.get("codebase_reasoning", codebase_reasoning)
             if ctx
             else codebase_reasoning
         )
 
-        if codebase_reasoning_mode == "lsp":
-            # Use LSP mode to get detailed code structure
-            if ctx:
-                await ctx.log(
-                    level="info",
-                    message="Using LSP mode for codebase analysis",
-                )
-            # Get LSP snapshot of the codebase
-            from yellhorn_mcp.utils.lsp_utils import get_lsp_snapshot
+        # Delete existing .yellhorncontext file to prevent it from influencing file filtering
+        context_file_path = repo_path / output_path
+        if context_file_path.exists():
+            try:
+                context_file_path.unlink()
+                if ctx:
+                    await ctx.log(
+                        level="info",
+                        message=f"Deleted existing {output_path} file before analysis",
+                    )
+            except Exception as e:
+                if ctx:
+                    await ctx.log(
+                        level="warning",
+                        message=f"Could not delete existing {output_path} file: {e}",
+                    )
 
-            lsp_file_paths, lsp_file_contents = await get_lsp_snapshot(repo_path)
+        # Step 1: Build the codebase context
+        directory_context, file_paths, all_dirs = await build_codebase_context(
+            repo_path=repo_path,
+            codebase_reasoning_mode=codebase_reasoning_mode,
+            model=model,
+            ctx=ctx,
+            git_command_func=git_command_func,
+        )
 
-            # Use all LSP results without filtering
-            filtered_lsp_paths = lsp_file_paths
-            filtered_lsp_contents = lsp_file_contents
-
-            # Format with LSP structure
-            directory_context = await format_codebase_for_prompt(
-                filtered_lsp_paths, filtered_lsp_contents
-            )
-
-        elif codebase_reasoning_mode == "full":
-            # Use full mode with file contents
-            if ctx:
-                await ctx.log(
-                    level="info",
-                    message="Using full mode with file contents for codebase analysis",
-                )
-
-            # Get file contents for filtered files
-            file_contents = {}
-            for file_path in filtered_file_paths:
-                full_path = repo_path / file_path
-                if full_path.is_file():
-                    try:
-                        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
-                            file_contents[file_path] = f.read()
-                    except Exception:
-                        # Skip files that can't be read
-                        pass
-
-            # Format with full file contents
-            directory_context = await format_codebase_for_prompt(filtered_file_paths, file_contents)
-
-        else:
-            # Default to file structure mode
-            if ctx:
-                await ctx.log(
-                    level="info",
-                    message="Using file structure mode for codebase analysis",
-                )
-            directory_context = build_file_structure_context(filtered_file_paths)
-
-        # Log peek of directory_context
+        # Log peek of directory context
         if ctx:
             await ctx.log(
                 level="info",
@@ -203,94 +524,24 @@ async def process_context_curation_async(
                 ),
             )
 
-        # Construct the system message
-        system_message = """You are an expert software developer tasked with analyzing a codebase structure to identify important directories for AI context.
-
-Your goal is to identify the most important directories that should be included when an AI assistant analyzes this codebase for the user's task.
-
-Analyze the directories and identify the ones that:
-1. Contain core application code relevant to the user's task
-2. Likely contain important business logic
-3. Would be essential for understanding the codebase architecture
-4. Are needed to implement the requested task
-
-Ignore directories that:
-1. Contain only build artifacts or generated code
-2. Store dependencies or vendor code
-3. Contain temporary or cache files
-4. Probably aren't relevant to the user's specific task
-
-Return your analysis as a list of important directories, one per line, in this format:
-
-```context
-dir1
-dir2
-dir3
-```
-
-Don't include explanations for your choices, just return the list in the specified format."""
-
-        # Construct the prompt with user task and directory context
-        prompt = f"""{directory_context}"""
-
-        # Use LLMManager for unified LLM calls
-        if not llm_manager:
-            raise YellhornMCPError("LLM Manager not initialized")
-
-        # Additional kwargs for the LLM call
-        llm_kwargs = {}
-
-        if ctx:
-            await ctx.log(
-                level="info",
-                message=f"Analyzing directory structure with {model}",
-            )
-
-        # Track important directories
+        # Step 2: Analyze with LLM
         all_important_dirs = set()
-
-        # Use LLMManager to handle the LLM call
         try:
-            result = await llm_manager.call_llm(
+            llm_result = await analyze_with_llm(
+                llm_manager=llm_manager,
                 model=model,
-                prompt=prompt,
-                system_message=system_message,
-                temperature=0.0,
-                **llm_kwargs,
+                directory_context=directory_context,
+                user_task=user_task,
+                debug=debug,
+                ctx=ctx,
             )
 
-            # Extract directory paths from all context blocks using regex
-            import re
-
-            # Ensure result is a string
-            result_str = result if isinstance(result, str) else str(result)
-
-            # Find all context blocks (```context followed by content and closing ```)
-            context_blocks = re.findall(r"```context\n([\s\S]*?)\n```", result_str, re.MULTILINE)
-
-            # Process each block
-            for block in context_blocks:
-                for line in block.split("\n"):
-                    line = line.strip()
-                    # Skip empty lines and comments
-                    if line and not line.startswith("#"):
-                        # Validate that the directory exists in our sorted_dirs list
-                        if line in sorted_dirs or line == ".":
-                            all_important_dirs.add(line)
-
-            # If we didn't find any directories in context blocks, try to extract them directly
-            if not all_important_dirs:
-                for line in result_str.split("\n"):
-                    line = line.strip()
-                    # Only add if it looks like a directory path (no spaces, existing in our list)
-                    # and not part of a code block
-                    if (
-                        line
-                        and " " not in line
-                        and (line in sorted_dirs or line == ".")
-                        and not line.startswith("```")
-                    ):
-                        all_important_dirs.add(line)
+            # Step 3: Parse LLM output for directories
+            all_important_dirs = await parse_llm_directories(
+                llm_result=llm_result,
+                all_dirs=all_dirs,
+                ctx=ctx,
+            )
 
             # Log the directories found
             if ctx:
@@ -309,17 +560,12 @@ Don't include explanations for your choices, just return the list in the specifi
                     level="error",
                     message=f"Error during LLM analysis: {str(e)} ({type(e).__name__})",
                 )
-            # Continue with fallback behavior
-            all_important_dirs = set(sorted_dirs)
+            # Fallback to all directories
+            all_important_dirs = set(all_dirs)
 
-        # If we didn't get any important directories, include all directories
+        # If no directories identified, use all (already handled in parse_llm_directories)
         if not all_important_dirs:
-            if ctx:
-                await ctx.log(
-                    level="warning",
-                    message="No important directories identified, including all directories",
-                )
-            all_important_dirs = set(sorted_dirs)
+            all_important_dirs = set(all_dirs)
 
         if ctx:
             await ctx.log(
@@ -327,102 +573,21 @@ Don't include explanations for your choices, just return the list in the specifi
                 message=f"Processing complete, identified {len(all_important_dirs)} important directories",
             )
 
-        # Generate the final .yellhorncontext file content with comments
-        final_content = "# Yellhorn Context File - AI context optimization\n"
-        final_content += f"# Generated by yellhorn-mcp curate_context tool\n"
-        final_content += f"# Based on task: {user_task[:80]}\n\n"
+        # Step 4: Save the context file
+        result = await save_context_file(
+            repo_path=repo_path,
+            output_path=output_path,
+            user_task=user_task,
+            all_important_dirs=all_important_dirs,
+            file_paths=file_paths,
+            ctx=ctx,
+        )
 
-        # Sort directories for consistent output
-        sorted_important_dirs = sorted(list(all_important_dirs))
+        # Restore original search grounding setting if modified
+        if disable_search_grounding and ctx:
+            ctx.request_context.lifespan_context["use_search_grounding"] = original_search_grounding
 
-        # Convert important directories to whitelist patterns (without ! prefix)
-        if sorted_important_dirs:
-            final_content += "# Important directories to specifically include\n"
-            dir_includes = []
-            for dir_path in sorted_important_dirs:
-                # Check if this directory has files in filtered_file_paths
-                has_files = False
-                if dir_path == ".":
-                    # Root directory - check for files at root level
-                    has_files = any("/" not in f for f in filtered_file_paths)
-                else:
-                    # Check if any filtered files are within this directory
-                    has_files = any(f.startswith(dir_path + "/") for f in filtered_file_paths)
-
-                if dir_path == ".":
-                    # Root directory is a special case
-                    if has_files:
-                        dir_includes.append("./")
-                    else:
-                        dir_includes.append("./**")
-                else:
-                    # Regular directory
-                    if has_files:
-                        dir_includes.append(f"{dir_path}/")
-                    else:
-                        # Add ** suffix for directories without files to make them recursive
-                        dir_includes.append(f"{dir_path}/**")
-
-            final_content += "\n".join(dir_includes) + "\n\n"
-
-        # Remove duplicate lines, keeping the last occurrence (from bottom up)
-        # Split content into lines, reverse to process from bottom up
-        content_lines = final_content.splitlines()
-        content_lines.reverse()
-
-        # Track seen lines (excluding comments and empty lines)
-        seen_lines = set()
-        unique_lines = []
-
-        for line in content_lines:
-            # Always keep comments and empty lines
-            if line.strip() == "" or line.strip().startswith("#"):
-                unique_lines.append(line)
-                continue
-
-            # For non-comment lines, check if we've seen them before
-            if line not in seen_lines:
-                seen_lines.add(line)
-                unique_lines.append(line)
-
-        # Reverse back to original order and join
-        unique_lines.reverse()
-        final_content = "\n".join(unique_lines)
-
-        # Write the file to the specified path
-        output_file_path = repo_path / output_path
-        try:
-            with open(output_file_path, "w", encoding="utf-8") as f:
-                f.write(final_content)
-
-            if ctx:
-                await ctx.log(
-                    level="info",
-                    message=f"Successfully wrote .yellhorncontext file to {output_file_path}",
-                )
-
-            # Format directories for log message
-            dirs_str = ", ".join(sorted_important_dirs[:5])
-            if len(sorted_important_dirs) > 5:
-                dirs_str += f", ... ({len(sorted_important_dirs) - 5} more)"
-
-            if ctx:
-                await ctx.log(
-                    level="info",
-                    message=f"Generated .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories, blacklist and whitelist patterns",
-                )
-
-            # Restore original search grounding setting if modified
-            if disable_search_grounding and ctx:
-                ctx.request_context.lifespan_context["use_search_grounding"] = (
-                    original_search_grounding
-                )
-
-            # Return success message
-            return f"Successfully created .yellhorncontext file at {output_file_path} with {len(sorted_important_dirs)} important directories and recommended blacklist patterns."
-
-        except Exception as write_error:
-            raise YellhornMCPError(f"Failed to write .yellhorncontext file: {str(write_error)}")
+        return result
 
     except Exception as e:
         error_message = f"Failed to generate .yellhorncontext file: {str(e)}"

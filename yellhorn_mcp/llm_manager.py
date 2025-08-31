@@ -399,7 +399,9 @@ class LLMManager:
         self.config = config or {}
 
         # Default configuration
-        self.safety_margin = self.config.get("safety_margin_tokens", 1000)
+        # Keep safety_margin for backward compatibility, but prefer ratio-based calculation
+        self.safety_margin = self.config.get("safety_margin_tokens", 1000)  # Fallback/legacy
+        self.safety_margin_ratio = self.config.get("safety_margin_ratio", 0.2)  # 20% of model limit
         self.overlap_ratio = self.config.get("overlap_ratio", 0.1)
         self.aggregation_strategy = self.config.get("aggregation_strategy", "concatenate")
         self.chunk_strategy = self.config.get("chunk_strategy", "sentences")
@@ -429,6 +431,7 @@ class LLMManager:
         temperature: float = 0.7,
         system_message: Optional[str] = None,
         response_format: Optional[str] = None,
+        ctx: Optional[Any] = None,
         **kwargs,
     ) -> Union[str, Dict[str, Any]]:
         """
@@ -440,20 +443,48 @@ class LLMManager:
             temperature: Temperature for generation
             system_message: Optional system message
             response_format: Optional response format (e.g., "json")
+            ctx: Optional context for logging
             **kwargs: Additional model-specific parameters
 
         Returns:
             Generated response (string or dict if JSON format)
         """
+        # Calculate token counts
+        prompt_tokens = self.token_counter.count_tokens(prompt, model)
+        system_tokens = self.token_counter.count_tokens(system_message or "", model)
+        total_input_tokens = prompt_tokens + system_tokens
+        model_limit = self.token_counter.get_model_limit(model)
+
+        # Calculate safety margin as percentage of model limit
+        safety_margin_tokens = int(model_limit * self.safety_margin_ratio)
+
+        # Log initial call info
+        if ctx:
+            await ctx.log(
+                level="info",
+                message=f"LLM call initiated - Model: {model}, Input tokens: {total_input_tokens}, Model limit: {model_limit}, Safety margin: {safety_margin_tokens} ({self.safety_margin_ratio*100:.0f}%), Temperature: {temperature}",
+            )
+
         # Check if chunking is needed
-        if not self.token_counter.can_fit_in_context(prompt, model, self.safety_margin):
+        needs_chunking = not self.token_counter.can_fit_in_context(
+            prompt, model, safety_margin_tokens
+        )
+
+        if needs_chunking:
+            if ctx:
+                chunks_needed = (total_input_tokens // (model_limit - safety_margin_tokens)) + 1
+                await ctx.log(
+                    level="info",
+                    message=f"Input exceeds model context limit. Chunking required: {chunks_needed} chunks estimated",
+                )
+
             return await self._chunked_call(
-                prompt, model, temperature, system_message, response_format, **kwargs
+                prompt, model, temperature, system_message, response_format, ctx=ctx, **kwargs
             )
 
         # Single call
         return await self._single_call(
-            prompt, model, temperature, system_message, response_format, **kwargs
+            prompt, model, temperature, system_message, response_format, ctx=ctx, **kwargs
         )
 
     async def _single_call(
@@ -463,19 +494,100 @@ class LLMManager:
         temperature: float,
         system_message: Optional[str],
         response_format: Optional[str],
+        ctx: Optional[Any] = None,
         **kwargs,
     ) -> Union[str, Dict[str, Any]]:
-        """Make a single LLM call."""
+        """Make a single LLM call with token limit failsafe."""
+        import time
+
+        start_time = time.time()
+
+        # Failsafe: Check token limits and truncate if necessary
+        prompt_tokens = self.token_counter.count_tokens(prompt, model)
+        system_tokens = self.token_counter.count_tokens(system_message or "", model)
+        total_input_tokens = prompt_tokens + system_tokens
+        model_limit = self.token_counter.get_model_limit(model)
+
+        # Calculate safety margin as percentage of model limit
+        safety_margin_tokens = int(model_limit * self.safety_margin_ratio)
+
+        # Reserve tokens for response generation and safety margin
+        available_tokens = model_limit - safety_margin_tokens
+
+        if total_input_tokens > available_tokens:
+            if ctx:
+                await ctx.log(
+                    level="warning",
+                    message=f"Token limit exceeded in _single_call: {total_input_tokens} > {available_tokens}. Truncating prompt.",
+                )
+
+            # Calculate how much we need to truncate
+            excess_tokens = total_input_tokens - available_tokens
+
+            # Truncate the prompt (preserve system message if possible)
+            if system_tokens < available_tokens // 2:  # If system message is reasonable size
+                # Truncate only the prompt
+                max_prompt_tokens = available_tokens - system_tokens
+                truncated_prompt = self._truncate_text_to_tokens(prompt, max_prompt_tokens, model)
+
+                if ctx:
+                    await ctx.log(
+                        level="info",
+                        message=f"Truncated prompt from {prompt_tokens} to ~{max_prompt_tokens} tokens",
+                    )
+                prompt = truncated_prompt
+            else:
+                # Both system message and prompt are too large - truncate both proportionally
+                system_ratio = system_tokens / total_input_tokens
+                prompt_ratio = prompt_tokens / total_input_tokens
+
+                max_system_tokens = int(
+                    available_tokens * system_ratio * 0.8
+                )  # Give system message priority
+                max_prompt_tokens = available_tokens - max_system_tokens
+
+                if system_message:
+                    system_message = self._truncate_text_to_tokens(
+                        system_message, max_system_tokens, model
+                    )
+                prompt = self._truncate_text_to_tokens(prompt, max_prompt_tokens, model)
+
+                if ctx:
+                    await ctx.log(
+                        level="info",
+                        message=f"Truncated both system message and prompt to fit {available_tokens} token limit",
+                    )
+
         if self._is_openai_model(model):
-            return await self._call_openai(
+            result = await self._call_openai(
                 prompt, model, temperature, system_message, response_format, **kwargs
             )
         elif self._is_gemini_model(model):
-            return await self._call_gemini(
+            result = await self._call_gemini(
                 prompt, model, temperature, system_message, response_format, **kwargs
             )
         else:
             raise ValueError(f"Unknown model type: {model}")
+
+        # Log completion metadata
+        elapsed_time = time.time() - start_time
+        if ctx and self._last_usage_metadata:
+            await ctx.log(
+                level="info",
+                message=(
+                    f"LLM call completed - Model: {model}, "
+                    f"Completion tokens: {self._last_usage_metadata.completion_tokens}, "
+                    f"Total tokens: {self._last_usage_metadata.total_tokens}, "
+                    f"Time: {elapsed_time:.2f}s"
+                ),
+            )
+        elif ctx:
+            await ctx.log(
+                level="info",
+                message=f"LLM call completed - Model: {model}, Time: {elapsed_time:.2f}s (no usage metadata available)",
+            )
+
+        return result
 
     @api_retry
     async def _call_openai(
@@ -689,6 +801,7 @@ class LLMManager:
         temperature: float,
         system_message: Optional[str],
         response_format: Optional[str],
+        ctx: Optional[Any] = None,
         **kwargs,
     ) -> Union[str, Dict[str, Any]]:
         """Make chunked LLM calls and aggregate results with rate limit handling.
@@ -699,21 +812,32 @@ class LLMManager:
             temperature: Temperature for generation
             system_message: Optional system message
             response_format: Optional response format (e.g., "json")
+            ctx: Optional context for logging
             **kwargs: Additional parameters for the LLM API
 
         Returns:
             Aggregated response (string or dict if JSON format)
         """
+        import time
+
+        start_time = time.time()
+
         # Calculate available tokens for content
         model_limit = self.token_counter.get_model_limit(model)
         system_tokens = self.token_counter.count_tokens(system_message or "", model)
-        available_tokens = model_limit - system_tokens - self.safety_margin
+        safety_margin_tokens = int(model_limit * self.safety_margin_ratio)
+        available_tokens = model_limit - system_tokens - safety_margin_tokens
 
         # Split prompt into chunks
         chunks = self._chunk_prompt(prompt, model, available_tokens)
 
         # Log the number of chunks created
         logger.info(f"Split prompt into {len(chunks)} chunks for model {model}")
+        if ctx:
+            await ctx.log(
+                level="info",
+                message=f"Processing {len(chunks)} chunks for model {model}, chunk size limit: {available_tokens} tokens",
+            )
 
         # Process chunks
         responses = []
@@ -727,13 +851,21 @@ class LLMManager:
                 if i > 0:
                     chunk_prompt = f"[Continuing from previous chunk...]\n\n{chunk_prompt}"
 
+            # Log chunk processing
+            if ctx:
+                chunk_tokens = self.token_counter.count_tokens(chunk_prompt, model)
+                await ctx.log(
+                    level="info",
+                    message=f"Processing chunk {i+1}/{len(chunks)}, tokens: {chunk_tokens}",
+                )
+
             # Debug log for each LLM call
             logger.debug(
                 f"Making LLM call {i+1}/{len(chunks)} to model {model} with chunk size: {len(chunk_prompt)} characters"
             )
 
             response = await self._single_call(
-                chunk_prompt, model, temperature, system_message, response_format, **kwargs
+                chunk_prompt, model, temperature, system_message, response_format, ctx=ctx, **kwargs
             )
             responses.append(response)
 
@@ -751,6 +883,20 @@ class LLMManager:
         # Store aggregated usage
         self._last_usage_metadata = total_usage
 
+        # Log final aggregated results
+        elapsed_time = time.time() - start_time
+        if ctx:
+            await ctx.log(
+                level="info",
+                message=(
+                    f"Chunked processing completed - Chunks: {len(chunks)}, "
+                    f"Total prompt tokens: {total_usage.prompt_tokens}, "
+                    f"Total completion tokens: {total_usage.completion_tokens}, "
+                    f"Total tokens: {total_usage.total_tokens}, "
+                    f"Time: {elapsed_time:.2f}s"
+                ),
+            )
+
         # Aggregate responses
         return self._aggregate_responses(responses, response_format)
 
@@ -764,6 +910,57 @@ class LLMManager:
             return ChunkingStrategy.split_by_sentences(
                 prompt, max_tokens, self.token_counter, model, self.overlap_ratio
             )
+
+    def _truncate_text_to_tokens(self, text: str, max_tokens: int, model: str) -> str:
+        """Truncate text to fit within max_tokens, preserving sentence boundaries when possible.
+
+        Args:
+            text: Text to truncate
+            max_tokens: Maximum number of tokens allowed
+            model: Model name for token counting
+
+        Returns:
+            Truncated text that fits within max_tokens
+        """
+        if not text.strip():
+            return text
+
+        # Check if text already fits
+        current_tokens = self.token_counter.count_tokens(text, model)
+        if current_tokens <= max_tokens:
+            return text
+
+        # Use binary search to find the maximum text that fits
+        low = 0
+        high = len(text)
+        best_length = 0
+
+        while low <= high:
+            mid = (low + high) // 2
+            chunk = text[:mid]
+            tokens = self.token_counter.count_tokens(chunk, model)
+
+            if tokens <= max_tokens:
+                best_length = mid
+                low = mid + 1
+            else:
+                high = mid - 1
+
+        if best_length == 0:
+            # Even a single character exceeds the limit - return empty or minimal text
+            return ""
+
+        truncated = text[:best_length]
+
+        # Try to find a good break point (sentence, paragraph, or word boundary)
+        # Look backwards from the cut point for natural boundaries
+        for boundary in [".", "!", "?", "\n\n", "\n", " "]:
+            last_boundary = truncated.rfind(boundary)
+            if last_boundary > best_length * 0.8:  # Only use if we don't lose too much text
+                return truncated[: last_boundary + (1 if boundary in ".!?" else 0)].strip()
+
+        # No good boundary found, return the truncated text
+        return truncated.strip()
 
     def _aggregate_responses(
         self, responses: List[Union[str, Dict]], response_format: Optional[str]
@@ -812,6 +1009,7 @@ class LLMManager:
         temperature: float = 0.7,
         system_message: Optional[str] = None,
         response_format: Optional[str] = None,
+        ctx: Optional[Any] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -825,6 +1023,7 @@ class LLMManager:
             temperature: Temperature for generation
             system_message: Optional system message
             response_format: Optional response format (e.g., "json")
+            ctx: Optional context for logging
             **kwargs: Additional arguments passed to the LLM
 
         Returns:
@@ -841,6 +1040,7 @@ class LLMManager:
             temperature=temperature,
             system_message=system_message,
             response_format=response_format,
+            ctx=ctx,
             **kwargs,
         )
 
@@ -878,6 +1078,7 @@ class LLMManager:
         temperature: float = 0.7,
         system_message: Optional[str] = None,
         response_format: Optional[str] = None,
+        ctx: Optional[Any] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -889,6 +1090,7 @@ class LLMManager:
             temperature: Temperature for generation
             system_message: Optional system message
             response_format: Optional response format (e.g., "json")
+            ctx: Optional context for logging
             **kwargs: Additional arguments passed to the LLM
 
         Returns:
@@ -904,6 +1106,7 @@ class LLMManager:
             temperature=temperature,
             system_message=system_message,
             response_format=response_format,
+            ctx=ctx,
             **kwargs,
         )
 

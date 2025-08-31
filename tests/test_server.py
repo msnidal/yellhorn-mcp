@@ -279,7 +279,7 @@ async def test_run_git_command_failure():
 @pytest.mark.asyncio
 async def test_get_codebase_snapshot():
     """Test getting codebase snapshot."""
-    with patch("yellhorn_mcp.processors.workplan_processor.run_git_command") as mock_git:
+    with patch("yellhorn_mcp.utils.git_utils.run_git_command") as mock_git:
         # Mock both calls to run_git_command (tracked files and untracked files)
         mock_git.side_effect = [
             "file1.py\nfile2.py",  # tracked files
@@ -306,7 +306,9 @@ async def test_get_codebase_snapshot():
 
                     with patch("pathlib.Path.read_text", mock_read_text):
                         # Test without .yellhornignore
-                        files, contents = await get_codebase_snapshot(Path("/mock/repo"))
+                        files, contents = await get_codebase_snapshot(
+                            Path("/mock/repo"), git_command_func=mock_git
+                        )
 
                         assert files == ["file1.py", "file2.py", "file3.py"]
                         assert "file1.py" in contents
@@ -724,7 +726,7 @@ async def test_add_github_issue_comment():
         assert "issue" in args[1]
         assert "comment" in args[1]
         assert "123" in args[1]
-        assert "--body" in args[1]
+        assert "--body-file" in args[1]
         # No temp file cleanup needed for this function
 
         # Test with error
@@ -782,7 +784,7 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
 
     with (
         patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot",
+            "yellhorn_mcp.formatters.codebase_snapshot.get_codebase_snapshot",
             new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
@@ -811,6 +813,10 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         # Test with required parameters
         from datetime import datetime, timezone
 
+        # Mock command functions
+        mock_github_command = AsyncMock(return_value="https://github.com/owner/repo/issues/123")
+        mock_git_command = AsyncMock(return_value="file1.py\nfile2.py")
+
         await process_workplan_async(
             Path("/mock/repo"),
             mock_llm_manager,
@@ -820,6 +826,8 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
             "full",  # codebase_reasoning
             "Create a new feature to support X",  # detailed_description
             ctx=mock_request_context,
+            github_command_func=AsyncMock(return_value="https://github.com/owner/repo/issues/123"),
+            git_command_func=AsyncMock(return_value="file1.py\nfile2.py"),
             _meta={
                 "start_time": datetime.now(timezone.utc),
                 "submitted_urls": [],
@@ -833,18 +841,17 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
 
         # The prompt is in kwargs
         prompt_content = call_args[1].get("prompt", "")
-        assert "# Task Title" in prompt_content
+        assert "One-line task title" in prompt_content
         assert "Feature Implementation Plan" in prompt_content
-        assert "# Task Details" in prompt_content
+        assert "Product / feature description from the PM" in prompt_content
         assert "Create a new feature to support X" in prompt_content
 
         # Check for workplan structure instructions
         assert "## Summary" in prompt_content
         assert "## Implementation Steps" in prompt_content
         assert "## Technical Details" in prompt_content
-        assert "## Testing Approach" in prompt_content
-        assert "## Files to Modify" in prompt_content
-        assert "## Example Code Changes" in prompt_content
+        assert "Global Test Strategy" in prompt_content
+        assert "New Files" in prompt_content
 
         # Check that format_metrics_section was NOT called (metrics no longer in body)
         mock_format_metrics.assert_not_called()
@@ -892,6 +899,10 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
+    # Mock command functions for this test
+    mock_github_command = AsyncMock(return_value="https://github.com/owner/repo/issues/123")
+    mock_git_command = AsyncMock(return_value="file1.py\nfile2.py")
+
     # Mock call_llm_with_citations to return empty content
     async def mock_call_empty(**kwargs):
         return {"content": "", "usage_metadata": UsageMetadata()}  # Empty content
@@ -903,7 +914,7 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
 
     with (
         patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot",
+            "yellhorn_mcp.formatters.codebase_snapshot.get_codebase_snapshot",
             new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
@@ -930,6 +941,8 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
             "full",  # codebase_reasoning
             "Create a new feature to support X",  # detailed_description
             ctx=mock_request_context,
+            github_command_func=AsyncMock(return_value="https://github.com/owner/repo/issues/123"),
+            git_command_func=AsyncMock(return_value="file1.py\nfile2.py"),
         )
 
         # Check that add_github_issue_comment was called with error message
@@ -965,7 +978,7 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
 
     with (
         patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot",
+            "yellhorn_mcp.formatters.codebase_snapshot.get_codebase_snapshot",
             new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
@@ -992,6 +1005,8 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
             "full",  # codebase_reasoning
             "Create a new feature to support X",  # detailed_description
             ctx=mock_request_context,
+            github_command_func=AsyncMock(return_value="https://github.com/owner/repo/issues/123"),
+            git_command_func=AsyncMock(return_value="file1.py\nfile2.py"),
         )
 
         # Check that add_github_issue_comment was called with error message
@@ -1123,7 +1138,9 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
                                 "repo_path"
                             ]
                             mock_get_issue.assert_called_once_with(repo_path, "123")
-                            mock_get_diff.assert_called_once_with(repo_path, "main", "HEAD", "full")
+                            mock_get_diff.assert_called_once_with(
+                                repo_path, "main", "HEAD", "full", None
+                            )
 
                             # Verify create_judgement_subissue was called with correct parameters
                             mock_create_judgement_subissue.assert_called_once()
@@ -1215,7 +1232,7 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
                             ]
                             mock_get_issue.assert_called_once_with(repo_path, "456")
                             mock_get_diff.assert_called_once_with(
-                                repo_path, base_ref, head_ref, "full"
+                                repo_path, base_ref, head_ref, "full", None
                             )
                             mock_create_judgement_subissue.assert_called_once()
 
@@ -1367,11 +1384,11 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                             "yellhorn_mcp.utils.search_grounding_utils._get_gemini_search_tools"
                         ) as mock_get_tools:
                             with patch(
-                                "yellhorn_mcp.processors.judgement_processor.get_codebase_snapshot",
+                                "yellhorn_mcp.formatters.codebase_snapshot.get_codebase_snapshot",
                                 new_callable=AsyncMock,
                             ) as mock_snapshot:
                                 with patch(
-                                    "yellhorn_mcp.processors.judgement_processor.format_codebase_for_prompt",
+                                    "yellhorn_mcp.formatters.format_codebase_for_prompt",
                                     new_callable=AsyncMock,
                                 ) as mock_format:
                                     mock_get_tools.return_value = [MagicMock()]
@@ -1466,7 +1483,7 @@ async def test_get_git_diff():
 
         assert result == "diff --git a/file.py b/file.py\n+def x(): pass"
         mock_git.assert_called_once_with(
-            Path("/mock/repo"), ["diff", "--patch", "main...feature-branch"]
+            Path("/mock/repo"), ["diff", "--patch", "main...feature-branch"], None
         )
 
         # Reset the mock for next test
@@ -1479,7 +1496,7 @@ async def test_get_git_diff():
 
         assert result == "diff --git a/file2.py b/file2.py\n+def y(): pass"
         mock_git.assert_called_once_with(
-            Path("/mock/repo"), ["diff", "--patch", "develop...feature-branch"]
+            Path("/mock/repo"), ["diff", "--patch", "develop...feature-branch"], None
         )
 
         # Test completed
@@ -1536,7 +1553,7 @@ async def test_process_workplan_async_with_citations(mock_request_context, mock_
 
     with (
         patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot",
+            "yellhorn_mcp.formatters.codebase_snapshot.get_codebase_snapshot",
             new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
@@ -1614,6 +1631,8 @@ This workplan implements feature X.
             "full",  # codebase_reasoning
             "Create a new feature to support X",  # detailed_description
             ctx=mock_request_context,
+            github_command_func=AsyncMock(return_value="https://github.com/owner/repo/issues/123"),
+            git_command_func=AsyncMock(return_value="file1.py\nfile2.py"),
         )
 
         # Check that LLM manager was called for generation
@@ -1727,7 +1746,7 @@ async def test_process_workplan_async_search_grounding_enabled(
 
     with (
         patch(
-            "yellhorn_mcp.processors.workplan_processor.get_codebase_snapshot",
+            "yellhorn_mcp.formatters.codebase_snapshot.get_codebase_snapshot",
             new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
@@ -1783,6 +1802,8 @@ async def test_process_workplan_async_search_grounding_enabled(
             "full",  # codebase_reasoning
             "Create a new feature to support X",  # detailed_description
             ctx=mock_request_context,
+            github_command_func=AsyncMock(return_value="https://github.com/owner/repo/issues/123"),
+            git_command_func=AsyncMock(return_value="file1.py\nfile2.py"),
         )
 
         # Verify that LLM manager was called for generation with citations
@@ -1831,11 +1852,11 @@ async def test_process_judgement_async_search_grounding_enabled(
             new_callable=AsyncMock,
         ) as mock_create_subissue,
         patch(
-            "yellhorn_mcp.processors.judgement_processor.get_codebase_snapshot",
+            "yellhorn_mcp.formatters.codebase_snapshot.get_codebase_snapshot",
             new_callable=AsyncMock,
         ) as mock_snapshot,
         patch(
-            "yellhorn_mcp.processors.judgement_processor.format_codebase_for_prompt",
+            "yellhorn_mcp.formatters.format_codebase_for_prompt",
             new_callable=AsyncMock,
         ) as mock_format,
         patch(
@@ -2412,7 +2433,6 @@ async def test_curate_context_with_optional_params():
             ctx=mock_ctx,
             user_task="Implement authentication system",
             codebase_reasoning="lsp",
-            depth_limit=3,
             ignore_file_path=".myignore",
             output_path=".mycontext",
         )
@@ -2421,8 +2441,7 @@ async def test_curate_context_with_optional_params():
         assert result_data["status"] == "✅ Context curation completed successfully"
         # Check that optional parameters were passed
         call_args = mock_process.call_args
-        assert call_args.kwargs["depth_limit"] == 3
-        assert call_args.kwargs["ignore_file_path"] == ".myignore"
+        assert call_args.kwargs["codebase_reasoning"] == "lsp"
         assert call_args.kwargs["output_path"] == ".mycontext"
 
 
