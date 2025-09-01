@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from yellhorn_mcp.token_counter import TokenCounter
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 
 class TestTokenCounter:

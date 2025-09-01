@@ -1,8 +1,27 @@
-"""Token counting utility using tiktoken for accurate token estimation."""
+"""Token counting utility with lazy tiktoken import to reduce startup time.
+
+Lazily importing tiktoken significantly reduces import-time overhead for tests that
+don't immediately need encoding tables. When tokenization is used, tiktoken is loaded
+on first use and results are cached. If tiktoken is unavailable, a simple heuristic is
+used as a fallback to keep functionality working in constrained environments.
+"""
 
 from typing import Any, Dict, Optional
+import os
 
-import tiktoken
+_tiktoken = None  # Lazy-loaded module
+
+
+def _load_tiktoken():
+    global _tiktoken
+    if _tiktoken is None:
+        try:
+            import tiktoken as _tk  # type: ignore
+
+            _tiktoken = _tk
+        except Exception:
+            _tiktoken = False  # Signal that tiktoken is unavailable
+    return _tiktoken
 
 
 class TokenCounter:
@@ -51,8 +70,19 @@ class TokenCounter:
                 - default_encoding: Default encoding to use (default: "cl100k_base")
                 - default_token_limit: Default token limit for unknown models (default: 8192)
         """
-        self._encoding_cache: Dict[str, tiktoken.Encoding] = {}
+        self._encoding_cache: Dict[str, Any] = {}
         self.config = config or {}
+
+        # Optional fast-token mode via env to speed local runs (uses lighter encoding)
+        if os.getenv("YELLHORN_FAST_TOKENS", "").lower() in {"1", "true", "on"}:
+            fast_overrides = {
+                "gpt-4o": "cl100k_base",
+                "gpt-4o-mini": "cl100k_base",
+                "o4-mini": "cl100k_base",
+                "o3": "cl100k_base",
+                "gpt-4.1": "cl100k_base",
+            }
+            self.MODEL_TO_ENCODING = {**self.MODEL_TO_ENCODING, **fast_overrides}
 
         # Initialize with config overrides if provided
         if "model_limits" in self.config and isinstance(self.config["model_limits"], dict):
@@ -63,8 +93,11 @@ class TokenCounter:
             # Update default encodings with any overrides from config
             self.MODEL_TO_ENCODING = {**self.MODEL_TO_ENCODING, **self.config["model_encodings"]}
 
-    def _get_encoding(self, model: str) -> tiktoken.Encoding:
+    def _get_encoding(self, model: str):
         """Get the appropriate encoding for a model, with caching."""
+        tk = _load_tiktoken()
+        if tk is False:
+            return None  # Signal heuristic mode
         # Get encoding name from config overrides with flexible matching
         config_encodings = self.config.get("model_encodings", {})
         config_key = self._find_matching_model_key(model, config_encodings)
@@ -81,11 +114,11 @@ class TokenCounter:
 
         if encoding_name not in self._encoding_cache:
             try:
-                self._encoding_cache[encoding_name] = tiktoken.get_encoding(encoding_name)
+                self._encoding_cache[encoding_name] = tk.get_encoding(encoding_name)
             except Exception:
                 # Fallback to default encoding if specified encoding not found
                 default_encoding = self.config.get("default_encoding", "cl100k_base")
-                self._encoding_cache[encoding_name] = tiktoken.get_encoding(default_encoding)
+                self._encoding_cache[encoding_name] = tk.get_encoding(default_encoding)
 
         return self._encoding_cache[encoding_name]
 
@@ -104,6 +137,9 @@ class TokenCounter:
             return 0
 
         encoding = self._get_encoding(model)
+        if encoding is None:
+            # Heuristic fallback: approximate 4 chars per token
+            return max(1, len(text) // 4)
         return len(encoding.encode(text))
 
     def _find_matching_model_key(self, model: str, model_dict: Dict[str, Any]) -> Optional[str]:

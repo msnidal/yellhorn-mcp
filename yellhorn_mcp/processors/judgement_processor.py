@@ -21,9 +21,8 @@ from yellhorn_mcp.integrations.github_integration import (
     create_judgement_subissue,
     update_github_issue,
 )
-from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+from yellhorn_mcp.llm_manager import LLMManager
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
-from yellhorn_mcp.token_counter import TokenCounter
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
@@ -31,6 +30,7 @@ from yellhorn_mcp.utils.comment_utils import (
 )
 from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
 from yellhorn_mcp.utils.git_utils import YellhornMCPError, run_git_command
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 
 async def get_git_diff(
@@ -237,7 +237,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 input_tokens=usage_metadata.prompt_tokens,
                 output_tokens=usage_metadata.completion_tokens,
                 total_tokens=usage_metadata.total_tokens,
-                timestamp=None,  # Will be set below
+                timestamp=datetime.now(timezone.utc),
             )
         else:
             # Gemini models - use citation-aware call
@@ -264,11 +264,12 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 input_tokens=usage_metadata.prompt_tokens,
                 output_tokens=usage_metadata.completion_tokens,
                 total_tokens=usage_metadata.total_tokens,
-                search_results_used=getattr(
-                    response_data.get("grounding_metadata"), "grounding_chunks", None
-                )
-                is not None,
-                timestamp=None,  # Will be set below
+                search_results_used=(
+                    len(getattr(response_data.get("grounding_metadata"), "grounding_chunks", []))
+                    if response_data.get("grounding_metadata") is not None
+                    else None
+                ),
+                timestamp=datetime.now(timezone.utc),
             )
 
         if not judgement_content:

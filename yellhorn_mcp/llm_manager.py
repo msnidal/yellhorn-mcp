@@ -20,7 +20,8 @@ from tenacity import (
     wait_exponential,
 )
 
-from .token_counter import TokenCounter
+from yellhorn_mcp.utils.token_utils import TokenCounter
+from yellhorn_mcp.models.metadata_models import UsageMetadata
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -83,89 +84,6 @@ api_retry = retry(
     before_sleep=log_retry_attempt,
     reraise=True,
 )
-
-
-class UsageMetadata:
-    """
-    Unified usage metadata class that handles both OpenAI and Gemini formats.
-
-    This class provides a consistent interface for accessing token usage information
-    regardless of the source (OpenAI API, Gemini API, or dictionary).
-    """
-
-    def __init__(self, data: Any = None):
-        """
-        Initialize UsageMetadata from various sources.
-
-        Args:
-            data: Can be:
-                - OpenAI CompletionUsage object
-                - Gemini GenerateContentResponseUsageMetadata object
-                - Dictionary with token counts
-                - None (defaults to 0 for all values)
-        """
-        self.prompt_tokens: int = 0
-        self.completion_tokens: int = 0
-        self.total_tokens: int = 0
-        self.model: Optional[str] = None
-
-        if data is None:
-            return
-
-        if isinstance(data, dict):
-            # Handle dictionary format (our internal format)
-            self.prompt_tokens = data.get("prompt_tokens", 0)
-            self.completion_tokens = data.get("completion_tokens", 0)
-            self.total_tokens = data.get("total_tokens", 0)
-            self.model = data.get("model")
-        elif hasattr(data, "input_tokens"):
-            # Response format
-            self.prompt_tokens = getattr(data, "input_tokens", 0)
-            self.completion_tokens = getattr(data, "output_tokens", 0)
-            self.total_tokens = getattr(data, "total_tokens", 0)
-        elif hasattr(data, "prompt_tokens"):
-            # OpenAI CompletionUsage format
-            self.prompt_tokens = getattr(data, "prompt_tokens", 0)
-            self.completion_tokens = getattr(data, "completion_tokens", 0)
-            self.total_tokens = getattr(data, "total_tokens", 0)
-        elif hasattr(data, "prompt_token_count"):
-            # Gemini GenerateContentResponseUsageMetadata format
-            self.prompt_tokens = getattr(data, "prompt_token_count", 0)
-            self.completion_tokens = getattr(data, "candidates_token_count", 0)
-            self.total_tokens = getattr(data, "total_token_count", 0)
-
-    @property
-    def prompt_token_count(self) -> int:
-        """Gemini-style property for compatibility."""
-        return self.prompt_tokens
-
-    @property
-    def candidates_token_count(self) -> int:
-        """Gemini-style property for compatibility."""
-        return self.completion_tokens
-
-    @property
-    def total_token_count(self) -> int:
-        """Gemini-style property for compatibility."""
-        return self.total_tokens
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary format."""
-        result = {
-            "prompt_tokens": self.prompt_tokens,
-            "completion_tokens": self.completion_tokens,
-            "total_tokens": self.total_tokens,
-        }
-        if self.model:
-            result["model"] = self.model
-        return result
-
-    def __bool__(self) -> bool:
-        """Check if we have valid usage data."""
-        try:
-            return self.total_tokens is not None and self.total_tokens > 0
-        except (TypeError, AttributeError):
-            return False
 
 
 class ChunkingStrategy:

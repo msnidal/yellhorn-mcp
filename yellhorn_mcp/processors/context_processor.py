@@ -21,8 +21,8 @@ from yellhorn_mcp.formatters.prompt_formatter import (
     format_codebase_for_prompt,
 )
 from yellhorn_mcp.llm_manager import LLMManager
-from yellhorn_mcp.token_counter import TokenCounter
 from yellhorn_mcp.utils.git_utils import YellhornMCPError
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 
 async def build_codebase_context(

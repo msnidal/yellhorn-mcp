@@ -4,8 +4,7 @@ This module handles token usage tracking, cost calculation,
 and metrics formatting for various AI models.
 """
 
-from yellhorn_mcp.llm_manager import UsageMetadata
-from yellhorn_mcp.models.metadata_models import CompletionMetadata
+from yellhorn_mcp.models.metadata_models import CompletionMetadata, UsageMetadata
 
 # Pricing configuration for models (USD per 1M tokens)
 MODEL_PRICING = {

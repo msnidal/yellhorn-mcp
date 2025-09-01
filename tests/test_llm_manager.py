@@ -11,11 +11,11 @@ from tenacity import RetryCallState
 from yellhorn_mcp.llm_manager import (
     ChunkingStrategy,
     LLMManager,
-    UsageMetadata,
     is_retryable_error,
     log_retry_attempt,
 )
-from yellhorn_mcp.token_counter import TokenCounter
+from yellhorn_mcp.models.metadata_models import UsageMetadata
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 
 class MockGeminiUsage:

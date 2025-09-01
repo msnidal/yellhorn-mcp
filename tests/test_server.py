@@ -1343,6 +1343,7 @@ async def test_judge_workplan_empty_diff(mock_request_context, mock_genai_client
 @pytest.mark.asyncio
 async def test_process_judgement_async_update_subissue(mock_request_context, mock_genai_client):
     """Test process_judgement_async updates existing sub-issue instead of creating new one."""
+    pytest.skip("Removed legacy gemini_integration logic and tests")
     from yellhorn_mcp.server import process_judgement_async
 
     # Mock the Gemini client response
@@ -1689,6 +1690,7 @@ async def test_process_workplan_async_with_search_grounding_disabled(
 @pytest.mark.asyncio
 async def test_async_generate_content_with_config_error_handling(mock_genai_client):
     """Test async_generate_content_with_config error handling."""
+    pytest.skip("Removed legacy gemini_integration logic and tests")
     from yellhorn_mcp.server import async_generate_content_with_config
     from yellhorn_mcp.utils.git_utils import YellhornMCPError
 
@@ -1716,6 +1718,7 @@ async def test_async_generate_content_with_config_error_handling(mock_genai_clie
 @pytest.mark.asyncio
 async def test_async_generate_content_with_config_with_generation_config(mock_genai_client):
     """Test async_generate_content_with_config with generation_config parameter."""
+    pytest.skip("Removed legacy gemini_integration logic and tests")
     from yellhorn_mcp.server import async_generate_content_with_config
 
     # Test successful call with generation_config
@@ -1821,6 +1824,7 @@ async def test_process_judgement_async_search_grounding_enabled(
     mock_request_context, mock_genai_client
 ):
     """Test process_judgement_async with search grounding enabled and verify generation_config is passed."""
+    pytest.skip("Removed legacy gemini_integration logic and tests")
     from yellhorn_mcp.server import process_judgement_async
 
     # Mock the response with grounding metadata

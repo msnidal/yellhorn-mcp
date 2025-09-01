@@ -12,13 +12,14 @@ from yellhorn_mcp.formatters import (
     get_codebase_context,
     get_codebase_snapshot,
 )
-from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.models.metadata_models import UsageMetadata
 from yellhorn_mcp.processors.workplan_processor import (
     _generate_and_update_issue,
     process_revision_async,
     process_workplan_async,
 )
-from yellhorn_mcp.token_counter import TokenCounter
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 
 class TestGetCodebaseSnapshot:

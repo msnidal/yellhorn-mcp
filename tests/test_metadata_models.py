@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from yellhorn_mcp.metadata_models import CompletionMetadata, SubmissionMetadata
+from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
 
 
 class TestSubmissionMetadata:

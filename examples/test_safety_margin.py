@@ -2,8 +2,9 @@
 """Example demonstrating the percentage-based safety margin in LLM Manager."""
 
 import asyncio
+
 from yellhorn_mcp.llm_manager import LLMManager
-from yellhorn_mcp.token_counter import TokenCounter
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 
 async def main():

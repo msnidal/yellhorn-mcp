@@ -37,7 +37,7 @@ from yellhorn_mcp.integrations.github_integration import (
     create_github_issue,
     get_issue_body,
 )
-from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+from yellhorn_mcp.llm_manager import LLMManager
 from yellhorn_mcp.models.metadata_models import SubmissionMetadata
 from yellhorn_mcp.processors.context_processor import process_context_curation_async
 from yellhorn_mcp.processors.judgement_processor import get_git_diff, process_judgement_async
@@ -826,7 +826,6 @@ from yellhorn_mcp.formatters import (
     format_codebase_for_prompt,
     get_codebase_snapshot,
 )
-from yellhorn_mcp.integrations.gemini_integration import async_generate_content_with_config
 from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment as add_github_issue_comment,
 )
@@ -885,7 +884,6 @@ __all__ = [
     "curate_context",
     "app_lifespan",
     "_get_gemini_search_tools",
-    "async_generate_content_with_config",
     "add_github_issue_comment_from_git_utils",
     "post_github_pr_review",
 ]
