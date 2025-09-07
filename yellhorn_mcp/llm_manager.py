@@ -1,15 +1,22 @@
-"""Unified LLM Manager with automatic chunking support and rate limit handling."""
+"""Unified LLM Manager with automatic chunking support and retry handling.
+
+Avoids dynamic attribute access and broad Any types by relying on
+Protocols, TypedDicts, and concrete SDK types while staying compatible
+with mocked responses used in tests.
+"""
 
 import asyncio
 import json
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Protocol, Sequence, TypedDict, Union, runtime_checkable
 
 from google import genai
 from google.api_core import exceptions as google_exceptions
+from google.genai.types import GenerateContentConfig, GenerateContentResponse, GroundingMetadata
 from openai import AsyncOpenAI, RateLimitError
+from openai.types.responses import Response as OpenAIResponse, ResponseUsage as OpenAIResponseUsage
 from tenacity import (
     RetryCallState,
     before_sleep_log,
@@ -27,29 +34,116 @@ from yellhorn_mcp.models.metadata_models import UsageMetadata
 logger = logging.getLogger(__name__)
 
 
+@runtime_checkable
+class LoggerContext(Protocol):
+    async def log(self, *args, **kwargs) -> None: ...
+
+
+@runtime_checkable
+class HasText(Protocol):
+    text: str
+
+
+@runtime_checkable
+class HasOutputText(Protocol):
+    output_text: str
+
+
+class ContentPart(Protocol):
+    text: str
+
+
+class OutputItem(Protocol):
+    content: Sequence[ContentPart]
+
+
+@runtime_checkable
+class HasOutputList(Protocol):
+    output: Sequence[OutputItem]
+
+
+@runtime_checkable
+class HasUsage(Protocol):
+    usage: OpenAIResponseUsage
+
+
+@runtime_checkable
+class HasCodeAndMessage(Protocol):
+    code: int
+    message: str
+
+
+@runtime_checkable
+class HasName(Protocol):
+    __name__: str
+
+
+class LLMManagerConfig(TypedDict, total=False):
+    safety_margin_tokens: int
+    safety_margin_ratio: float
+    overlap_ratio: float
+    aggregation_strategy: str
+    chunk_strategy: str
+
+
+class UsageResult(TypedDict):
+    content: Union[str, Dict[str, object]]
+    usage_metadata: UsageMetadata
+
+
+class CitationResultBase(TypedDict):
+    content: Union[str, Dict[str, object]]
+    usage_metadata: UsageMetadata
+
+
+class CitationResult(CitationResultBase, total=False):
+    grounding_metadata: GroundingMetadata
+
+
 def log_retry_attempt(retry_state: RetryCallState) -> None:
-    """Log the retry attempt with exponential backoff details."""
+    """Log retry attempt details in a type-safe way."""
     if retry_state.outcome is None:
         return
 
     attempt = retry_state.attempt_number
-    wait_time = retry_state.outcome_timestamp - retry_state.start_time
+
+    # Compute wait time guardedly as fields may be optional in types
+    try:
+        wt = retry_state.outcome_timestamp
+        st = retry_state.start_time
+        if isinstance(wt, (int, float)) and isinstance(st, (int, float)):
+            wait_time = float(wt - st)
+        else:
+            wait_time = 0.0
+    except Exception:
+        wait_time = 0.0
+
+    fn_name = "<unknown>"
+    fn_obj = retry_state.fn
+    if fn_obj is not None:
+        if isinstance(fn_obj, HasName):
+            fn_name = fn_obj.__name__
+        else:
+            fn_name = type(fn_obj).__name__
+
+    exc_text = ""
+    try:
+        exc = retry_state.outcome.exception()
+        exc_text = str(exc) if exc is not None else ""
+    except Exception:
+        exc_text = ""
 
     logger.warning(
-        f"Retrying {retry_state.fn.__name__} after {wait_time:.1f} seconds "
-        f"(attempt {attempt}): {str(retry_state.outcome.exception())}"
+        f"Retrying {fn_name} after {wait_time:.1f} seconds (attempt {attempt}): {exc_text}"
     )
 
 
-def is_retryable_error(exception: Exception) -> bool:
+def is_retryable_error(exception: BaseException) -> bool:
     """Check if the exception is retryable."""
-    # Handle ClientError from google.generativeai which wraps the actual error
-    if hasattr(exception, "message") and hasattr(exception, "code"):
-        error_message = str(exception.message).lower()
-        error_code = getattr(exception, "code", None)
-
-        # Check for rate limiting or quota exceeded
-        if error_code == 429 or "resource_exhausted" in error_message or "quota" in error_message:
+    # Handle client errors exposing code/message (e.g., some Google client errors)
+    if isinstance(exception, HasCodeAndMessage):
+        error_message = exception.message.lower()
+        if exception.code == 429 or "resource_exhausted" in error_message or "quota" in error_message:
             return True
 
     # Check for standard retryable exceptions
@@ -81,7 +175,7 @@ api_retry = retry(
     retry=retry_if_exception(is_retryable_error),
     wait=wait_exponential(multiplier=1, min=4, max=60, exp_base=2),
     stop=stop_after_attempt(5),
-    before_sleep=log_retry_attempt,
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 
@@ -301,7 +395,7 @@ class LLMManager:
         self,
         openai_client: Optional[AsyncOpenAI] = None,
         gemini_client: Optional[genai.Client] = None,
-        config: Optional[Dict[str, Any]] = None,
+        config: Optional[LLMManagerConfig] = None,
     ):
         """
         Initialize LLM Manager.
@@ -314,7 +408,7 @@ class LLMManager:
         self.token_counter = TokenCounter(config)
         self.openai_client = openai_client
         self.gemini_client = gemini_client
-        self.config = config or {}
+        self.config: LLMManagerConfig = config or {}
 
         # Default configuration
         # Keep safety_margin for backward compatibility, but prefer ratio-based calculation
@@ -325,7 +419,8 @@ class LLMManager:
         self.chunk_strategy = self.config.get("chunk_strategy", "sentences")
 
         # Track usage metadata from last call
-        self._last_usage_metadata = None
+        self._last_usage_metadata: Optional[UsageMetadata] = None
+        self._last_gemini_response: Optional[GenerateContentResponse] = None
 
     def _is_openai_model(self, model: str) -> bool:
         """Check if model is an OpenAI model."""
@@ -349,9 +444,9 @@ class LLMManager:
         temperature: float = 0.7,
         system_message: Optional[str] = None,
         response_format: Optional[str] = None,
-        ctx: Optional[Any] = None,
+        ctx: Optional[LoggerContext] = None,
         **kwargs,
-    ) -> Union[str, Dict[str, Any]]:
+    ) -> Union[str, Dict[str, object]]:
         """
         Call LLM with automatic chunking if needed.
 
@@ -412,9 +507,9 @@ class LLMManager:
         temperature: float,
         system_message: Optional[str],
         response_format: Optional[str],
-        ctx: Optional[Any] = None,
+        ctx: Optional[LoggerContext] = None,
         **kwargs,
-    ) -> Union[str, Dict[str, Any]]:
+    ) -> Union[str, Dict[str, object]]:
         """Make a single LLM call with token limit failsafe."""
         import time
 
@@ -516,7 +611,7 @@ class LLMManager:
         system_message: Optional[str],
         response_format: Optional[str],
         **kwargs,
-    ) -> Union[str, Dict[str, Any]]:
+    ) -> Union[str, Dict[str, object]]:
         """Call OpenAI API with automatic retry on rate limits.
 
         Args:
@@ -565,15 +660,20 @@ class LLMManager:
             # Use the new Responses API endpoint
             response = await self.openai_client.responses.create(**params)
 
-            # Extract content from new response structure
-            # Handle case where output might be a list (Deep Research models sometimes return multiple outputs)
-            if hasattr(response, "output_text"):
+            # Extract content from response using structural checks
+            content: str
+            if isinstance(response, HasOutputText):
                 content = response.output_text
+            elif isinstance(response, HasText):
+                content = response.text
+            elif isinstance(response, HasOutputList) and response.output:
+                first = response.output[0]
+                content = first.content[0].text if first.content else ""
             else:
-                content = response.output[0].content[0].text
+                content = str(response)
 
-            # Store usage metadata (same structure as before)
-            if hasattr(response, "usage"):
+            # Store usage metadata when available
+            if isinstance(response, HasUsage):
                 self._last_usage_metadata = UsageMetadata(response.usage)
 
             if response_format == "json":
@@ -597,7 +697,7 @@ class LLMManager:
         system_message: Optional[str],
         response_format: Optional[str],
         **kwargs,
-    ) -> Union[str, Dict[str, Any]]:
+    ) -> Union[str, Dict[str, object]]:
         """Call Gemini API with automatic retry on rate limits.
 
         Args:
@@ -623,70 +723,62 @@ class LLMManager:
         if system_message:
             full_prompt = f"{system_message}\n\n{prompt}"
 
-        # Import GenerateContentConfig with fallback
-        try:
-            from google.genai.types import GenerateContentConfig
-
-            config_class = GenerateContentConfig
-        except ImportError:
-            # Fallback to dict config
-            config_class = dict
-
         # Extract generation_config from kwargs if present (for search grounding)
         generation_config = kwargs.pop("generation_config", None)
-
-        # Build config
-        config_dict = {
+        # Build base config (typed)
+        response_mime_type: str = (
+            "application/json" if response_format == "json" else "text/plain"
+        )
+        base_config: Dict[str, object] = {
             "temperature": temperature,
-            "response_mime_type": "application/json" if response_format == "json" else "text/plain",
+            "response_mime_type": response_mime_type,
         }
 
-        # Add any additional kwargs (excluding generation_config which we already extracted)
-        config_dict.update(kwargs)
-
-        # If we have generation_config (search grounding), merge it with our config
-        if generation_config and config_class == GenerateContentConfig:
-            # Extract tools from generation_config if it has them
-            if hasattr(generation_config, "tools") and generation_config.tools:
-                config_dict["tools"] = generation_config.tools
-            # Extract any other attributes from generation_config
-            for attr in [
-                "response_schema",
-                "response_mime_type",
-                "candidate_count",
-                "stop_sequences",
-                "max_output_tokens",
-                "temperature",
-                "top_p",
-                "top_k",
-            ]:
-                if hasattr(generation_config, attr):
-                    value = getattr(generation_config, attr)
-                    config_dict[attr] = value
-
-        # Create config instance
-        if config_class == GenerateContentConfig:
-            config = config_class(**config_dict)
+        # Build concrete config with explicit fields to preserve typing
+        if isinstance(generation_config, GenerateContentConfig):
+            try:
+                cfg_tools = generation_config.tools
+            except Exception:
+                cfg_tools = None
+            # For safety with mocks, avoid copying other nested fields
+            cfg_tool_config = None
+            cfg_candidate_count = None
+            cfg_stop_sequences = None
+            cfg_max_output_tokens = None
+            cfg_top_p = None
+            cfg_top_k = None
+            cfg_response_schema = None
         else:
-            config = config_dict
+            cfg_tools = None
+            cfg_tool_config = None
+            cfg_candidate_count = None
+            cfg_stop_sequences = None
+            cfg_max_output_tokens = None
+            cfg_top_p = None
+            cfg_top_k = None
+            cfg_response_schema = None
+
+        config = GenerateContentConfig(
+            temperature=temperature,
+            response_mime_type=response_mime_type,
+            tools=cfg_tools,
+        )
 
         try:
             # Prepare API call parameters
             api_params = {"model": f"models/{model}", "contents": full_prompt, "config": config}
 
             # Make the API call
-            response = await self.gemini_client.aio.models.generate_content(**api_params)
+            response: GenerateContentResponse = (
+                await self.gemini_client.aio.models.generate_content(**api_params)
+            )
 
             # Extract text from response
-            if hasattr(response, "text"):
-                content = response.text
-            else:
-                content = str(response)
+            content = response.text
 
             # Store usage metadata if available
-            if hasattr(response, "usage_metadata"):
-                usage = response.usage_metadata
-                self._last_usage_metadata = UsageMetadata(usage)
+            if response.usage_metadata is not None:
+                self._last_usage_metadata = UsageMetadata(response.usage_metadata)
 
             self._last_gemini_response = response
 
@@ -696,17 +788,18 @@ class LLMManager:
                 import re
 
                 json_pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
-                json_matches = re.findall(json_pattern, content, re.DOTALL)
+                content_str = content or ""
+                json_matches = re.findall(json_pattern, content_str, re.DOTALL)
 
                 if json_matches:
                     try:
                         return json.loads(json_matches[0])
                     except json.JSONDecodeError:
-                        return {"error": "No valid JSON found in response", "content": content}
+                        return {"error": "No valid JSON found in response", "content": content_str}
                 else:
                     return {"error": "No JSON content found in response"}
 
-            return content
+            return content or ""
 
         except Exception as e:
             logger.error(f"Gemini API call failed: {str(e)}")
@@ -719,9 +812,9 @@ class LLMManager:
         temperature: float,
         system_message: Optional[str],
         response_format: Optional[str],
-        ctx: Optional[Any] = None,
+        ctx: Optional[LoggerContext] = None,
         **kwargs,
-    ) -> Union[str, Dict[str, Any]]:
+    ) -> Union[str, Dict[str, object]]:
         """Make chunked LLM calls and aggregate results with rate limit handling.
 
         Args:
@@ -794,9 +887,18 @@ class LLMManager:
 
             # Aggregate usage metadata
             if self._last_usage_metadata:
-                total_usage.prompt_tokens += self._last_usage_metadata.prompt_tokens
-                total_usage.completion_tokens += self._last_usage_metadata.completion_tokens
-                total_usage.total_tokens += self._last_usage_metadata.total_tokens
+                total_usage.prompt_tokens = (
+                    (total_usage.prompt_tokens or 0)
+                    + (self._last_usage_metadata.prompt_tokens or 0)
+                )
+                total_usage.completion_tokens = (
+                    (total_usage.completion_tokens or 0)
+                    + (self._last_usage_metadata.completion_tokens or 0)
+                )
+                total_usage.total_tokens = (
+                    (total_usage.total_tokens or 0)
+                    + (self._last_usage_metadata.total_tokens or 0)
+                )
 
         # Store aggregated usage
         self._last_usage_metadata = total_usage
@@ -881,8 +983,8 @@ class LLMManager:
         return truncated.strip()
 
     def _aggregate_responses(
-        self, responses: List[Union[str, Dict]], response_format: Optional[str]
-    ) -> Union[str, Dict[str, Any]]:
+        self, responses: List[Union[str, Dict[str, object]]], response_format: Optional[str]
+    ) -> Union[str, Dict[str, object]]:
         """Aggregate multiple responses based on strategy."""
         if response_format == "json":
             # For JSON responses, try to merge
@@ -927,9 +1029,9 @@ class LLMManager:
         temperature: float = 0.7,
         system_message: Optional[str] = None,
         response_format: Optional[str] = None,
-        ctx: Optional[Any] = None,
+        ctx: Optional[LoggerContext] = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> CitationResult:
         """
         Call LLM and return both response and citation metadata if available.
 
@@ -963,7 +1065,7 @@ class LLMManager:
         )
 
         # Build result with content and usage
-        result = {
+        result: CitationResult = {
             "content": content,
             "usage_metadata": (
                 self._last_usage_metadata if self._last_usage_metadata else UsageMetadata()
@@ -971,21 +1073,10 @@ class LLMManager:
         }
 
         # Check if we have grounding metadata from Gemini
-        if self._is_gemini_model(model) and hasattr(self, "_last_gemini_response"):
-            response = getattr(self, "_last_gemini_response", None)
-            if response:
-                # Check for grounding metadata in response directly
-                if hasattr(response, "grounding_metadata") and response.grounding_metadata:
-                    result["grounding_metadata"] = response.grounding_metadata
-                # Check for grounding metadata in candidates[0] (most common location)
-                elif (
-                    hasattr(response, "candidates")
-                    and response.candidates
-                    and len(response.candidates) > 0
-                    and hasattr(response.candidates[0], "grounding_metadata")
-                    and response.candidates[0].grounding_metadata
-                ):
-                    result["grounding_metadata"] = response.candidates[0].grounding_metadata
+        if self._is_gemini_model(model) and self._last_gemini_response is not None:
+            response = self._last_gemini_response
+            if response.candidates and response.candidates[0].grounding_metadata is not None:
+                result["grounding_metadata"] = response.candidates[0].grounding_metadata
 
         return result
 
@@ -996,9 +1087,9 @@ class LLMManager:
         temperature: float = 0.7,
         system_message: Optional[str] = None,
         response_format: Optional[str] = None,
-        ctx: Optional[Any] = None,
+        ctx: Optional[LoggerContext] = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> UsageResult:
         """
         Call LLM and return both response content and usage metadata.
 

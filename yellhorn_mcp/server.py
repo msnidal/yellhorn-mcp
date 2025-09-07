@@ -25,7 +25,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from google import genai
 from mcp.server.fastmcp import Context, FastMCP
@@ -62,7 +61,7 @@ logging.basicConfig(
 
 
 @asynccontextmanager
-async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     """Lifespan context manager for the FastMCP app.
 
     Args:

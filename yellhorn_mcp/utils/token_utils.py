@@ -6,10 +6,14 @@ on first use and results are cached. If tiktoken is unavailable, a simple heuris
 used as a fallback to keep functionality working in constrained environments.
 """
 
-from typing import Any, Dict, Optional
+from typing import Dict, Mapping, Optional, Protocol, TypeVar, TypedDict, cast
 import os
 
 _tiktoken = None  # Lazy-loaded module
+
+
+class Encoding(Protocol):
+    def encode(self, text: str) -> list[int]: ...
 
 
 def _load_tiktoken():
@@ -22,6 +26,13 @@ def _load_tiktoken():
         except Exception:
             _tiktoken = False  # Signal that tiktoken is unavailable
     return _tiktoken
+
+
+class TokenCounterConfig(TypedDict, total=False):
+    model_limits: Dict[str, int]
+    model_encodings: Dict[str, str]
+    default_encoding: str
+    default_token_limit: int
 
 
 class TokenCounter:
@@ -59,7 +70,7 @@ class TokenCounter:
         "gemini-2.5-flash": "cl100k_base",
     }
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[TokenCounterConfig | Mapping[str, object]] = None):
         """
         Initialize TokenCounter with encoding cache and optional configuration.
 
@@ -70,8 +81,30 @@ class TokenCounter:
                 - default_encoding: Default encoding to use (default: "cl100k_base")
                 - default_token_limit: Default token limit for unknown models (default: 8192)
         """
-        self._encoding_cache: Dict[str, Any] = {}
-        self.config = config or {}
+        self._encoding_cache: Dict[str, Encoding] = {}
+
+        def _normalize(conf: Mapping[str, object]) -> TokenCounterConfig:
+            norm: TokenCounterConfig = {}
+            ml = conf.get("model_limits")
+            me = conf.get("model_encodings")
+            de = conf.get("default_encoding")
+            dt = conf.get("default_token_limit")
+            if isinstance(ml, dict):
+                norm["model_limits"] = {str(k): int(v) for k, v in ml.items()}
+            if isinstance(me, dict):
+                norm["model_encodings"] = {str(k): str(v) for k, v in me.items()}
+            if isinstance(de, str):
+                norm["default_encoding"] = de
+            if isinstance(dt, int):
+                norm["default_token_limit"] = dt
+            return norm
+
+        if config is None:
+            self.config = {}
+        elif isinstance(config, dict):
+            self.config = _normalize(config)
+        else:
+            self.config = _normalize(config)
 
         # Optional fast-token mode via env to speed local runs (uses lighter encoding)
         if os.getenv("YELLHORN_FAST_TOKENS", "").lower() in {"1", "true", "on"}:
@@ -93,7 +126,7 @@ class TokenCounter:
             # Update default encodings with any overrides from config
             self.MODEL_TO_ENCODING = {**self.MODEL_TO_ENCODING, **self.config["model_encodings"]}
 
-    def _get_encoding(self, model: str):
+    def _get_encoding(self, model: str) -> Optional[Encoding]:
         """Get the appropriate encoding for a model, with caching."""
         tk = _load_tiktoken()
         if tk is False:
@@ -114,11 +147,11 @@ class TokenCounter:
 
         if encoding_name not in self._encoding_cache:
             try:
-                self._encoding_cache[encoding_name] = tk.get_encoding(encoding_name)
+                self._encoding_cache[encoding_name] = cast(Encoding, tk.get_encoding(encoding_name))
             except Exception:
                 # Fallback to default encoding if specified encoding not found
                 default_encoding = self.config.get("default_encoding", "cl100k_base")
-                self._encoding_cache[encoding_name] = tk.get_encoding(default_encoding)
+                self._encoding_cache[encoding_name] = cast(Encoding, tk.get_encoding(default_encoding))
 
         return self._encoding_cache[encoding_name]
 
@@ -142,7 +175,9 @@ class TokenCounter:
             return max(1, len(text) // 4)
         return len(encoding.encode(text))
 
-    def _find_matching_model_key(self, model: str, model_dict: Dict[str, Any]) -> Optional[str]:
+    T = TypeVar("T")
+
+    def _find_matching_model_key(self, model: str, model_dict: Mapping[str, T]) -> Optional[str]:
         """
         Find a model key that matches the given model name.
         First tries exact match, then looks for keys that are substrings of the model.

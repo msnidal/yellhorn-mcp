@@ -8,7 +8,8 @@ import asyncio
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
+from google.genai.types import GroundingMetadata
 
 from google import genai
 from mcp.server.fastmcp import Context
@@ -111,7 +112,7 @@ async def process_judgement_async(
     debug: bool = False,
     codebase_reasoning: str = "full",
     disable_search_grounding: bool = False,
-    _meta: dict[str, Any] | None = None,
+    _meta: dict[str, object] | None = None,
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
     git_command_func: Callable | None = None,
@@ -193,8 +194,8 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 _meta["original_search_grounding"] and not disable_search_grounding
             )
 
-        # Prepare additional kwargs for the LLM call
-        llm_kwargs = {}
+        # Prepare optional generation config for the LLM call
+        generation_config = None
         is_openai_model = llm_manager._is_openai_model(model)
 
         # Handle search grounding for Gemini models
@@ -210,7 +211,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
                 search_tools = _get_gemini_search_tools(model)
                 if search_tools:
-                    llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
+                    generation_config = GenerateContentConfig(tools=search_tools)
                     if ctx:
                         await ctx.log(
                             level="info", message=f"Search grounding enabled for model {model}"
@@ -226,7 +227,11 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         if is_openai_model:
             # OpenAI models don't support citations
             response_data = await llm_manager.call_llm_with_usage(
-                prompt=prompt, model=model, temperature=0.0, ctx=ctx, **llm_kwargs
+                prompt=prompt,
+                model=model,
+                temperature=0.0,
+                ctx=ctx,
+                generation_config=generation_config,
             )
             judgement_content = response_data["content"]
             usage_metadata = response_data["usage_metadata"]
@@ -242,10 +247,15 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         else:
             # Gemini models - use citation-aware call
             response_data = await llm_manager.call_llm_with_citations(
-                prompt=prompt, model=model, temperature=0.0, ctx=ctx, **llm_kwargs
+                prompt=prompt,
+                model=model,
+                temperature=0.0,
+                ctx=ctx,
+                generation_config=generation_config,
             )
 
-            judgement_content = response_data["content"]
+            content_val = response_data["content"]
+            judgement_content = content_val if isinstance(content_val, str) else str(content_val)
             usage_metadata = response_data["usage_metadata"]
 
             # Process citations if available
@@ -257,6 +267,16 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 )
 
             # Create completion metadata
+            if "grounding_metadata" in response_data:
+                gmeta2 = response_data["grounding_metadata"]
+                sr_used = (
+                    len(gmeta2.grounding_chunks)
+                    if isinstance(gmeta2, GroundingMetadata) and gmeta2.grounding_chunks is not None
+                    else None
+                )
+            else:
+                sr_used = None
+
             completion_metadata = CompletionMetadata(
                 model_name=model,
                 status="✅ Judgement generated successfully",
@@ -264,11 +284,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 input_tokens=usage_metadata.prompt_tokens,
                 output_tokens=usage_metadata.completion_tokens,
                 total_tokens=usage_metadata.total_tokens,
-                search_results_used=(
-                    len(getattr(response_data.get("grounding_metadata"), "grounding_chunks", []))
-                    if response_data.get("grounding_metadata") is not None
-                    else None
-                ),
+                search_results_used=sr_used,
                 timestamp=datetime.now(timezone.utc),
             )
 
@@ -279,7 +295,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             )
 
         # Calculate generation time if we have metadata
-        if completion_metadata and _meta and "start_time" in _meta:
+        if completion_metadata and _meta and "start_time" in _meta and isinstance(_meta["start_time"], datetime):
             generation_time = (datetime.now(timezone.utc) - _meta["start_time"]).total_seconds()
             completion_metadata.generation_time_seconds = generation_time
             completion_metadata.timestamp = datetime.now(timezone.utc)
@@ -370,14 +386,18 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
         # Add completion comment to the PARENT issue, not the sub-issue
         if completion_metadata and _meta:
+            _urls_obj = _meta.get("submitted_urls")
+            urls = [u for u in _urls_obj if isinstance(u, str)] if isinstance(_urls_obj, list) else None
+            _ts_obj = _meta.get("start_time")
+            ts = _ts_obj if isinstance(_ts_obj, datetime) else datetime.now(timezone.utc)
             submission_metadata = SubmissionMetadata(
                 status="Generating judgement...",
                 model_name=model,
                 search_grounding_enabled=not disable_search_grounding,
                 yellhorn_version=__version__,
-                submitted_urls=_meta.get("submitted_urls"),
+                submitted_urls=urls,
                 codebase_reasoning_mode=codebase_reasoning,
-                timestamp=_meta.get("start_time", datetime.now(timezone.utc)),
+                timestamp=ts,
             )
 
             # Post completion comment to the sub-issue

@@ -8,9 +8,11 @@ import asyncio
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
+from google.genai.types import GroundingMetadata
 
 from google import genai
+from google.genai.types import GenerateContentConfig
 from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
@@ -47,7 +49,7 @@ async def _generate_and_update_issue(
     disable_search_grounding: bool,
     debug: bool,
     codebase_reasoning: str,
-    _meta: dict[str, Any] | None,
+    _meta: dict[str, object] | None,
     ctx: Context | None,
     github_command_func: Callable | None = None,
     git_command_func: Callable | None = None,
@@ -104,7 +106,7 @@ async def _generate_and_update_issue(
         use_search_grounding = _meta["original_search_grounding"] and not disable_search_grounding
 
     # Prepare additional kwargs for the LLM call
-    llm_kwargs = {}
+    generation_config: GenerateContentConfig | None = None
     is_openai_model = llm_manager._is_openai_model(model)
 
     # Handle search grounding for Gemini models
@@ -123,6 +125,8 @@ async def _generate_and_update_issue(
                     await ctx.log(
                         level="info", message=f"Search grounding enabled for model {model}"
                     )
+                # Prefer passing via generation_config to keep types precise
+                generation_config = GenerateContentConfig(tools=search_tools)
         except ImportError:
             if ctx:
                 await ctx.log(
@@ -135,9 +139,14 @@ async def _generate_and_update_issue(
         if is_openai_model:
             # OpenAI models don't support citations
             response_data = await llm_manager.call_llm_with_usage(
-                prompt=prompt, model=model, temperature=0.0, ctx=ctx, **llm_kwargs
+                prompt=prompt,
+                model=model,
+                temperature=0.0,
+                ctx=ctx,
+                generation_config=generation_config,
             )
-            workplan_content = response_data["content"]
+            content_val = response_data["content"]
+            workplan_content = content_val if isinstance(content_val, str) else str(content_val)
             usage_metadata = response_data["usage_metadata"]
             completion_metadata = CompletionMetadata(
                 model_name=model,
@@ -154,12 +163,12 @@ async def _generate_and_update_issue(
                 prompt=prompt,
                 model=model,
                 temperature=0.0,
-                tools=search_tools,
                 ctx=ctx,
-                **llm_kwargs,
+                generation_config=generation_config,
             )
 
-            workplan_content = response_data["content"]
+            content_val = response_data["content"]
+            workplan_content = content_val if isinstance(content_val, str) else str(content_val)
             usage_metadata = response_data["usage_metadata"]
 
             # Process citations if available
@@ -171,6 +180,16 @@ async def _generate_and_update_issue(
                 )
 
             # Create completion metadata
+            if "grounding_metadata" in response_data:
+                gmeta2 = response_data["grounding_metadata"]
+                sr_used = (
+                    len(gmeta2.grounding_chunks)
+                    if isinstance(gmeta2, GroundingMetadata) and gmeta2.grounding_chunks is not None
+                    else None
+                )
+            else:
+                sr_used = None
+
             completion_metadata = CompletionMetadata(
                 model_name=model,
                 status="✅ Workplan generated successfully",
@@ -178,11 +197,7 @@ async def _generate_and_update_issue(
                 input_tokens=usage_metadata.prompt_tokens,
                 output_tokens=usage_metadata.completion_tokens,
                 total_tokens=usage_metadata.total_tokens,
-                search_results_used=(
-                    len(getattr(response_data.get("grounding_metadata"), "grounding_chunks", []))
-                    if response_data.get("grounding_metadata") is not None
-                    else None
-                ),
+                search_results_used=sr_used,
                 timestamp=datetime.now(timezone.utc),
             )
 
@@ -215,7 +230,7 @@ async def _generate_and_update_issue(
         return
 
     # Calculate generation time if we have metadata
-    if completion_metadata and _meta and "start_time" in _meta:
+    if completion_metadata and _meta and "start_time" in _meta and isinstance(_meta["start_time"], datetime):
         generation_time = (datetime.now(timezone.utc) - _meta["start_time"]).total_seconds()
         completion_metadata.generation_time_seconds = generation_time
         completion_metadata.timestamp = datetime.now(timezone.utc)
@@ -270,7 +285,7 @@ async def process_workplan_async(
     detailed_description: str,
     debug: bool = False,
     disable_search_grounding: bool = False,
-    _meta: dict[str, Any] | None = None,
+    _meta: dict[str, object] | None = None,
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
     git_command_func: Callable | None = None,
@@ -506,7 +521,7 @@ async def process_revision_async(
     codebase_reasoning: str,
     debug: bool = False,
     disable_search_grounding: bool = False,
-    _meta: dict[str, Any] | None = None,
+    _meta: dict[str, object] | None = None,
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
     git_command_func: Callable | None = None,

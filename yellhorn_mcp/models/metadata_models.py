@@ -1,9 +1,15 @@
-"""Metadata models for Yellhorn MCP GitHub issue comments."""
+"""Metadata models for Yellhorn MCP GitHub issue comments.
+
+Rewrites dynamic attribute access to precise type checks with protocols
+and explicit SDK types to improve static typing performance.
+"""
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Dict, Optional, Protocol, Union, runtime_checkable
 
 from pydantic import BaseModel, Field
+from openai.types.responses import ResponseUsage as OpenAIResponseUsage
+from google.genai.types import GenerateContentResponseUsageMetadata as GeminiUsage
 
 
 class SubmissionMetadata(BaseModel):
@@ -50,6 +56,23 @@ class CompletionMetadata(BaseModel):
     timestamp: datetime = Field(description="Timestamp of completion")
 
 
+@runtime_checkable
+class _OpenAICompat(Protocol):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+@runtime_checkable
+class _ResponseCompat(Protocol):
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
+ 
+
+
 class UsageMetadata:
     """
     Unified usage metadata class that handles both OpenAI and Gemini formats.
@@ -58,7 +81,17 @@ class UsageMetadata:
     regardless of the source (OpenAI API, Gemini API, or dictionary).
     """
 
-    def __init__(self, data: Any = None):
+    def __init__(
+        self,
+        data: Union[
+            OpenAIResponseUsage,
+            GeminiUsage,
+            Dict[str, int | str],
+            _OpenAICompat,
+            _ResponseCompat,
+            None,
+        ] = None,
+    ):
         """
         Initialize UsageMetadata from various sources.
 
@@ -69,9 +102,9 @@ class UsageMetadata:
                 - Dictionary with token counts
                 - None (defaults to 0 for all values)
         """
-        self.prompt_tokens: int = 0
-        self.completion_tokens: int = 0
-        self.total_tokens: int = 0
+        self.prompt_tokens: int | None = 0
+        self.completion_tokens: int | None = 0
+        self.total_tokens: int | None = 0
         self.model: Optional[str] = None
 
         if data is None:
@@ -79,47 +112,54 @@ class UsageMetadata:
 
         if isinstance(data, dict):
             # Handle dictionary format (our internal format)
-            self.prompt_tokens = data.get("prompt_tokens", 0)
-            self.completion_tokens = data.get("completion_tokens", 0)
-            self.total_tokens = data.get("total_tokens", 0)
-            self.model = data.get("model")
-        elif hasattr(data, "input_tokens"):
-            # Response format
-            self.prompt_tokens = getattr(data, "input_tokens", 0)
-            self.completion_tokens = getattr(data, "output_tokens", 0)
-            self.total_tokens = getattr(data, "total_tokens", 0)
-        elif hasattr(data, "prompt_tokens"):
-            # OpenAI CompletionUsage format
-            self.prompt_tokens = getattr(data, "prompt_tokens", 0)
-            self.completion_tokens = getattr(data, "completion_tokens", 0)
-            self.total_tokens = getattr(data, "total_tokens", 0)
-        elif hasattr(data, "prompt_token_count"):
-            # Gemini GenerateContentResponseUsageMetadata format
-            self.prompt_tokens = getattr(data, "prompt_token_count", 0)
-            self.completion_tokens = getattr(data, "candidates_token_count", 0)
-            self.total_tokens = getattr(data, "total_token_count", 0)
+            pt = data.get("prompt_tokens")
+            ct = data.get("completion_tokens")
+            tt = data.get("total_tokens")
+            mdl = data.get("model")
+            self.prompt_tokens = pt if isinstance(pt, int) or pt is None else 0
+            self.completion_tokens = ct if isinstance(ct, int) or ct is None else 0
+            self.total_tokens = tt if isinstance(tt, int) or tt is None else 0
+            self.model = mdl if isinstance(mdl, str) else None
+        elif isinstance(data, _ResponseCompat):
+            # OpenAI Responses API usage
+            self.prompt_tokens = data.input_tokens
+            self.completion_tokens = data.output_tokens
+            self.total_tokens = data.total_tokens
+        elif isinstance(data, _OpenAICompat):
+            # OpenAI CompletionUsage-like format
+            self.prompt_tokens = data.prompt_tokens
+            self.completion_tokens = data.completion_tokens
+            self.total_tokens = data.total_tokens
+        else:
+            # Final attempt: handle objects with Gemini-like attributes
+            try:
+                self.prompt_tokens = data.prompt_token_count  # type: ignore[attr-defined]
+                self.completion_tokens = data.candidates_token_count  # type: ignore[attr-defined]
+                self.total_tokens = data.total_token_count  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     @property
     def prompt_token_count(self) -> int:
         """Gemini-style property for compatibility."""
-        return self.prompt_tokens
+        return int(self.prompt_tokens or 0)
 
     @property
     def candidates_token_count(self) -> int:
         """Gemini-style property for compatibility."""
-        return self.completion_tokens
+        return int(self.completion_tokens or 0)
 
     @property
     def total_token_count(self) -> int:
         """Gemini-style property for compatibility."""
-        return self.total_tokens
+        return int(self.total_tokens or 0)
 
     def to_dict(self) -> dict[str, int | str]:
         """Convert to dictionary format."""
         result: dict[str, int | str] = {
-            "prompt_tokens": self.prompt_tokens,
-            "completion_tokens": self.completion_tokens,
-            "total_tokens": self.total_tokens,
+            "prompt_tokens": int(self.prompt_tokens or 0),
+            "completion_tokens": int(self.completion_tokens or 0),
+            "total_tokens": int(self.total_tokens or 0),
         }
         if self.model:
             result["model"] = self.model

@@ -10,7 +10,7 @@ import os
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, List, Optional, Set
+from typing import List, Optional, Set
 
 from mcp.server.fastmcp import Context
 

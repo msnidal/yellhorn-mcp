@@ -39,8 +39,14 @@ def _class_attributes_from_ast(node: ast.ClassDef) -> list[str]:
         if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
             name = stmt.target.id
             if not name.startswith("_"):
-                annotation = getattr(stmt.annotation, "id", "Any")
-                attrs.append(f"{name}: {annotation}")
+                if isinstance(stmt.annotation, ast.Name):
+                    annotation_str = stmt.annotation.id
+                else:
+                    try:
+                        annotation_str = ast.unparse(stmt.annotation)
+                    except Exception:
+                        annotation_str = "Any"
+                attrs.append(f"{name}: {annotation_str}")
         # Assign      => untyped attr e.g. name = "foo"
         elif isinstance(stmt, ast.Assign):
             if len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
@@ -87,19 +93,12 @@ def _sig_from_ast(node: ast.AST) -> str | None:
         # Add regular args with type annotations if available
         for arg in node.args.args:
             arg_name = arg.arg
-            # Get annotation if present
-            annotation = getattr(arg, "annotation", None)
-            if annotation:
+            annotation = arg.annotation
+            if annotation is not None:
                 try:
-                    # Python 3.9+ supports ast.unparse
-                    if hasattr(ast, "unparse"):
-                        annotation_str = ast.unparse(annotation)
-                    else:
-                        # Fallback for older Python versions
-                        annotation_str = getattr(annotation, "id", "Any")
+                    annotation_str = ast.unparse(annotation)
                     arg_name = f"{arg.arg}: {annotation_str}"
                 except Exception:
-                    # If we can't unparse, just use the name
                     pass
             args.append(arg_name)
 
@@ -107,12 +106,11 @@ def _sig_from_ast(node: ast.AST) -> str | None:
         if node.args.vararg:
             vararg_name = node.args.vararg.arg
             # Add type annotation for *args if present
-            annotation = getattr(node.args.vararg, "annotation", None)
-            if annotation:
+            annotation = node.args.vararg.annotation
+            if annotation is not None:
                 try:
-                    if hasattr(ast, "unparse"):
-                        annotation_str = ast.unparse(annotation)
-                        vararg_name = f"{vararg_name}: {annotation_str}"
+                    annotation_str = ast.unparse(annotation)
+                    vararg_name = f"{vararg_name}: {annotation_str}"
                 except Exception:
                     pass
             args.append(f"*{vararg_name}")
@@ -124,12 +122,11 @@ def _sig_from_ast(node: ast.AST) -> str | None:
             for kwarg in node.args.kwonlyargs:
                 kwarg_name = kwarg.arg
                 # Get annotation if present
-                annotation = getattr(kwarg, "annotation", None)
-                if annotation:
+                annotation = kwarg.annotation
+                if annotation is not None:
                     try:
-                        if hasattr(ast, "unparse"):
-                            annotation_str = ast.unparse(annotation)
-                            kwarg_name = f"{kwarg.arg}: {annotation_str}"
+                        annotation_str = ast.unparse(annotation)
+                        kwarg_name = f"{kwarg.arg}: {annotation_str}"
                     except Exception:
                         pass
                 args.append(kwarg_name)
@@ -138,12 +135,11 @@ def _sig_from_ast(node: ast.AST) -> str | None:
         if node.args.kwarg:
             kwargs_name = node.args.kwarg.arg
             # Add type annotation for **kwargs if present
-            annotation = getattr(node.args.kwarg, "annotation", None)
-            if annotation:
+            annotation = node.args.kwarg.annotation
+            if annotation is not None:
                 try:
-                    if hasattr(ast, "unparse"):
-                        annotation_str = ast.unparse(annotation)
-                        kwargs_name = f"{kwargs_name}: {annotation_str}"
+                    annotation_str = ast.unparse(annotation)
+                    kwargs_name = f"{kwargs_name}: {annotation_str}"
                 except Exception:
                     pass
             args.append(f"**{kwargs_name}")
@@ -153,12 +149,11 @@ def _sig_from_ast(node: ast.AST) -> str | None:
         sig = f"{prefix} {node.name}({', '.join(args)})"
 
         # Add return type if available
-        returns = getattr(node, "returns", None)
-        if returns:
+        returns = node.returns
+        if returns is not None:
             try:
-                if hasattr(ast, "unparse"):
-                    return_type = ast.unparse(returns)
-                    sig = f"{sig} -> {return_type}"
+                return_type = ast.unparse(returns)
+                sig = f"{sig} -> {return_type}"
             except Exception:
                 pass
 
@@ -205,8 +200,11 @@ def extract_python_api(file_path: Path) -> list[str]:
 
         # Process module-level definitions
         for node in tree.body:
-            # Skip private members
-            if hasattr(node, "name") and (node.name.startswith("_") or node.name.startswith("__")):
+            # Consider only function/class defs and skip private
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if node.name.startswith("_"):
+                    continue
+            else:
                 continue
 
             sig = _sig_from_ast(node)
@@ -224,10 +222,9 @@ def extract_python_api(file_path: Path) -> list[str]:
 
                     # Process methods
                     for method in node.body:
-                        # Skip private methods
-                        if hasattr(method, "name") and (
-                            method.name.startswith("_") or method.name.startswith("__")
-                        ):
+                        if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            continue
+                        if method.name.startswith("_"):
                             continue
 
                         method_sig = _sig_from_ast(method)
