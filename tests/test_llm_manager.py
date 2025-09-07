@@ -8,12 +8,9 @@ from google.api_core import exceptions as google_exceptions
 from openai import RateLimitError
 from tenacity import RetryCallState
 
-from yellhorn_mcp.llm_manager import (
-    ChunkingStrategy,
-    LLMManager,
-    is_retryable_error,
-    log_retry_attempt,
-)
+from yellhorn_mcp.llm.manager import LLMManager
+from yellhorn_mcp.llm.chunking import ChunkingStrategy
+from yellhorn_mcp.llm.retry import is_retryable_error, log_retry_attempt
 from yellhorn_mcp.models.metadata_models import UsageMetadata
 from yellhorn_mcp.utils.token_utils import TokenCounter
 
@@ -507,7 +504,7 @@ class TestLLMManager:
                 prompt="Test", model="gemini-2.5-pro-preview-05-06", temperature=0.7
             )
 
-    @patch("yellhorn_mcp.llm_manager.ChunkingStrategy.split_by_sentences")
+    @patch("yellhorn_mcp.llm.chunking.ChunkingStrategy.split_by_sentences")
     def test_chunk_strategy_sentences(self, mock_split):
         """Test sentence chunking strategy."""
         mock_split.return_value = ["chunk1", "chunk2"]
@@ -519,7 +516,7 @@ class TestLLMManager:
         assert result == ["chunk1", "chunk2"]
         mock_split.assert_called_once()
 
-    @patch("yellhorn_mcp.llm_manager.ChunkingStrategy.split_by_paragraphs")
+    @patch("yellhorn_mcp.llm.chunking.ChunkingStrategy.split_by_paragraphs")
     def test_chunk_strategy_paragraphs(self, mock_split):
         """Test paragraph chunking strategy."""
         mock_split.return_value = ["chunk1", "chunk2"]
@@ -1231,7 +1228,7 @@ class TestRetryFunctions:
         assert is_retryable_error(TypeError("Type error")) is False
         assert is_retryable_error(Exception("Random error")) is False
 
-    @patch("yellhorn_mcp.llm_manager.logger")
+    @patch("yellhorn_mcp.llm.retry.logger")
     def test_log_retry_attempt(self, mock_logger):
         """Test log_retry_attempt function."""
         # Create mock retry state

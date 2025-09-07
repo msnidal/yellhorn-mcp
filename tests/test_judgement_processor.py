@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+from yellhorn_mcp.llm import LLMManager
+from yellhorn_mcp.llm.usage import UsageMetadata
 from yellhorn_mcp.processors.judgement_processor import get_git_diff, process_judgement_async
 from yellhorn_mcp.utils.git_utils import YellhornMCPError
 

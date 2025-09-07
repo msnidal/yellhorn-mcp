@@ -4,7 +4,7 @@
       "type": "stdio",
       "command": "yellhorn-mcp",
       "args": [],
-      "env": {"YELLHORN_MCP_MODEL": "gpt-5", "YELLHORN_MCP_REASONING_EFFORT": "high"}
+      "env": {}
     }
   }
 }

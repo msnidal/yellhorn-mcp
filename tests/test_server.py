@@ -766,7 +766,8 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
 
     # Create mock LLM Manager
-    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    from yellhorn_mcp.llm import LLMManager
+    from yellhorn_mcp.llm.usage import UsageMetadata
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -895,7 +896,8 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
 
     # Create mock LLM Manager that returns empty response
-    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    from yellhorn_mcp.llm import LLMManager
+    from yellhorn_mcp.llm.usage import UsageMetadata
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -966,7 +968,7 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
 
     # Create mock LLM Manager that raises an error
-    from yellhorn_mcp.llm_manager import LLMManager
+    from yellhorn_mcp.llm import LLMManager
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1079,7 +1081,8 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
     mock_request_context.request_context.lifespan_context["openai_client"] = None
 
     # Create mock LLM Manager
-    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    from yellhorn_mcp.llm import LLMManager
+    from yellhorn_mcp.llm.usage import UsageMetadata
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1166,7 +1169,8 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
     mock_request_context.request_context.lifespan_context["openai_client"] = None
 
     # Create mock LLM Manager
-    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    from yellhorn_mcp.llm import LLMManager
+    from yellhorn_mcp.llm.usage import UsageMetadata
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1405,7 +1409,8 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                                     ] = True
 
                                     # Create mock LLM Manager
-                                    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+                                    from yellhorn_mcp.llm import LLMManager
+                                    from yellhorn_mcp.llm.usage import UsageMetadata
 
                                     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1602,7 +1607,8 @@ This workplan implements feature X.
         mock_response.candidates = [mock_candidate]
 
         # Create mock LLM Manager
-        from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+        from yellhorn_mcp.llm import LLMManager
+        from yellhorn_mcp.llm.usage import UsageMetadata
 
         mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1776,7 +1782,8 @@ async def test_process_workplan_async_search_grounding_enabled(
         # Mocks are now handled by LLM Manager
 
         # Create mock LLM Manager
-        from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+        from yellhorn_mcp.llm import LLMManager
+        from yellhorn_mcp.llm.usage import UsageMetadata
 
         mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1894,7 +1901,8 @@ async def test_process_judgement_async_search_grounding_enabled(
         mock_request_context.request_context.lifespan_context["use_search_grounding"] = True
 
         # Create mock LLM Manager
-        from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+        from yellhorn_mcp.llm import LLMManager
+        from yellhorn_mcp.llm.usage import UsageMetadata
 
         mock_llm_manager = MagicMock(spec=LLMManager)
 

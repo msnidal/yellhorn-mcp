@@ -323,7 +323,7 @@ async def test_update_snapshot_with_full_diff_files():
 @pytest.mark.asyncio
 async def test_integration_process_workplan_lsp_mode():
     """Test the integration of LSP mode with process_workplan_async."""
-    from yellhorn_mcp.llm_manager import LLMManager
+    from yellhorn_mcp.llm import LLMManager
     from yellhorn_mcp.processors.workplan_processor import process_workplan_async
 
     # Mock dependencies
@@ -451,7 +451,7 @@ async def test_integration_process_workplan_lsp_mode():
 @pytest.mark.asyncio
 async def test_integration_process_judgement_lsp_mode():
     """Test the integration of LSP mode with process_judgement_async."""
-    from yellhorn_mcp.llm_manager import LLMManager
+    from yellhorn_mcp.llm import LLMManager
     from yellhorn_mcp.processors.judgement_processor import process_judgement_async
 
     # Mock dependencies

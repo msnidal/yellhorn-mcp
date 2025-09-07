@@ -12,7 +12,7 @@ from yellhorn_mcp.formatters import (
     get_codebase_context,
     get_codebase_snapshot,
 )
-from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.models.metadata_models import UsageMetadata
 from yellhorn_mcp.processors.workplan_processor import (
     _generate_and_update_issue,

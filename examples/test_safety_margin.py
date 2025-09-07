@@ -3,7 +3,7 @@
 
 import asyncio
 
-from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.utils.token_utils import TokenCounter
 
 

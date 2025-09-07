@@ -2,7 +2,7 @@
 
 import pytest
 
-from yellhorn_mcp.llm_manager import UsageMetadata
+from yellhorn_mcp.llm.usage import UsageMetadata
 from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
 
 

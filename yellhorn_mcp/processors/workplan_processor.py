@@ -26,7 +26,7 @@ from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment,
     update_issue_with_workplan,
 )
-from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.models.metadata_models import CompletionMetadata
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,

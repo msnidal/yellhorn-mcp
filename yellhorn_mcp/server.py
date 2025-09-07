@@ -36,7 +36,7 @@ from yellhorn_mcp.integrations.github_integration import (
     create_github_issue,
     get_issue_body,
 )
-from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.models.metadata_models import SubmissionMetadata
 from yellhorn_mcp.processors.context_processor import process_context_curation_async
 from yellhorn_mcp.processors.judgement_processor import get_git_diff, process_judgement_async

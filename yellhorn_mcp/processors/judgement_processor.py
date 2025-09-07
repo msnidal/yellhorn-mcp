@@ -22,7 +22,7 @@ from yellhorn_mcp.integrations.github_integration import (
     create_judgement_subissue,
     update_github_issue,
 )
-from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,

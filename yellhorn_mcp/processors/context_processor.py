@@ -20,7 +20,7 @@ from yellhorn_mcp.formatters.prompt_formatter import (
     build_file_structure_context,
     format_codebase_for_prompt,
 )
-from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.utils.git_utils import YellhornMCPError
 from yellhorn_mcp.utils.token_utils import TokenCounter
 
