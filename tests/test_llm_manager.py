@@ -73,6 +73,9 @@ class TestLLMManager:
 
         assert manager._is_openai_model("gpt-4o") is True
         assert manager._is_openai_model("gpt-4o-mini") is True
+        assert manager._is_openai_model("gpt-5") is True
+        assert manager._is_openai_model("gpt-5-mini") is True
+        assert manager._is_openai_model("gpt-5-nano") is True
         assert manager._is_openai_model("o4-mini") is True
         assert manager._is_openai_model("o3") is True
         assert manager._is_openai_model("gemini-2.5-pro-preview-05-06") is False
@@ -87,6 +90,28 @@ class TestLLMManager:
         assert manager._is_gemini_model("gemini-1.5-pro") is True
         assert manager._is_gemini_model("gpt-4o") is False
         assert manager._is_gemini_model("unknown-model") is False
+
+    def test_is_deep_research_model(self):
+        """Test deep research model detection."""
+        manager = LLMManager()
+
+        assert manager._is_deep_research_model("o3") is True
+        assert manager._is_deep_research_model("o4-mini") is True
+        assert manager._is_deep_research_model("gpt-5") is True
+        assert manager._is_deep_research_model("gpt-5-mini") is True
+        assert manager._is_deep_research_model("gpt-5-nano") is True
+        assert manager._is_deep_research_model("gpt-4o") is False
+        assert manager._is_deep_research_model("gemini-2.5-pro") is False
+
+    def test_is_reasoning_model(self):
+        """Test reasoning model detection."""
+        manager = LLMManager()
+
+        assert manager._is_reasoning_model("gpt-5") is True
+        assert manager._is_reasoning_model("gpt-5-mini") is True
+        assert manager._is_reasoning_model("gpt-5-nano") is False  # Nano doesn't support reasoning
+        assert manager._is_reasoning_model("gpt-4o") is False
+        assert manager._is_reasoning_model("o3") is False
 
     @pytest.mark.asyncio
     async def test_call_llm_simple_openai(self):
@@ -116,6 +141,148 @@ class TestLLMManager:
 
         assert result == "Test response"
         mock_openai.responses.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_call_llm_gpt5_with_reasoning_high(self):
+        """Test GPT-5 call with high reasoning effort."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="High reasoning response")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 100
+        mock_response.usage.completion_tokens = 200
+        mock_response.usage.total_tokens = 300
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        result = await manager.call_llm(
+            prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort="high"
+        )
+
+        assert result == "High reasoning response"
+
+        # Check that reasoning_effort was set to high
+        call_args = mock_openai.responses.create.call_args
+        assert call_args[1]["reasoning_effort"] == "high"
+        assert manager._last_reasoning_effort == "high"
+
+    @pytest.mark.asyncio
+    async def test_call_llm_gpt5_with_reasoning_low(self):
+        """Test GPT-5 call with low reasoning effort."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Low reasoning response")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 50
+        mock_response.usage.completion_tokens = 100
+        mock_response.usage.total_tokens = 150
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        result = await manager.call_llm(
+            prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort="low"
+        )
+
+        assert result == "Low reasoning response"
+
+        # Check that reasoning_effort was set to low
+        call_args = mock_openai.responses.create.call_args
+        assert call_args[1]["reasoning_effort"] == "low"
+        assert manager._last_reasoning_effort == "low"
+
+    @pytest.mark.asyncio
+    async def test_call_llm_gpt5_mini_with_reasoning_medium(self):
+        """Test GPT-5-mini call with medium reasoning effort."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Mini reasoning response")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 50
+        mock_response.usage.completion_tokens = 100
+        mock_response.usage.total_tokens = 150
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        # Test with usage result to get reasoning effort
+        result = await manager.call_llm_with_usage(
+            prompt="Test prompt", model="gpt-5-mini", temperature=0.7, reasoning_effort="medium"
+        )
+
+        assert result["content"] == "Mini reasoning response"
+        assert result["reasoning_effort"] == "medium"
+        assert result["usage_metadata"].prompt_tokens == 50
+
+    @pytest.mark.asyncio
+    async def test_call_llm_gpt5_nano_no_reasoning(self):
+        """Test GPT-5-nano doesn't support reasoning mode."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Nano response")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 25
+        mock_response.usage.completion_tokens = 50
+        mock_response.usage.total_tokens = 75
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        result = await manager.call_llm(
+            prompt="Test prompt",
+            model="gpt-5-nano",
+            temperature=0.7,
+            reasoning_effort="high",  # Should be ignored for nano
+        )
+
+        assert result == "Nano response"
+
+        # Check that reasoning_effort was NOT set (nano doesn't support it)
+        call_args = mock_openai.responses.create.call_args
+        assert "reasoning_effort" not in call_args[1]
+        assert manager._last_reasoning_effort is None
+
+    @pytest.mark.asyncio
+    async def test_call_llm_gpt5_invalid_reasoning_effort(self):
+        """Test GPT-5 call with invalid reasoning effort."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Response")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 50
+        mock_response.usage.completion_tokens = 100
+        mock_response.usage.total_tokens = 150
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        # Test with invalid reasoning effort
+        result = await manager.call_llm(
+            prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort="extreme"
+        )
+
+        assert result == "Response"
+
+        # Check that reasoning_effort was NOT set due to invalid value
+        call_args = mock_openai.responses.create.call_args
+        assert "reasoning_effort" not in call_args[1]
+        assert manager._last_reasoning_effort is None
 
     @pytest.mark.asyncio
     async def test_call_llm_simple_gemini(self):

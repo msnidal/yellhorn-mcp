@@ -7,9 +7,9 @@ and explicit SDK types to improve static typing performance.
 from datetime import datetime
 from typing import Dict, Optional, Protocol, Union, runtime_checkable
 
-from pydantic import BaseModel, Field
-from openai.types.responses import ResponseUsage as OpenAIResponseUsage
 from google.genai.types import GenerateContentResponseUsageMetadata as GeminiUsage
+from openai.types.responses import ResponseUsage as OpenAIResponseUsage
+from pydantic import BaseModel, Field
 
 
 class SubmissionMetadata(BaseModel):
@@ -68,9 +68,6 @@ class _ResponseCompat(Protocol):
     input_tokens: int
     output_tokens: int
     total_tokens: int
-
-
- 
 
 
 class UsageMetadata:

@@ -9,9 +9,9 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from google.genai.types import GroundingMetadata
 
 from google import genai
+from google.genai.types import GroundingMetadata
 from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
@@ -295,7 +295,12 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             )
 
         # Calculate generation time if we have metadata
-        if completion_metadata and _meta and "start_time" in _meta and isinstance(_meta["start_time"], datetime):
+        if (
+            completion_metadata
+            and _meta
+            and "start_time" in _meta
+            and isinstance(_meta["start_time"], datetime)
+        ):
             generation_time = (datetime.now(timezone.utc) - _meta["start_time"]).total_seconds()
             completion_metadata.generation_time_seconds = generation_time
             completion_metadata.timestamp = datetime.now(timezone.utc)
@@ -387,7 +392,11 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
         # Add completion comment to the PARENT issue, not the sub-issue
         if completion_metadata and _meta:
             _urls_obj = _meta.get("submitted_urls")
-            urls = [u for u in _urls_obj if isinstance(u, str)] if isinstance(_urls_obj, list) else None
+            urls = (
+                [u for u in _urls_obj if isinstance(u, str)]
+                if isinstance(_urls_obj, list)
+                else None
+            )
             _ts_obj = _meta.get("start_time")
             ts = _ts_obj if isinstance(_ts_obj, datetime) else datetime.now(timezone.utc)
             submission_metadata = SubmissionMetadata(

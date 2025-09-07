@@ -119,6 +119,32 @@ class TestTokenCounter:
         assert len(counter._encoding_cache) == 2
         assert "cl100k_base" in counter._encoding_cache
 
+    def test_gpt5_model_limits(self):
+        """Test GPT-5 model token limits."""
+        counter = TokenCounter()
+
+        # Test GPT-5 model limits
+        assert counter.get_model_limit("gpt-5") == 2_000_000
+        assert counter.get_model_limit("gpt-5-mini") == 1_000_000
+        assert counter.get_model_limit("gpt-5-nano") == 500_000
+
+    def test_gpt5_model_encodings(self):
+        """Test GPT-5 models use correct encoding."""
+        counter = TokenCounter()
+
+        # GPT-5 models should use o200k_base encoding
+        counter.count_tokens("Test text", "gpt-5")
+        assert "o200k_base" in counter._encoding_cache
+
+        # Clear cache and test other variants
+        counter._encoding_cache.clear()
+        counter.count_tokens("Test text", "gpt-5-mini")
+        assert "o200k_base" in counter._encoding_cache
+
+        counter._encoding_cache.clear()
+        counter.count_tokens("Test text", "gpt-5-nano")
+        assert "o200k_base" in counter._encoding_cache
+
     def test_unknown_model_encoding(self):
         """Test handling of unknown models."""
         counter = TokenCounter()

@@ -16,7 +16,8 @@ from google import genai
 from google.api_core import exceptions as google_exceptions
 from google.genai.types import GenerateContentConfig, GenerateContentResponse, GroundingMetadata
 from openai import AsyncOpenAI, RateLimitError
-from openai.types.responses import Response as OpenAIResponse, ResponseUsage as OpenAIResponseUsage
+from openai.types.responses import Response as OpenAIResponse
+from openai.types.responses import ResponseUsage as OpenAIResponseUsage
 from tenacity import (
     RetryCallState,
     before_sleep_log,
@@ -27,8 +28,8 @@ from tenacity import (
     wait_exponential,
 )
 
-from yellhorn_mcp.utils.token_utils import TokenCounter
 from yellhorn_mcp.models.metadata_models import UsageMetadata
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -89,6 +90,7 @@ class LLMManagerConfig(TypedDict, total=False):
 class UsageResult(TypedDict):
     content: Union[str, Dict[str, object]]
     usage_metadata: UsageMetadata
+    reasoning_effort: Optional[str]  # Reasoning effort level used (low/medium/high or None)
 
 
 class CitationResultBase(TypedDict):
@@ -143,7 +145,11 @@ def is_retryable_error(exception: BaseException) -> bool:
     # Handle client errors exposing code/message (e.g., some Google client errors)
     if isinstance(exception, HasCodeAndMessage):
         error_message = exception.message.lower()
-        if exception.code == 429 or "resource_exhausted" in error_message or "quota" in error_message:
+        if (
+            exception.code == 429
+            or "resource_exhausted" in error_message
+            or "quota" in error_message
+        ):
             return True
 
     # Check for standard retryable exceptions
@@ -421,6 +427,7 @@ class LLMManager:
         # Track usage metadata from last call
         self._last_usage_metadata: Optional[UsageMetadata] = None
         self._last_gemini_response: Optional[GenerateContentResponse] = None
+        self._last_reasoning_effort: Optional[str] = None  # Track reasoning effort level used
 
     def _is_openai_model(self, model: str) -> bool:
         """Check if model is an OpenAI model."""
@@ -433,9 +440,17 @@ class LLMManager:
 
     def _is_deep_research_model(self, model: str) -> bool:
         """Check if model is a deep research model that supports web search and code interpreter tools."""
-        # Deep research models typically include o3, o4, and other reasoning models
-        deep_research_prefixes = ["o3", "o4-"]
+        # Deep research models typically include o3, o4, GPT-5 (with reasoning), and other reasoning models
+        deep_research_prefixes = ["o3", "o4-", "gpt-5"]
         return any(model.startswith(prefix) for prefix in deep_research_prefixes)
+
+    def _is_reasoning_model(self, model: str) -> bool:
+        """Check if model supports reasoning mode."""
+        # GPT-5 models support reasoning mode (except nano)
+        if model == "gpt-5-nano":
+            return False
+        reasoning_models = ["gpt-5", "gpt-5-mini"]
+        return any(model.startswith(prefix) for prefix in reasoning_models)
 
     async def call_llm(
         self,
@@ -632,6 +647,9 @@ class LLMManager:
         if not self.openai_client:
             raise ValueError("OpenAI client not initialized")
 
+        # Pop reasoning_effort from kwargs before building params
+        reasoning_effort = kwargs.pop("reasoning_effort", None)
+
         # Build params for Responses API
         params = {
             "model": model,
@@ -644,6 +662,23 @@ class LLMManager:
         # System message goes to instructions
         if system_message:
             params["instructions"] = system_message
+
+        # Enable reasoning effort for supported GPT-5 models
+        if reasoning_effort and self._is_reasoning_model(model):
+            # Validate reasoning effort level
+            valid_efforts = ["low", "medium", "high"]
+            if reasoning_effort in valid_efforts:
+                logger.info(f"Enabling reasoning effort '{reasoning_effort}' for model {model}")
+                params["reasoning_effort"] = reasoning_effort
+                # Store reasoning effort level for cost calculation and result
+                self._last_reasoning_effort = reasoning_effort
+            else:
+                logger.warning(
+                    f"Invalid reasoning effort '{reasoning_effort}'. Must be one of: {valid_efforts}"
+                )
+                self._last_reasoning_effort = None
+        else:
+            self._last_reasoning_effort = None
 
         # Enable Deep Research tools for supported models
         if self._is_deep_research_model(model):
@@ -726,9 +761,7 @@ class LLMManager:
         # Extract generation_config from kwargs if present (for search grounding)
         generation_config = kwargs.pop("generation_config", None)
         # Build base config (typed)
-        response_mime_type: str = (
-            "application/json" if response_format == "json" else "text/plain"
-        )
+        response_mime_type: str = "application/json" if response_format == "json" else "text/plain"
         base_config: Dict[str, object] = {
             "temperature": temperature,
             "response_mime_type": response_mime_type,
@@ -887,17 +920,14 @@ class LLMManager:
 
             # Aggregate usage metadata
             if self._last_usage_metadata:
-                total_usage.prompt_tokens = (
-                    (total_usage.prompt_tokens or 0)
-                    + (self._last_usage_metadata.prompt_tokens or 0)
+                total_usage.prompt_tokens = (total_usage.prompt_tokens or 0) + (
+                    self._last_usage_metadata.prompt_tokens or 0
                 )
-                total_usage.completion_tokens = (
-                    (total_usage.completion_tokens or 0)
-                    + (self._last_usage_metadata.completion_tokens or 0)
+                total_usage.completion_tokens = (total_usage.completion_tokens or 0) + (
+                    self._last_usage_metadata.completion_tokens or 0
                 )
-                total_usage.total_tokens = (
-                    (total_usage.total_tokens or 0)
-                    + (self._last_usage_metadata.total_tokens or 0)
+                total_usage.total_tokens = (total_usage.total_tokens or 0) + (
+                    self._last_usage_metadata.total_tokens or 0
                 )
 
         # Store aggregated usage
@@ -1125,6 +1155,7 @@ class LLMManager:
             "usage_metadata": (
                 self._last_usage_metadata if self._last_usage_metadata else UsageMetadata()
             ),
+            "reasoning_effort": self._last_reasoning_effort,
         }
 
     def get_last_usage_metadata(self) -> Optional[UsageMetadata]:

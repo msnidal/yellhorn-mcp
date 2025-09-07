@@ -9,10 +9,9 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from google.genai.types import GroundingMetadata
 
 from google import genai
-from google.genai.types import GenerateContentConfig
+from google.genai.types import GenerateContentConfig, GroundingMetadata
 from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
@@ -230,7 +229,12 @@ async def _generate_and_update_issue(
         return
 
     # Calculate generation time if we have metadata
-    if completion_metadata and _meta and "start_time" in _meta and isinstance(_meta["start_time"], datetime):
+    if (
+        completion_metadata
+        and _meta
+        and "start_time" in _meta
+        and isinstance(_meta["start_time"], datetime)
+    ):
         generation_time = (datetime.now(timezone.utc) - _meta["start_time"]).total_seconds()
         completion_metadata.generation_time_seconds = generation_time
         completion_metadata.timestamp = datetime.now(timezone.utc)

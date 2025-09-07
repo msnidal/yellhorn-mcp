@@ -42,7 +42,8 @@ def main():
         dest="model",
         default=os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro"),
         help="Model to use (e.g., gemini-2.5-pro, gemini-2.5-flash, "
-        "gpt-4o, gpt-4o-mini, o4-mini, o3, o3-deep-research, o4-mini-deep-research). "
+        "gpt-4o, gpt-4o-mini, gpt-5, gpt-5-mini, gpt-5-nano, "
+        "o4-mini, o3, o3-deep-research, o4-mini-deep-research). "
         "Default: gemini-2.5-pro or YELLHORN_MCP_MODEL env var.",
     )
 
@@ -63,6 +64,16 @@ def main():
         help="Disable Google Search Grounding for Gemini models. "
         "By default, search grounding is enabled for all Gemini models. "
         "This flag maps to YELLHORN_MCP_SEARCH=off environment variable.",
+    )
+
+    parser.add_argument(
+        "--reasoning-effort",
+        dest="reasoning_effort",
+        choices=["low", "medium", "high"],
+        default=None,
+        help="Set reasoning effort level for GPT-5 models (gpt-5, gpt-5-mini). "
+        "Options: low, medium, high. This provides enhanced reasoning capabilities "
+        "at higher cost. Has no effect on models that don't support reasoning.",
     )
 
     parser.add_argument(
@@ -114,6 +125,10 @@ def main():
     if args.no_search_grounding:
         os.environ["YELLHORN_MCP_SEARCH"] = "off"
 
+    # Handle reasoning effort flag
+    if args.reasoning_effort:
+        os.environ["YELLHORN_MCP_REASONING_EFFORT"] = args.reasoning_effort
+
     # Validate repository path
     repo_path = Path(args.repo_path).resolve()
     if not repo_path.exists():
@@ -134,6 +149,13 @@ def main():
     if not is_openai_model:
         search_status = "disabled" if args.no_search_grounding else "enabled"
         logging.info(f"Google Search Grounding: {search_status}")
+
+    # Show reasoning effort status for GPT-5 models
+    if args.model.startswith("gpt-5") and args.model != "gpt-5-nano":
+        if args.reasoning_effort:
+            logging.info(f"Reasoning effort: {args.reasoning_effort}")
+        else:
+            logging.info("Reasoning effort: disabled")
 
     mcp.run(transport="stdio")
 

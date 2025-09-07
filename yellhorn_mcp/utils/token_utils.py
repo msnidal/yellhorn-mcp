@@ -6,8 +6,8 @@ on first use and results are cached. If tiktoken is unavailable, a simple heuris
 used as a fallback to keep functionality working in constrained environments.
 """
 
-from typing import Dict, Mapping, Optional, Protocol, TypeVar, TypedDict, cast
 import os
+from typing import Dict, Mapping, Optional, Protocol, TypedDict, TypeVar, cast
 
 _tiktoken = None  # Lazy-loaded module
 
@@ -46,6 +46,9 @@ class TokenCounter:
         "o4-mini": 200_000,
         "o3": 200_000,
         "gpt-4.1": 1_000_000,
+        "gpt-5": 2_000_000,  # GPT-5 with 2M context window
+        "gpt-5-mini": 1_000_000,  # GPT-5 mini variant with 1M context
+        "gpt-5-nano": 500_000,  # GPT-5 nano variant with 500K context
         # Google models
         "gemini-2.0-flash-exp": 1_048_576,
         "gemini-1.5-flash": 1_048_576,
@@ -62,6 +65,9 @@ class TokenCounter:
         "o4-mini": "o200k_base",
         "o3": "o200k_base",
         "gpt-4.1": "o200k_base",
+        "gpt-5": "o200k_base",  # GPT-5 uses the same encoding as GPT-4o
+        "gpt-5-mini": "o200k_base",
+        "gpt-5-nano": "o200k_base",
         # Gemini models - we'll use cl100k_base as approximation
         "gemini-2.0-flash-exp": "cl100k_base",
         "gemini-1.5-flash": "cl100k_base",
@@ -114,6 +120,9 @@ class TokenCounter:
                 "o4-mini": "cl100k_base",
                 "o3": "cl100k_base",
                 "gpt-4.1": "cl100k_base",
+                "gpt-5": "cl100k_base",
+                "gpt-5-mini": "cl100k_base",
+                "gpt-5-nano": "cl100k_base",
             }
             self.MODEL_TO_ENCODING = {**self.MODEL_TO_ENCODING, **fast_overrides}
 
@@ -151,7 +160,9 @@ class TokenCounter:
             except Exception:
                 # Fallback to default encoding if specified encoding not found
                 default_encoding = self.config.get("default_encoding", "cl100k_base")
-                self._encoding_cache[encoding_name] = cast(Encoding, tk.get_encoding(default_encoding))
+                self._encoding_cache[encoding_name] = cast(
+                    Encoding, tk.get_encoding(default_encoding)
+                )
 
         return self._encoding_cache[encoding_name]
 
