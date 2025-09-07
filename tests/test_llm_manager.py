@@ -850,8 +850,8 @@ class TestLLMManager:
         assert usage.total_tokens == 150
 
     @pytest.mark.asyncio
-    async def test_openai_temperature_for_o_models(self):
-        """Test that temperature is always 1.0 for 'o' models."""
+    async def test_openai_temperature_omitted_for_o_models(self):
+        """Test that temperature is omitted for 'o' reasoning models."""
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text="Test response")])]
@@ -872,15 +872,15 @@ class TestLLMManager:
 
         manager = LLMManager(openai_client=mock_openai)
 
-        # Test with o3 model
+        # Test with o3 model (reasoning model: should NOT include temperature)
         await manager.call_llm(
             prompt="Test prompt", model="o3", temperature=0.5  # This should be overridden to 1.0
         )
 
         call_args = mock_openai.responses.create.call_args[1]
-        assert call_args["temperature"] == 1.0
+        assert "temperature" not in call_args
 
-        # Test with o4-mini model
+        # Test with o4-mini model (reasoning model: should NOT include temperature)
         await manager.call_llm(
             prompt="Test prompt",
             model="o4-mini",
@@ -888,7 +888,7 @@ class TestLLMManager:
         )
 
         call_args = mock_openai.responses.create.call_args[1]
-        assert call_args["temperature"] == 1.0
+        assert "temperature" not in call_args
 
     @pytest.mark.asyncio
     async def test_gemini_json_parsing_error(self):
@@ -959,6 +959,36 @@ class TestLLMManager:
         assert "error" in result
         assert result["error"] == "Failed to parse JSON"
         assert result["content"] == "Invalid JSON content"
+
+    @pytest.mark.asyncio
+    async def test_openai_ignores_generation_config_param(self):
+        """Ensure generation_config is not forwarded to OpenAI Responses API."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="OK")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 1
+        mock_response.usage.completion_tokens = 1
+        mock_response.usage.total_tokens = 2
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        # Pass a sentinel generation_config to ensure it's stripped
+        sentinel_config = object()
+        result = await manager.call_llm(
+            prompt="Test",
+            model="gpt-4o",
+            temperature=0.7,
+            generation_config=sentinel_config,
+        )
+
+        assert result == "OK"
+        call_kwargs = mock_openai.responses.create.call_args[1]
+        assert "generation_config" not in call_kwargs
 
 
 class TestUsageMetadata:

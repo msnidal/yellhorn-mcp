@@ -452,6 +452,18 @@ class LLMManager:
         reasoning_models = ["gpt-5", "gpt-5-mini"]
         return any(model.startswith(prefix) for prefix in reasoning_models)
 
+    def _openai_supports_temperature(self, model: str) -> bool:
+        """Return True if the OpenAI model accepts a temperature parameter.
+
+        - Reasoning models (o*, gpt-5*) do not accept temperature.
+        - Non-reasoning chat/completion models (e.g., gpt-4o*) do.
+        """
+        if model.startswith("o"):
+            return False
+        if model.startswith("gpt-5"):
+            return False
+        return True
+
     async def call_llm(
         self,
         prompt: str,
@@ -649,15 +661,21 @@ class LLMManager:
 
         # Pop reasoning_effort from kwargs before building params
         reasoning_effort = kwargs.pop("reasoning_effort", None)
+        # Remove unsupported params for OpenAI Responses API
+        # generation_config is used for Gemini (search grounding) and should not be forwarded
+        kwargs.pop("generation_config", None)
 
         # Build params for Responses API
         params = {
             "model": model,
             "input": prompt,  # User prompt goes to input
-            "temperature": 1.0 if model.startswith("o") else temperature,
             # store: false can be set to not persist the conversation state
             **kwargs,
         }
+
+        # Only include temperature for models that support it
+        if self._openai_supports_temperature(model):
+            params["temperature"] = temperature
 
         # System message goes to instructions
         if system_message:
