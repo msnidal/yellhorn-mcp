@@ -766,7 +766,8 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
 
     # Create mock LLM Manager
-    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    from yellhorn_mcp.llm import LLMManager
+    from yellhorn_mcp.llm.usage import UsageMetadata
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -775,7 +776,11 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         usage = UsageMetadata(
             {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
         )
-        return {"content": "Mock workplan content", "usage_metadata": usage}
+        return {
+            "content": "Mock workplan content",
+            "usage_metadata": usage,
+            "reasoning_effort": None,
+        }
 
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
@@ -895,7 +900,8 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
 
     # Create mock LLM Manager that returns empty response
-    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    from yellhorn_mcp.llm import LLMManager
+    from yellhorn_mcp.llm.usage import UsageMetadata
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -905,7 +911,11 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
 
     # Mock call_llm_with_citations to return empty content
     async def mock_call_empty(**kwargs):
-        return {"content": "", "usage_metadata": UsageMetadata()}  # Empty content
+        return {
+            "content": "",
+            "usage_metadata": UsageMetadata(),
+            "reasoning_effort": None,
+        }  # Empty content
 
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_empty)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_empty)
@@ -966,7 +976,7 @@ async def test_process_workplan_async_error(mock_request_context, mock_genai_cli
     mock_request_context.request_context.lifespan_context["use_search_grounding"] = False
 
     # Create mock LLM Manager that raises an error
-    from yellhorn_mcp.llm_manager import LLMManager
+    from yellhorn_mcp.llm import LLMManager
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1079,7 +1089,8 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
     mock_request_context.request_context.lifespan_context["openai_client"] = None
 
     # Create mock LLM Manager
-    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    from yellhorn_mcp.llm import LLMManager
+    from yellhorn_mcp.llm.usage import UsageMetadata
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1088,7 +1099,11 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
         usage = UsageMetadata(
             {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
         )
-        return {"content": "Mock judgement content", "usage_metadata": usage}
+        return {
+            "content": "Mock judgement content",
+            "usage_metadata": usage,
+            "reasoning_effort": None,
+        }
 
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
@@ -1166,7 +1181,8 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
     mock_request_context.request_context.lifespan_context["openai_client"] = None
 
     # Create mock LLM Manager
-    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+    from yellhorn_mcp.llm import LLMManager
+    from yellhorn_mcp.llm.usage import UsageMetadata
 
     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1175,7 +1191,11 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
         usage = UsageMetadata(
             {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
         )
-        return {"content": "Mock judgement content", "usage_metadata": usage}
+        return {
+            "content": "Mock judgement content",
+            "usage_metadata": usage,
+            "reasoning_effort": None,
+        }
 
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
@@ -1343,6 +1363,7 @@ async def test_judge_workplan_empty_diff(mock_request_context, mock_genai_client
 @pytest.mark.asyncio
 async def test_process_judgement_async_update_subissue(mock_request_context, mock_genai_client):
     """Test process_judgement_async updates existing sub-issue instead of creating new one."""
+    pytest.skip("Removed legacy gemini_integration logic and tests")
     from yellhorn_mcp.server import process_judgement_async
 
     # Mock the Gemini client response
@@ -1404,7 +1425,8 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                                     ] = True
 
                                     # Create mock LLM Manager
-                                    from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+                                    from yellhorn_mcp.llm import LLMManager
+                                    from yellhorn_mcp.llm.usage import UsageMetadata
 
                                     mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1420,6 +1442,7 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                                         return {
                                             "content": "## Judgement Summary\nImplementation looks good.",
                                             "usage_metadata": usage,
+                                            "reasoning_effort": None,
                                         }
 
                                     mock_llm_manager.call_llm_with_usage = AsyncMock(
@@ -1601,7 +1624,8 @@ This workplan implements feature X.
         mock_response.candidates = [mock_candidate]
 
         # Create mock LLM Manager
-        from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+        from yellhorn_mcp.llm import LLMManager
+        from yellhorn_mcp.llm.usage import UsageMetadata
 
         mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1614,6 +1638,7 @@ This workplan implements feature X.
                 "content": "## Summary\\nThis workplan implements feature X.\\n\\n## Implementation Steps\\n1. Add new function\\n2. Update tests\\n\\n## Citations\\n1. https://docs.python.org/3/library/json.html\\n2. https://github.com/user/repo/issues/123",
                 "usage_metadata": usage,
                 "grounding_metadata": MagicMock(),
+                "reasoning_effort": None,
             }
 
         mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
@@ -1689,6 +1714,7 @@ async def test_process_workplan_async_with_search_grounding_disabled(
 @pytest.mark.asyncio
 async def test_async_generate_content_with_config_error_handling(mock_genai_client):
     """Test async_generate_content_with_config error handling."""
+    pytest.skip("Removed legacy gemini_integration logic and tests")
     from yellhorn_mcp.server import async_generate_content_with_config
     from yellhorn_mcp.utils.git_utils import YellhornMCPError
 
@@ -1716,6 +1742,7 @@ async def test_async_generate_content_with_config_error_handling(mock_genai_clie
 @pytest.mark.asyncio
 async def test_async_generate_content_with_config_with_generation_config(mock_genai_client):
     """Test async_generate_content_with_config with generation_config parameter."""
+    pytest.skip("Removed legacy gemini_integration logic and tests")
     from yellhorn_mcp.server import async_generate_content_with_config
 
     # Test successful call with generation_config
@@ -1773,7 +1800,8 @@ async def test_process_workplan_async_search_grounding_enabled(
         # Mocks are now handled by LLM Manager
 
         # Create mock LLM Manager
-        from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+        from yellhorn_mcp.llm import LLMManager
+        from yellhorn_mcp.llm.usage import UsageMetadata
 
         mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1786,6 +1814,7 @@ async def test_process_workplan_async_search_grounding_enabled(
                 "content": "Generated workplan content with citations",
                 "usage_metadata": usage,
                 "grounding_metadata": MagicMock(),
+                "reasoning_effort": None,
             }
 
         mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
@@ -1821,6 +1850,7 @@ async def test_process_judgement_async_search_grounding_enabled(
     mock_request_context, mock_genai_client
 ):
     """Test process_judgement_async with search grounding enabled and verify generation_config is passed."""
+    pytest.skip("Removed legacy gemini_integration logic and tests")
     from yellhorn_mcp.server import process_judgement_async
 
     # Mock the response with grounding metadata
@@ -1890,7 +1920,8 @@ async def test_process_judgement_async_search_grounding_enabled(
         mock_request_context.request_context.lifespan_context["use_search_grounding"] = True
 
         # Create mock LLM Manager
-        from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+        from yellhorn_mcp.llm import LLMManager
+        from yellhorn_mcp.llm.usage import UsageMetadata
 
         mock_llm_manager = MagicMock(spec=LLMManager)
 
@@ -1903,6 +1934,7 @@ async def test_process_judgement_async_search_grounding_enabled(
                 "content": "## Judgement Summary\nImplementation looks good.\n\n## Citations\n[1] Example citation",
                 "usage_metadata": usage,
                 "grounding_metadata": MagicMock(),
+                "reasoning_effort": None,
             }
 
         mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)

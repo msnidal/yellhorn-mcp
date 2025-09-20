@@ -10,7 +10,7 @@ import os
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, List, Optional, Set
+from typing import List, Optional, Set
 
 from mcp.server.fastmcp import Context
 
@@ -20,9 +20,9 @@ from yellhorn_mcp.formatters.prompt_formatter import (
     build_file_structure_context,
     format_codebase_for_prompt,
 )
-from yellhorn_mcp.llm_manager import LLMManager
-from yellhorn_mcp.token_counter import TokenCounter
+from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.utils.git_utils import YellhornMCPError
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 
 async def build_codebase_context(

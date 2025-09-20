@@ -6,7 +6,7 @@ abstracting error handling and JSON parsing.
 
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from yellhorn_mcp.utils.git_utils import (
     YellhornMCPError,
@@ -25,7 +25,7 @@ async def create_github_issue(
     body: str,
     labels: list[str] | str = "yellhorn-mcp",
     github_command_func: Callable | None = None,
-) -> dict[str, Any]:
+) -> dict[str, str]:
     """Create a GitHub issue and return its data.
 
     Args:
@@ -122,7 +122,7 @@ async def update_issue_with_workplan(
     repo_path: Path,
     issue_number: str,
     workplan_text: str,
-    usage: Any | None,
+    usage: object | None,
     title: str | None = None,
     github_command_func: Callable | None = None,
 ) -> None:

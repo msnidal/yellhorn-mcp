@@ -8,9 +8,10 @@ import asyncio
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable, cast
 
 from google import genai
+from google.genai.types import GroundingMetadata
 from mcp.server.fastmcp import Context
 from openai import AsyncOpenAI
 
@@ -21,9 +22,13 @@ from yellhorn_mcp.integrations.github_integration import (
     create_judgement_subissue,
     update_github_issue,
 )
-from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
-from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
-from yellhorn_mcp.token_counter import TokenCounter
+from yellhorn_mcp.llm import LLMManager
+from yellhorn_mcp.llm.base import CitationResult, ReasoningEffort, UsageResult
+from yellhorn_mcp.models.metadata_models import (
+    CompletionMetadata,
+    SubmissionMetadata,
+    UsageMetadata,
+)
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
@@ -31,6 +36,7 @@ from yellhorn_mcp.utils.comment_utils import (
 )
 from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
 from yellhorn_mcp.utils.git_utils import YellhornMCPError, run_git_command
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 
 async def get_git_diff(
@@ -111,10 +117,11 @@ async def process_judgement_async(
     debug: bool = False,
     codebase_reasoning: str = "full",
     disable_search_grounding: bool = False,
-    _meta: dict[str, Any] | None = None,
+    _meta: dict[str, object] | None = None,
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
     git_command_func: Callable | None = None,
+    reasoning_effort: ReasoningEffort | None = None,
 ) -> None:
     """Judge a code diff against a workplan asynchronously.
 
@@ -137,6 +144,7 @@ async def process_judgement_async(
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
         git_command_func: Optional Git command function (for mocking).
+        reasoning_effort: Optional reasoning effort to apply for supported models.
     """
     try:
 
@@ -193,8 +201,8 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 _meta["original_search_grounding"] and not disable_search_grounding
             )
 
-        # Prepare additional kwargs for the LLM call
-        llm_kwargs = {}
+        # Prepare optional generation config for the LLM call
+        generation_config = None
         is_openai_model = llm_manager._is_openai_model(model)
 
         # Handle search grounding for Gemini models
@@ -210,7 +218,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
                 search_tools = _get_gemini_search_tools(model)
                 if search_tools:
-                    llm_kwargs["generation_config"] = GenerateContentConfig(tools=search_tools)
+                    generation_config = GenerateContentConfig(tools=search_tools)
                     if ctx:
                         await ctx.log(
                             level="info", message=f"Search grounding enabled for model {model}"
@@ -223,13 +231,32 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                     )
 
         # Call LLM through the manager with citation support
+        effective_reasoning: ReasoningEffort | None = None
         if is_openai_model:
             # OpenAI models don't support citations
-            response_data = await llm_manager.call_llm_with_usage(
-                prompt=prompt, model=model, temperature=0.0, ctx=ctx, **llm_kwargs
+            if reasoning_effort is not None:
+                usage_result: UsageResult = await llm_manager.call_llm_with_usage(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                    reasoning_effort=reasoning_effort,
+                )
+            else:
+                usage_result = await llm_manager.call_llm_with_usage(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                )
+            usage_metadata: UsageMetadata = usage_result["usage_metadata"]
+            content_value = usage_result["content"]
+            judgement_content = (
+                content_value if isinstance(content_value, str) else str(content_value)
             )
-            judgement_content = response_data["content"]
-            usage_metadata = response_data["usage_metadata"]
+            effective_reasoning = usage_result.get("reasoning_effort")
             completion_metadata = CompletionMetadata(
                 model_name=model,
                 status="✅ Judgement generated successfully",
@@ -237,26 +264,52 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 input_tokens=usage_metadata.prompt_tokens,
                 output_tokens=usage_metadata.completion_tokens,
                 total_tokens=usage_metadata.total_tokens,
-                timestamp=None,  # Will be set below
+                timestamp=datetime.now(timezone.utc),
             )
         else:
             # Gemini models - use citation-aware call
-            response_data = await llm_manager.call_llm_with_citations(
-                prompt=prompt, model=model, temperature=0.0, ctx=ctx, **llm_kwargs
-            )
+            if reasoning_effort is not None:
+                citation_result: CitationResult = await llm_manager.call_llm_with_citations(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                    reasoning_effort=reasoning_effort,
+                )
+            else:
+                citation_result = await llm_manager.call_llm_with_citations(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                )
 
-            judgement_content = response_data["content"]
-            usage_metadata = response_data["usage_metadata"]
+            content_val = citation_result.get("content", "")
+            judgement_content = content_val if isinstance(content_val, str) else str(content_val)
+            usage_metadata = citation_result.get("usage_metadata", UsageMetadata())
 
             # Process citations if available
-            if "grounding_metadata" in response_data and response_data["grounding_metadata"]:
+            grounding_metadata = citation_result.get("grounding_metadata")
+            if grounding_metadata is not None:
                 from yellhorn_mcp.utils.search_grounding_utils import add_citations_from_metadata
 
                 judgement_content = add_citations_from_metadata(
-                    judgement_content, response_data["grounding_metadata"]
+                    judgement_content, cast(GroundingMetadata, grounding_metadata)
                 )
 
             # Create completion metadata
+            if isinstance(grounding_metadata, GroundingMetadata):
+                sr_used = (
+                    len(grounding_metadata.grounding_chunks)
+                    if grounding_metadata.grounding_chunks is not None
+                    else None
+                )
+            else:
+                sr_used = None
+            effective_reasoning = None
+
             completion_metadata = CompletionMetadata(
                 model_name=model,
                 status="✅ Judgement generated successfully",
@@ -264,11 +317,8 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 input_tokens=usage_metadata.prompt_tokens,
                 output_tokens=usage_metadata.completion_tokens,
                 total_tokens=usage_metadata.total_tokens,
-                search_results_used=getattr(
-                    response_data.get("grounding_metadata"), "grounding_chunks", None
-                )
-                is not None,
-                timestamp=None,  # Will be set below
+                search_results_used=sr_used,
+                timestamp=datetime.now(timezone.utc),
             )
 
         if not judgement_content:
@@ -278,7 +328,12 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             )
 
         # Calculate generation time if we have metadata
-        if completion_metadata and _meta and "start_time" in _meta:
+        if (
+            completion_metadata
+            and _meta
+            and "start_time" in _meta
+            and isinstance(_meta["start_time"], datetime)
+        ):
             generation_time = (datetime.now(timezone.utc) - _meta["start_time"]).total_seconds()
             completion_metadata.generation_time_seconds = generation_time
             completion_metadata.timestamp = datetime.now(timezone.utc)
@@ -290,7 +345,10 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             and completion_metadata.output_tokens
         ):
             completion_metadata.estimated_cost = calculate_cost(
-                model, completion_metadata.input_tokens, completion_metadata.output_tokens
+                model,
+                int(completion_metadata.input_tokens or 0),
+                int(completion_metadata.output_tokens or 0),
+                effective_reasoning.value if effective_reasoning else None,
             )
 
         # Add context size
@@ -369,14 +427,22 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
 
         # Add completion comment to the PARENT issue, not the sub-issue
         if completion_metadata and _meta:
+            _urls_obj = _meta.get("submitted_urls")
+            urls = (
+                [u for u in _urls_obj if isinstance(u, str)]
+                if isinstance(_urls_obj, list)
+                else None
+            )
+            _ts_obj = _meta.get("start_time")
+            ts = _ts_obj if isinstance(_ts_obj, datetime) else datetime.now(timezone.utc)
             submission_metadata = SubmissionMetadata(
                 status="Generating judgement...",
                 model_name=model,
                 search_grounding_enabled=not disable_search_grounding,
                 yellhorn_version=__version__,
-                submitted_urls=_meta.get("submitted_urls"),
+                submitted_urls=urls,
                 codebase_reasoning_mode=codebase_reasoning,
-                timestamp=_meta.get("start_time", datetime.now(timezone.utc)),
+                timestamp=ts,
             )
 
             # Post completion comment to the sub-issue

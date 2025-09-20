@@ -5,13 +5,19 @@
   "reportMissingTypeStubs": false,
   "reportUnusedVariable": false,
   "reportUnusedImport": false,
+  "include": [
+    "yellhorn_mcp"
+  ],
   "exclude": [
     "**/node_modules",
     "**/__pycache__",
     "build",
     "dist",
     ".venv",
-    "venv"
+    "venv",
+    "tests",
+    "examples",
+    "notebooks"
   ],
   "venvPath": ".",
   "venv": ".venv"

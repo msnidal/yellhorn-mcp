@@ -8,14 +8,14 @@ from google.api_core import exceptions as google_exceptions
 from openai import RateLimitError
 from tenacity import RetryCallState
 
-from yellhorn_mcp.llm_manager import (
-    ChunkingStrategy,
-    LLMManager,
-    UsageMetadata,
-    is_retryable_error,
-    log_retry_attempt,
-)
-from yellhorn_mcp.token_counter import TokenCounter
+from yellhorn_mcp.llm.base import ReasoningEffort, ResponseFormat
+from yellhorn_mcp.llm.chunking import ChunkingStrategy
+from yellhorn_mcp.llm.config import AggregationStrategy
+from yellhorn_mcp.llm.config import ChunkStrategy as ChunkStrategySetting
+from yellhorn_mcp.llm.manager import LLMManager
+from yellhorn_mcp.llm.retry import is_retryable_error, log_retry_attempt
+from yellhorn_mcp.models.metadata_models import UsageMetadata
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 
 class MockGeminiUsage:
@@ -37,8 +37,8 @@ class TestLLMManager:
         assert manager.gemini_client is None
         assert manager.safety_margin == 1000
         assert manager.overlap_ratio == 0.1
-        assert manager.aggregation_strategy == "concatenate"
-        assert manager.chunk_strategy == "sentences"
+        assert manager.aggregation_strategy is AggregationStrategy.CONCATENATE
+        assert manager.chunk_strategy is ChunkStrategySetting.SENTENCES
         assert isinstance(manager.token_counter, TokenCounter)
 
     def test_init_with_clients(self):
@@ -64,8 +64,8 @@ class TestLLMManager:
 
         assert manager.safety_margin == 2000
         assert manager.overlap_ratio == 0.2
-        assert manager.aggregation_strategy == "summarize"
-        assert manager.chunk_strategy == "paragraphs"
+        assert manager.aggregation_strategy is AggregationStrategy.SUMMARIZE
+        assert manager.chunk_strategy is ChunkStrategySetting.PARAGRAPHS
 
     def test_is_openai_model(self):
         """Test OpenAI model detection."""
@@ -73,6 +73,9 @@ class TestLLMManager:
 
         assert manager._is_openai_model("gpt-4o") is True
         assert manager._is_openai_model("gpt-4o-mini") is True
+        assert manager._is_openai_model("gpt-5") is True
+        assert manager._is_openai_model("gpt-5-mini") is True
+        assert manager._is_openai_model("gpt-5-nano") is True
         assert manager._is_openai_model("o4-mini") is True
         assert manager._is_openai_model("o3") is True
         assert manager._is_openai_model("gemini-2.5-pro-preview-05-06") is False
@@ -87,6 +90,28 @@ class TestLLMManager:
         assert manager._is_gemini_model("gemini-1.5-pro") is True
         assert manager._is_gemini_model("gpt-4o") is False
         assert manager._is_gemini_model("unknown-model") is False
+
+    def test_is_deep_research_model(self):
+        """Test deep research model detection."""
+        manager = LLMManager()
+
+        assert manager._is_deep_research_model("o3") is True
+        assert manager._is_deep_research_model("o4-mini") is True
+        assert manager._is_deep_research_model("gpt-5") is True
+        assert manager._is_deep_research_model("gpt-5-mini") is True
+        assert manager._is_deep_research_model("gpt-5-nano") is True
+        assert manager._is_deep_research_model("gpt-4o") is False
+        assert manager._is_deep_research_model("gemini-2.5-pro") is False
+
+    def test_is_reasoning_model(self):
+        """Test reasoning model detection."""
+        manager = LLMManager()
+
+        assert manager._is_reasoning_model("gpt-5") is True
+        assert manager._is_reasoning_model("gpt-5-mini") is True
+        assert manager._is_reasoning_model("gpt-5-nano") is False  # Nano doesn't support reasoning
+        assert manager._is_reasoning_model("gpt-4o") is False
+        assert manager._is_reasoning_model("o3") is False
 
     @pytest.mark.asyncio
     async def test_call_llm_simple_openai(self):
@@ -116,6 +141,156 @@ class TestLLMManager:
 
         assert result == "Test response"
         mock_openai.responses.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_call_llm_gpt5_with_reasoning_high(self):
+        """Test GPT-5 call with high reasoning effort."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="High reasoning response")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 100
+        mock_response.usage.completion_tokens = 200
+        mock_response.usage.total_tokens = 300
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        result = await manager.call_llm(
+            prompt="Test prompt",
+            model="gpt-5",
+            temperature=0.7,
+            reasoning_effort=ReasoningEffort.HIGH,
+        )
+
+        assert result == "High reasoning response"
+
+        # Check that reasoning_effort was set to high
+        call_args = mock_openai.responses.create.call_args
+        assert "reasoning" in call_args[1]
+        assert call_args[1]["reasoning"]["effort"] == "high"
+        assert manager._last_reasoning_effort is ReasoningEffort.HIGH
+
+    @pytest.mark.asyncio
+    async def test_call_llm_gpt5_with_reasoning_low(self):
+        """Test GPT-5 call with low reasoning effort."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Low reasoning response")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 50
+        mock_response.usage.completion_tokens = 100
+        mock_response.usage.total_tokens = 150
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        result = await manager.call_llm(
+            prompt="Test prompt",
+            model="gpt-5",
+            temperature=0.7,
+            reasoning_effort=ReasoningEffort.LOW,
+        )
+
+        assert result == "Low reasoning response"
+
+        # Check that reasoning_effort was set to low
+        call_args = mock_openai.responses.create.call_args
+        assert "reasoning" in call_args[1]
+        assert call_args[1]["reasoning"]["effort"] == "low"
+        assert manager._last_reasoning_effort is ReasoningEffort.LOW
+
+    @pytest.mark.asyncio
+    async def test_call_llm_gpt5_mini_with_reasoning_medium(self):
+        """Test GPT-5-mini call with medium reasoning effort."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Mini reasoning response")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 50
+        mock_response.usage.completion_tokens = 100
+        mock_response.usage.total_tokens = 150
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        # Test with usage result to get reasoning effort
+        result = await manager.call_llm_with_usage(
+            prompt="Test prompt",
+            model="gpt-5-mini",
+            temperature=0.7,
+            reasoning_effort=ReasoningEffort.MEDIUM,
+        )
+
+        assert result["content"] == "Mini reasoning response"
+        assert result["reasoning_effort"] is ReasoningEffort.MEDIUM
+        assert result["usage_metadata"].prompt_tokens == 50
+
+    @pytest.mark.asyncio
+    async def test_call_llm_gpt5_nano_no_reasoning(self):
+        """Test GPT-5-nano doesn't support reasoning mode."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Nano response")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 25
+        mock_response.usage.completion_tokens = 50
+        mock_response.usage.total_tokens = 75
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        result = await manager.call_llm(
+            prompt="Test prompt",
+            model="gpt-5-nano",
+            temperature=0.7,
+            reasoning_effort=ReasoningEffort.HIGH,  # Should be ignored for nano
+        )
+
+        assert result == "Nano response"
+
+        # Check that reasoning_effort was NOT set (nano doesn't support it)
+        call_args = mock_openai.responses.create.call_args
+        assert "reasoning" not in call_args[1]
+        assert manager._last_reasoning_effort is None
+
+    @pytest.mark.asyncio
+    async def test_call_llm_gpt5_invalid_reasoning_effort(self):
+        """Test GPT-5 call with invalid reasoning effort."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="Response")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 50
+        mock_response.usage.completion_tokens = 100
+        mock_response.usage.total_tokens = 150
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        # Test with invalid reasoning effort (non-enum)
+        with pytest.raises(TypeError):
+            await manager.call_llm(
+                prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort="extreme"
+            )
+
+        mock_openai.responses.create.assert_not_called()
+        assert manager._last_reasoning_effort is None
 
     @pytest.mark.asyncio
     async def test_call_llm_simple_gemini(self):
@@ -198,7 +373,7 @@ class TestLLMManager:
         manager = LLMManager(openai_client=mock_openai)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gpt-4o", response_format="json"
+            prompt="Test prompt", model="gpt-4o", response_format=ResponseFormat.JSON
         )
 
         assert result == {"key": "value"}
@@ -277,7 +452,7 @@ class TestLLMManager:
             {"key3": "value3", "list": [1, 2]},
         ]
 
-        result = manager._aggregate_responses(responses, "json")
+        result = manager._aggregate_responses(responses, ResponseFormat.JSON)
 
         assert result["key1"] == "value1"
         assert result["key2"] == "value2"
@@ -291,7 +466,7 @@ class TestLLMManager:
 
         responses = [{"items": [1, 2, 3]}, {"items": [4, 5, 6]}]
 
-        result = manager._aggregate_responses(responses, "json")
+        result = manager._aggregate_responses(responses, ResponseFormat.JSON)
 
         assert result["items"] == [1, 2, 3, 4, 5, 6]
 
@@ -301,7 +476,7 @@ class TestLLMManager:
 
         responses = [{"key": "value1"}, {"key": "value2"}, "Invalid JSON"]
 
-        result = manager._aggregate_responses(responses, "json")
+        result = manager._aggregate_responses(responses, ResponseFormat.JSON)
 
         # Should fallback to chunks format
         assert "chunks" in result
@@ -340,7 +515,7 @@ class TestLLMManager:
                 prompt="Test", model="gemini-2.5-pro-preview-05-06", temperature=0.7
             )
 
-    @patch("yellhorn_mcp.llm_manager.ChunkingStrategy.split_by_sentences")
+    @patch("yellhorn_mcp.llm.chunking.ChunkingStrategy.split_by_sentences")
     def test_chunk_strategy_sentences(self, mock_split):
         """Test sentence chunking strategy."""
         mock_split.return_value = ["chunk1", "chunk2"]
@@ -352,7 +527,7 @@ class TestLLMManager:
         assert result == ["chunk1", "chunk2"]
         mock_split.assert_called_once()
 
-    @patch("yellhorn_mcp.llm_manager.ChunkingStrategy.split_by_paragraphs")
+    @patch("yellhorn_mcp.llm.chunking.ChunkingStrategy.split_by_paragraphs")
     def test_chunk_strategy_paragraphs(self, mock_split):
         """Test paragraph chunking strategy."""
         mock_split.return_value = ["chunk1", "chunk2"]
@@ -683,8 +858,8 @@ class TestLLMManager:
         assert usage.total_tokens == 150
 
     @pytest.mark.asyncio
-    async def test_openai_temperature_for_o_models(self):
-        """Test that temperature is always 1.0 for 'o' models."""
+    async def test_openai_temperature_omitted_for_o_models(self):
+        """Test that temperature is omitted for 'o' reasoning models."""
         mock_openai = MagicMock()
         mock_response = MagicMock()
         mock_response.output = [MagicMock(content=[MagicMock(text="Test response")])]
@@ -705,15 +880,15 @@ class TestLLMManager:
 
         manager = LLMManager(openai_client=mock_openai)
 
-        # Test with o3 model
+        # Test with o3 model (reasoning model: should NOT include temperature)
         await manager.call_llm(
             prompt="Test prompt", model="o3", temperature=0.5  # This should be overridden to 1.0
         )
 
         call_args = mock_openai.responses.create.call_args[1]
-        assert call_args["temperature"] == 1.0
+        assert "temperature" not in call_args
 
-        # Test with o4-mini model
+        # Test with o4-mini model (reasoning model: should NOT include temperature)
         await manager.call_llm(
             prompt="Test prompt",
             model="o4-mini",
@@ -721,7 +896,7 @@ class TestLLMManager:
         )
 
         call_args = mock_openai.responses.create.call_args[1]
-        assert call_args["temperature"] == 1.0
+        assert "temperature" not in call_args
 
     @pytest.mark.asyncio
     async def test_gemini_json_parsing_error(self):
@@ -735,7 +910,7 @@ class TestLLMManager:
         manager = LLMManager(gemini_client=mock_gemini)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gemini-2.5-pro", response_format="json"
+            prompt="Test prompt", model="gemini-2.5-pro", response_format=ResponseFormat.JSON
         )
 
         assert isinstance(result, dict)
@@ -754,7 +929,7 @@ class TestLLMManager:
         manager = LLMManager(gemini_client=mock_gemini)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gemini-2.5-pro", response_format="json"
+            prompt="Test prompt", model="gemini-2.5-pro", response_format=ResponseFormat.JSON
         )
 
         assert isinstance(result, dict)
@@ -785,13 +960,43 @@ class TestLLMManager:
         manager = LLMManager(openai_client=mock_openai)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gpt-4o", response_format="json"
+            prompt="Test prompt", model="gpt-4o", response_format=ResponseFormat.JSON
         )
 
         assert isinstance(result, dict)
         assert "error" in result
         assert result["error"] == "Failed to parse JSON"
         assert result["content"] == "Invalid JSON content"
+
+    @pytest.mark.asyncio
+    async def test_openai_ignores_generation_config_param(self):
+        """Ensure generation_config is not forwarded to OpenAI Responses API."""
+        mock_openai = MagicMock()
+        mock_response = MagicMock()
+        mock_response.output = [MagicMock(content=[MagicMock(text="OK")])]
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 1
+        mock_response.usage.completion_tokens = 1
+        mock_response.usage.total_tokens = 2
+        del mock_response.usage.input_tokens
+        del mock_response.output_text
+
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        manager = LLMManager(openai_client=mock_openai)
+
+        # Pass a sentinel generation_config to ensure it's stripped
+        sentinel_config = object()
+        result = await manager.call_llm(
+            prompt="Test",
+            model="gpt-4o",
+            temperature=0.7,
+            generation_config=sentinel_config,
+        )
+
+        assert result == "OK"
+        call_kwargs = mock_openai.responses.create.call_args[1]
+        assert "generation_config" not in call_kwargs
 
 
 class TestUsageMetadata:
@@ -1034,7 +1239,7 @@ class TestRetryFunctions:
         assert is_retryable_error(TypeError("Type error")) is False
         assert is_retryable_error(Exception("Random error")) is False
 
-    @patch("yellhorn_mcp.llm_manager.logger")
+    @patch("yellhorn_mcp.llm.retry.logger")
     def test_log_retry_attempt(self, mock_logger):
         """Test log_retry_attempt function."""
         # Create mock retry state

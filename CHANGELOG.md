@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2025-08-12
+
+### Added
+
+- Reasoning effort support is now fully wired through the server and processor flows. When
+  `YELLHORN_MCP_REASONING_EFFORT` is set, the chosen effort level is passed to every
+  `LLMManager` call and persisted alongside usage metadata.
+
+### Changed
+
+- Cost estimation now accounts for reasoning premiums by forwarding the active reasoning
+  effort into `calculate_cost`, ensuring GPT-5 usage metrics reflect enhanced pricing.
+
+### Fixed
+
+- Workplan and judgement processors no longer rely on ad-hoc dictionaries for reasoning
+  metadata, eliminating `Any` usage and improving type safety end-to-end.
+
 ## [0.7.1] - 2025-08-11
 
 ### Added

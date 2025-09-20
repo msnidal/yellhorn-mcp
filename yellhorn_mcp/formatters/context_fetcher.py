@@ -3,8 +3,8 @@
 from pathlib import Path
 from typing import Callable, Optional
 
-from yellhorn_mcp.token_counter import TokenCounter
 from yellhorn_mcp.utils.lsp_utils import get_lsp_snapshot
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 from .codebase_snapshot import get_codebase_snapshot
 from .prompt_formatter import build_file_structure_context, format_codebase_for_prompt

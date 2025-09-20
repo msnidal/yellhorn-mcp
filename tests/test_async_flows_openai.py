@@ -7,7 +7,7 @@ import pytest
 from mcp.server.fastmcp import Context
 
 from tests.helpers import DummyContext
-from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.processors.judgement_processor import process_judgement_async
 from yellhorn_mcp.processors.workplan_processor import (
     process_revision_async,

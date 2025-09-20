@@ -107,24 +107,25 @@ def add_citations_from_metadata(text: str, grounding_metadata: GroundingMetadata
     if not text or not grounding_metadata:
         return text
 
-    # Extract supports and chunks from grounding metadata
-    # Handle both attribute access and dictionary access for flexibility
+    # Extract supports and chunks from grounding metadata (object or dict)
     supports = []
     chunks = []
-
-    # Try to get supports
-    if hasattr(grounding_metadata, "grounding_supports") and grounding_metadata.grounding_supports:
-        supports = grounding_metadata.grounding_supports
-    elif isinstance(grounding_metadata, dict) and grounding_metadata.get("grounding_supports"):
-        supports = grounding_metadata["grounding_supports"]
-
-    # Try to get chunks
-    if hasattr(grounding_metadata, "grounding_chunks"):
-        if grounding_metadata.grounding_chunks:
-            chunks = grounding_metadata.grounding_chunks
-    elif isinstance(grounding_metadata, dict) and "grounding_chunks" in grounding_metadata:
-        if grounding_metadata["grounding_chunks"]:
-            chunks = grounding_metadata["grounding_chunks"]
+    if isinstance(grounding_metadata, GroundingMetadata):
+        supports = grounding_metadata.grounding_supports or []
+        chunks = grounding_metadata.grounding_chunks or []
+    elif isinstance(grounding_metadata, dict):
+        supports = grounding_metadata.get("grounding_supports") or []
+        chunks = grounding_metadata.get("grounding_chunks") or []
+    else:
+        # Handle generic objects (e.g., MagicMock) with attribute-style access
+        try:
+            supports = grounding_metadata.grounding_supports or []  # type: ignore[attr-defined]
+        except Exception:
+            supports = []
+        try:
+            chunks = grounding_metadata.grounding_chunks or []  # type: ignore[attr-defined]
+        except Exception:
+            chunks = []
 
     if not supports or not chunks:
         return text
@@ -132,15 +133,17 @@ def add_citations_from_metadata(text: str, grounding_metadata: GroundingMetadata
     # Sort supports by end_index in descending order to avoid shifting issues when inserting.
     # Handle both object and dictionary formats for segment and end_index
     def get_end_index(support):
-        if hasattr(support, "segment"):
-            segment = support.segment
-            if hasattr(segment, "end_index") and segment.end_index is not None:
-                return segment.end_index
-        elif isinstance(support, dict) and "segment" in support:
-            segment = support["segment"]
-            if isinstance(segment, dict) and segment.get("end_index") is not None:
-                return segment["end_index"]
-        return 0
+        try:
+            segment = support.segment  # type: ignore[attr-defined]
+            end_idx = segment.end_index  # type: ignore[attr-defined]
+            return end_idx if end_idx is not None else 0
+        except Exception:
+            if isinstance(support, dict):
+                seg = support.get("segment")
+                if isinstance(seg, dict):
+                    end = seg.get("end_index")
+                    return end if isinstance(end, int) else 0
+            return 0
 
     sorted_supports = sorted(supports, key=get_end_index, reverse=True)
 
@@ -150,10 +153,11 @@ def add_citations_from_metadata(text: str, grounding_metadata: GroundingMetadata
 
         # Get grounding_chunk_indices, handling both object and dict formats
         indices = []
-        if hasattr(support, "grounding_chunk_indices"):
-            indices = support.grounding_chunk_indices
-        elif isinstance(support, dict) and "grounding_chunk_indices" in support:
-            indices = support["grounding_chunk_indices"]
+        try:
+            indices = support.grounding_chunk_indices  # type: ignore[attr-defined]
+        except Exception:
+            if isinstance(support, dict):
+                indices = support.get("grounding_chunk_indices") or []
 
         if indices:
             # Create citation string like [1](link1)[2](link2)
@@ -163,14 +167,18 @@ def add_citations_from_metadata(text: str, grounding_metadata: GroundingMetadata
                     chunk = chunks[i]
                     # Extract URI from chunk, handling both object and dict formats
                     uri = None
-                    if hasattr(chunk, "web") and chunk.web:
-                        web = chunk.web
-                        if hasattr(web, "uri"):
-                            uri = web.uri
-                    elif isinstance(chunk, dict) and "web" in chunk:
-                        web = chunk["web"]
-                        if isinstance(web, dict) and "uri" in web:
-                            uri = web["uri"]
+                    try:
+                        web = chunk.web  # type: ignore[attr-defined]
+                        if web is not None:
+                            try:
+                                uri = web.uri  # type: ignore[attr-defined]
+                            except Exception:
+                                uri = None
+                    except Exception:
+                        if isinstance(chunk, dict):
+                            web = chunk.get("web")
+                            if isinstance(web, dict):
+                                uri = web.get("uri")
 
                     if uri:
                         citation_links.append(f"[{i + 1}]({uri})")

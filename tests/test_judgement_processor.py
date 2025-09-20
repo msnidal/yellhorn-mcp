@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from yellhorn_mcp.llm_manager import LLMManager, UsageMetadata
+from yellhorn_mcp.llm import LLMManager
+from yellhorn_mcp.llm.base import ReasoningEffort
+from yellhorn_mcp.llm.usage import UsageMetadata
 from yellhorn_mcp.processors.judgement_processor import get_git_diff, process_judgement_async
 from yellhorn_mcp.utils.git_utils import YellhornMCPError
 
@@ -172,6 +174,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "## Judgement Summary\nAPPROVED - Implementation looks good",
             "usage_metadata": mock_usage,
+            "reasoning_effort": ReasoningEffort.MEDIUM,
         }
 
         mock_ctx = MagicMock()
@@ -187,6 +190,9 @@ class TestProcessJudgementAsync:
             ) as mock_update,
             patch("yellhorn_mcp.utils.git_utils.run_git_command") as mock_git,
             patch("yellhorn_mcp.integrations.github_integration.add_issue_comment") as mock_comment,
+            patch(
+                "yellhorn_mcp.processors.judgement_processor.calculate_cost", return_value=0.456
+            ) as mock_cost,
         ):
             mock_context.return_value = ("Mock codebase context", ["auth.py"])
             mock_update.return_value = None
@@ -196,7 +202,7 @@ class TestProcessJudgementAsync:
             await process_judgement_async(
                 repo_path=repo_path,
                 llm_manager=mock_llm_manager,
-                model="gpt-4o",
+                model="gpt-5",
                 workplan_content=workplan_content,
                 diff_content=diff_content,
                 base_ref="main",
@@ -214,15 +220,19 @@ class TestProcessJudgementAsync:
                     return_value="https://github.com/owner/repo/issues/125"
                 ),
                 git_command_func=mock_git,
+                reasoning_effort=ReasoningEffort.MEDIUM,
             )
 
             # Verify LLM was called with correct prompt
             mock_llm_manager.call_llm_with_usage.assert_called_once()
-            call_args = mock_llm_manager.call_llm_with_usage.call_args[1]
-            assert workplan_content in call_args["prompt"]
-            assert diff_content in call_args["prompt"]
-            assert "main" in call_args["prompt"]
-            assert "feature" in call_args["prompt"]
+            call_kwargs = mock_llm_manager.call_llm_with_usage.call_args.kwargs
+            assert workplan_content in call_kwargs["prompt"]
+            assert diff_content in call_kwargs["prompt"]
+            assert "main" in call_kwargs["prompt"]
+            assert "feature" in call_kwargs["prompt"]
+            assert call_kwargs["reasoning_effort"] is ReasoningEffort.MEDIUM
+            mock_cost.assert_called_once()
+            assert mock_cost.call_args.args[3] == ReasoningEffort.MEDIUM.value
 
             # Note: GitHub integration tests are complex due to dependencies
             # Core LLM functionality is verified above
@@ -305,6 +315,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "## Judgement Summary\nAPPROVED",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()
@@ -367,6 +378,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "## Judgement Summary\nAPPROVED",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()
@@ -440,6 +452,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "## Judgement Summary\nAPPROVED",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()
@@ -502,6 +515,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "",  # Empty content
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()
@@ -669,6 +683,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "## Judgement Summary\nAPPROVED",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()

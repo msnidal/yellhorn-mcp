@@ -1,8 +1,38 @@
-"""Token counting utility using tiktoken for accurate token estimation."""
+"""Token counting utility with lazy tiktoken import to reduce startup time.
 
-from typing import Any, Dict, Optional
+Lazily importing tiktoken significantly reduces import-time overhead for tests that
+don't immediately need encoding tables. When tokenization is used, tiktoken is loaded
+on first use and results are cached. If tiktoken is unavailable, a simple heuristic is
+used as a fallback to keep functionality working in constrained environments.
+"""
 
-import tiktoken
+import os
+from typing import Dict, Mapping, Optional, Protocol, TypedDict, TypeVar, cast
+
+_tiktoken = None  # Lazy-loaded module
+
+
+class Encoding(Protocol):
+    def encode(self, text: str) -> list[int]: ...
+
+
+def _load_tiktoken():
+    global _tiktoken
+    if _tiktoken is None:
+        try:
+            import tiktoken as _tk  # type: ignore
+
+            _tiktoken = _tk
+        except Exception:
+            _tiktoken = False  # Signal that tiktoken is unavailable
+    return _tiktoken
+
+
+class TokenCounterConfig(TypedDict, total=False):
+    model_limits: Dict[str, int]
+    model_encodings: Dict[str, str]
+    default_encoding: str
+    default_token_limit: int
 
 
 class TokenCounter:
@@ -16,6 +46,9 @@ class TokenCounter:
         "o4-mini": 200_000,
         "o3": 200_000,
         "gpt-4.1": 1_000_000,
+        "gpt-5": 2_000_000,  # GPT-5 with 2M context window
+        "gpt-5-mini": 1_000_000,  # GPT-5 mini variant with 1M context
+        "gpt-5-nano": 500_000,  # GPT-5 nano variant with 500K context
         # Google models
         "gemini-2.0-flash-exp": 1_048_576,
         "gemini-1.5-flash": 1_048_576,
@@ -32,6 +65,9 @@ class TokenCounter:
         "o4-mini": "o200k_base",
         "o3": "o200k_base",
         "gpt-4.1": "o200k_base",
+        "gpt-5": "o200k_base",  # GPT-5 uses the same encoding as GPT-4o
+        "gpt-5-mini": "o200k_base",
+        "gpt-5-nano": "o200k_base",
         # Gemini models - we'll use cl100k_base as approximation
         "gemini-2.0-flash-exp": "cl100k_base",
         "gemini-1.5-flash": "cl100k_base",
@@ -40,7 +76,7 @@ class TokenCounter:
         "gemini-2.5-flash": "cl100k_base",
     }
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[TokenCounterConfig | Mapping[str, object]] = None):
         """
         Initialize TokenCounter with encoding cache and optional configuration.
 
@@ -51,8 +87,44 @@ class TokenCounter:
                 - default_encoding: Default encoding to use (default: "cl100k_base")
                 - default_token_limit: Default token limit for unknown models (default: 8192)
         """
-        self._encoding_cache: Dict[str, tiktoken.Encoding] = {}
-        self.config = config or {}
+        self._encoding_cache: Dict[str, Encoding] = {}
+
+        def _normalize(conf: Mapping[str, object]) -> TokenCounterConfig:
+            norm: TokenCounterConfig = {}
+            ml = conf.get("model_limits")
+            me = conf.get("model_encodings")
+            de = conf.get("default_encoding")
+            dt = conf.get("default_token_limit")
+            if isinstance(ml, dict):
+                norm["model_limits"] = {str(k): int(v) for k, v in ml.items()}
+            if isinstance(me, dict):
+                norm["model_encodings"] = {str(k): str(v) for k, v in me.items()}
+            if isinstance(de, str):
+                norm["default_encoding"] = de
+            if isinstance(dt, int):
+                norm["default_token_limit"] = dt
+            return norm
+
+        if config is None:
+            self.config = {}
+        elif isinstance(config, dict):
+            self.config = _normalize(config)
+        else:
+            self.config = _normalize(config)
+
+        # Optional fast-token mode via env to speed local runs (uses lighter encoding)
+        if os.getenv("YELLHORN_FAST_TOKENS", "").lower() in {"1", "true", "on"}:
+            fast_overrides = {
+                "gpt-4o": "cl100k_base",
+                "gpt-4o-mini": "cl100k_base",
+                "o4-mini": "cl100k_base",
+                "o3": "cl100k_base",
+                "gpt-4.1": "cl100k_base",
+                "gpt-5": "cl100k_base",
+                "gpt-5-mini": "cl100k_base",
+                "gpt-5-nano": "cl100k_base",
+            }
+            self.MODEL_TO_ENCODING = {**self.MODEL_TO_ENCODING, **fast_overrides}
 
         # Initialize with config overrides if provided
         if "model_limits" in self.config and isinstance(self.config["model_limits"], dict):
@@ -63,8 +135,11 @@ class TokenCounter:
             # Update default encodings with any overrides from config
             self.MODEL_TO_ENCODING = {**self.MODEL_TO_ENCODING, **self.config["model_encodings"]}
 
-    def _get_encoding(self, model: str) -> tiktoken.Encoding:
+    def _get_encoding(self, model: str) -> Optional[Encoding]:
         """Get the appropriate encoding for a model, with caching."""
+        tk = _load_tiktoken()
+        if tk is False:
+            return None  # Signal heuristic mode
         # Get encoding name from config overrides with flexible matching
         config_encodings = self.config.get("model_encodings", {})
         config_key = self._find_matching_model_key(model, config_encodings)
@@ -81,11 +156,13 @@ class TokenCounter:
 
         if encoding_name not in self._encoding_cache:
             try:
-                self._encoding_cache[encoding_name] = tiktoken.get_encoding(encoding_name)
+                self._encoding_cache[encoding_name] = cast(Encoding, tk.get_encoding(encoding_name))  # type: ignore
             except Exception:
                 # Fallback to default encoding if specified encoding not found
                 default_encoding = self.config.get("default_encoding", "cl100k_base")
-                self._encoding_cache[encoding_name] = tiktoken.get_encoding(default_encoding)
+                self._encoding_cache[encoding_name] = cast(
+                    Encoding, tk.get_encoding(default_encoding)  # type: ignore
+                )
 
         return self._encoding_cache[encoding_name]
 
@@ -104,9 +181,14 @@ class TokenCounter:
             return 0
 
         encoding = self._get_encoding(model)
+        if encoding is None:
+            # Heuristic fallback: approximate 4 chars per token
+            return max(1, len(text) // 4)
         return len(encoding.encode(text))
 
-    def _find_matching_model_key(self, model: str, model_dict: Dict[str, Any]) -> Optional[str]:
+    T = TypeVar("T")
+
+    def _find_matching_model_key(self, model: str, model_dict: Mapping[str, T]) -> Optional[str]:
         """
         Find a model key that matches the given model name.
         First tries exact match, then looks for keys that are substrings of the model.

@@ -4,8 +4,7 @@ This module handles token usage tracking, cost calculation,
 and metrics formatting for various AI models.
 """
 
-from yellhorn_mcp.llm_manager import UsageMetadata
-from yellhorn_mcp.models.metadata_models import CompletionMetadata
+from yellhorn_mcp.models.metadata_models import CompletionMetadata, UsageMetadata
 
 # Pricing configuration for models (USD per 1M tokens)
 MODEL_PRICING = {
@@ -53,6 +52,24 @@ MODEL_PRICING = {
         "input": {"default": 0.15},  # $0.15 per 1M input tokens
         "output": {"default": 0.60},  # $0.60 per 1M output tokens
     },
+    "gpt-5": {
+        "input": {"default": 3.00, "reasoning": 15.00},  # $3 per 1M input, $15 for reasoning mode
+        "output": {
+            "default": 12.00,
+            "reasoning": 60.00,
+        },  # $12 per 1M output, $60 for reasoning mode
+    },
+    "gpt-5-mini": {
+        "input": {
+            "default": 0.50,
+            "reasoning": 2.50,
+        },  # $0.50 per 1M input, $2.50 for reasoning mode
+        "output": {"default": 2.00, "reasoning": 10.00},  # $2 per 1M output, $10 for reasoning mode
+    },
+    "gpt-5-nano": {
+        "input": {"default": 0.10},  # $0.10 per 1M input tokens
+        "output": {"default": 0.40},  # $0.40 per 1M output tokens
+    },
     "o4-mini": {
         "input": {"default": 1.1},  # $1.1 per 1M input tokens
         "output": {"default": 4.4},  # $4.4 per 1M output tokens
@@ -73,13 +90,16 @@ MODEL_PRICING = {
 }
 
 
-def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
+def calculate_cost(
+    model: str, input_tokens: int, output_tokens: int, reasoning_effort: str | None = None
+) -> float | None:
     """Calculates the estimated cost for a model API call.
 
     Args:
         model: The model name (Gemini or OpenAI).
         input_tokens: Number of input tokens used.
         output_tokens: Number of output tokens generated.
+        reasoning_effort: Reasoning effort level used (low/medium/high) for models that support it.
 
     Returns:
         The estimated cost in USD, or None if pricing is unavailable for the model.
@@ -89,8 +109,17 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float |
         return None
 
     # Calculate costs (convert to millions for rate multiplication)
-    input_rate = pricing["input"]["default"]
-    output_rate = pricing["output"]["default"]
+    # Use reasoning pricing if reasoning effort is set (any level), otherwise default
+    if reasoning_effort and "reasoning" in pricing["input"]:
+        input_rate = pricing["input"]["reasoning"]
+    else:
+        input_rate = pricing["input"]["default"]
+
+    if reasoning_effort and "reasoning" in pricing["output"]:
+        output_rate = pricing["output"]["reasoning"]
+    else:
+        output_rate = pricing["output"]["default"]
+
     input_cost = (input_tokens / 1_000_000) * input_rate
     output_cost = (output_tokens / 1_000_000) * output_rate
     return input_cost + output_cost

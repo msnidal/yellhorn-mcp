@@ -2,7 +2,7 @@
 
 import pytest
 
-from yellhorn_mcp.llm_manager import UsageMetadata
+from yellhorn_mcp.llm.usage import UsageMetadata
 from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
 
 
@@ -60,6 +60,49 @@ def test_calculate_cost_gemini_models():
     # = 0.01 + 0.02 = 0.03
     assert cost is not None
     assert round(cost, 6) == 0.03
+
+
+def test_calculate_cost_gpt5_models():
+    """Test calculate_cost with GPT-5 models."""
+    # gpt-5 default pricing
+    cost = calculate_cost("gpt-5", 100_000, 50_000)
+    # Expected: (100_000 / 1M) * 3.00 + (50_000 / 1M) * 12.00
+    # = 0.3 + 0.6 = 0.9
+    assert abs(cost - 0.9) < 0.0001
+
+    # gpt-5 with reasoning effort (any level uses reasoning pricing)
+    cost = calculate_cost("gpt-5", 100_000, 50_000, reasoning_effort="high")
+    # Expected: (100_000 / 1M) * 15.00 + (50_000 / 1M) * 60.00
+    # = 1.5 + 3.0 = 4.5
+    assert abs(cost - 4.5) < 0.0001
+
+    # gpt-5 with low reasoning effort (still uses reasoning pricing)
+    cost = calculate_cost("gpt-5", 100_000, 50_000, reasoning_effort="low")
+    # Expected: same as high - any effort level uses reasoning pricing
+    assert abs(cost - 4.5) < 0.0001
+
+    # gpt-5-mini default pricing
+    cost = calculate_cost("gpt-5-mini", 100_000, 50_000)
+    # Expected: (100_000 / 1M) * 0.50 + (50_000 / 1M) * 2.00
+    # = 0.05 + 0.1 = 0.15
+    assert abs(cost - 0.15) < 0.0001
+
+    # gpt-5-mini with reasoning effort
+    cost = calculate_cost("gpt-5-mini", 100_000, 50_000, reasoning_effort="medium")
+    # Expected: (100_000 / 1M) * 2.50 + (50_000 / 1M) * 10.00
+    # = 0.25 + 0.5 = 0.75
+    assert abs(cost - 0.75) < 0.0001
+
+    # gpt-5-nano (doesn't support reasoning mode)
+    cost = calculate_cost("gpt-5-nano", 100_000, 50_000)
+    # Expected: (100_000 / 1M) * 0.10 + (50_000 / 1M) * 0.40
+    # = 0.01 + 0.02 = 0.03
+    assert abs(cost - 0.03) < 0.0001
+
+    # gpt-5-nano ignores reasoning effort (not supported)
+    cost = calculate_cost("gpt-5-nano", 100_000, 50_000, reasoning_effort="high")
+    # Should still use default pricing since nano doesn't have reasoning pricing
+    assert abs(cost - 0.03) < 0.0001
 
 
 def test_calculate_cost_deep_research_models():

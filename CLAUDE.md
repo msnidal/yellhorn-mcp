@@ -45,10 +45,10 @@ When working with LLM calls, always use the unified `LLMManager`:
 ```python
 # Good - using LLM Manager
 llm_manager = LLMManager(openai_client=openai_client, gemini_client=gemini_client)
-response = await llm_manager.call_llm(prompt, model, temperature=0.7)
+response = await llm_manager.call_llm(prompt=prompt, model=model, temperature=0.7)
 
 # Good - with usage tracking
-result = await llm_manager.call_llm_with_usage(prompt, model)
+result = await llm_manager.call_llm_with_usage(prompt=prompt, model=model)
 content = result["content"]
 usage = result["usage_metadata"]
 
@@ -61,7 +61,7 @@ response = await openai_client.chat.completions.create(...)
 Use the built-in retry decorator for external API calls:
 
 ```python
-from yellhorn_mcp.llm_manager import api_retry
+from yellhorn_mcp.llm.retry import api_retry
 
 @api_retry
 async def my_api_call():

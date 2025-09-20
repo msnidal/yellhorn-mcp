@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from yellhorn_mcp.llm_manager import LLMManager
+from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.processors.context_processor import process_context_curation_async
 from yellhorn_mcp.utils.git_utils import YellhornMCPError
 

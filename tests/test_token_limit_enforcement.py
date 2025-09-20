@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from yellhorn_mcp.formatters.context_fetcher import apply_token_limit, get_codebase_context
-from yellhorn_mcp.token_counter import TokenCounter
+from yellhorn_mcp.utils.token_utils import TokenCounter
 
 
 class TestTokenLimitEnforcement:

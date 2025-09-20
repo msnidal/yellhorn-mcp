@@ -42,8 +42,10 @@ The server requires the following environment variables:
 - `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro"). Available options:
   - **Gemini models**: "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"
   - **OpenAI models**: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "gpt-4.1"
+  - **GPT-5 models**: "gpt-5", "gpt-5-mini", "gpt-5-nano" (support reasoning mode for gpt-5 and gpt-5-mini)
   - **Deep Research models**: "o3-deep-research", "o4-mini-deep-research"
-  - Note: Deep Research models automatically enable `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
+  - Note: Deep Research models (including GPT-5) automatically enable `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
+- `YELLHORN_MCP_REASONING_EFFORT` (optional): Set reasoning effort level for GPT-5 models. Options: "low", "medium", "high". This provides enhanced reasoning capabilities at higher cost for supported models (gpt-5, gpt-5-mini). The effort level determines the amount of compute used for reasoning, with higher levels providing more thorough reasoning at increased cost. When set, the server propagates the effort into all generation calls and cost metrics incorporate the corresponding reasoning rates.
 - `YELLHORN_MCP_SEARCH` (optional): Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models
