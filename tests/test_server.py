@@ -2127,6 +2127,51 @@ async def test_app_lifespan_openai_model():
 
 
 @pytest.mark.asyncio
+async def test_app_lifespan_grok_model(caplog):
+    """Test app_lifespan initializes Grok models with xAI credentials."""
+    from mcp.server.fastmcp import FastMCP
+
+    from yellhorn_mcp.server import app_lifespan
+
+    mock_server = MagicMock(spec=FastMCP)
+
+    caplog.set_level("INFO")
+
+    with (
+        patch("os.getenv") as mock_getenv,
+        patch("pathlib.Path.resolve") as mock_resolve,
+        patch("yellhorn_mcp.server.is_git_repository", return_value=True),
+        patch("httpx.AsyncClient") as mock_httpx,
+        patch("yellhorn_mcp.server.AsyncOpenAI") as mock_openai_client,
+    ):
+
+        def getenv_side_effect(key, default=None):
+            env_vars = {
+                "REPO_PATH": "/test/repo",
+                "YELLHORN_MCP_MODEL": "grok-4",
+                "XAI_API_KEY": "test-xai-key",
+                "XAI_API_BASE_URL": "https://mock.x.ai/v1",
+            }
+            return env_vars.get(key, default)
+
+        mock_getenv.side_effect = getenv_side_effect
+        mock_resolve.return_value = Path("/test/repo")
+
+        async with app_lifespan(mock_server) as lifespan_context:
+            assert lifespan_context["model"] == "grok-4"
+            assert lifespan_context["use_search_grounding"] is False
+            assert lifespan_context["gemini_client"] is None
+            assert lifespan_context["openai_client"] is not None
+
+        mock_openai_client.assert_called_once_with(
+            api_key="test-xai-key",
+            http_client=mock_httpx.return_value,
+            base_url="https://mock.x.ai/v1",
+        )
+        assert any("Initializing Grok client" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_app_lifespan_missing_gemini_api_key():
     """Test app_lifespan raises error when Gemini API key is missing."""
     from mcp.server.fastmcp import FastMCP

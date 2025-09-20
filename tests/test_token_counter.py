@@ -128,6 +128,24 @@ class TestTokenCounter:
         assert counter.get_model_limit("gpt-5-mini") == 1_000_000
         assert counter.get_model_limit("gpt-5-nano") == 500_000
 
+    def test_grok_model_limits(self):
+        """Test Grok model token limits."""
+        counter = TokenCounter()
+
+        assert counter.get_model_limit("grok-4") == 256_000
+        assert counter.get_model_limit("grok-4-fast") == 2_000_000
+
+    def test_grok_model_encodings(self):
+        """Test Grok models use OpenAI-compatible encodings."""
+        counter = TokenCounter()
+
+        counter.count_tokens("Test text", "grok-4")
+        assert "o200k_base" in counter._encoding_cache
+
+        counter._encoding_cache.clear()
+        counter.count_tokens("Test text", "grok-4-fast")
+        assert "o200k_base" in counter._encoding_cache
+
     def test_gpt5_model_encodings(self):
         """Test GPT-5 models use correct encoding."""
         counter = TokenCounter()

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with the Gemini 2.5 Pro and OpenAI API for software development tasks. Version 0.7.0 introduces major improvements including unified LLM management, automatic chunking, and robust retry logic.
+Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to interact with Gemini 2.5 Pro, OpenAI, and xAI Grok APIs for software development tasks. Version 0.7.0 introduces major improvements including unified LLM management, automatic chunking, and robust retry logic.
 
 ### What's New in v0.7.0
 
@@ -38,17 +38,20 @@ The server requires the following environment variables:
 
 - `GEMINI_API_KEY` (required for Gemini models): Your Gemini API key
 - `OPENAI_API_KEY` (required for OpenAI models): Your OpenAI API key
+- `XAI_API_KEY` (required for Grok models): Your xAI API key
 - `REPO_PATH` (optional): Path to your Git repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL` (optional): Model to use (defaults to "gemini-2.5-pro"). Available options:
   - **Gemini models**: "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"
   - **OpenAI models**: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "gpt-4.1"
   - **GPT-5 models**: "gpt-5", "gpt-5-mini", "gpt-5-nano" (support reasoning mode for gpt-5 and gpt-5-mini)
+  - **xAI Grok models**: "grok-4" (256K context window) and "grok-4-fast" (2M context window)
   - **Deep Research models**: "o3-deep-research", "o4-mini-deep-research"
   - Note: Deep Research models (including GPT-5) automatically enable `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
 - `YELLHORN_MCP_REASONING_EFFORT` (optional): Set reasoning effort level for GPT-5 models. Options: "low", "medium", "high". This provides enhanced reasoning capabilities at higher cost for supported models (gpt-5, gpt-5-mini). The effort level determines the amount of compute used for reasoning, with higher levels providing more thorough reasoning at increased cost. When set, the server propagates the effort into all generation calls and cost metrics incorporate the corresponding reasoning rates.
 - `YELLHORN_MCP_SEARCH` (optional): Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models
+- `XAI_API_BASE_URL` (optional): Override the default xAI endpoint (`https://api.x.ai/v1`) if needed
 
 ### File Filtering with .yellhorncontext and .yellhornignore
 
@@ -162,6 +165,11 @@ export YELLHORN_MCP_MODEL=gemini-2.5-pro
 export OPENAI_API_KEY=your_openai_api_key_here
 export REPO_PATH=/path/to/your/repo
 export YELLHORN_MCP_MODEL=gpt-4o
+
+# OR for xAI Grok models
+export XAI_API_KEY=your_xai_api_key_here
+export REPO_PATH=/path/to/your/repo
+export YELLHORN_MCP_MODEL=grok-4
 ```
 
 ### VSCode/Cursor Setup
@@ -192,6 +200,8 @@ To configure Yellhorn MCP in VSCode or Cursor, create a `.vscode/mcp.json` file 
 }
 ```
 
+If you plan to use Grok models in this setup, add `"XAI_API_KEY": "${input:xai-api-key}"` (and optionally an input prompt) to the `env` map so the CLI can authenticate with xAI.
+
 ### Claude Code Setup
 
 To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json` file in your project with the following content:
@@ -210,6 +220,8 @@ To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json
   }
 }
 ```
+
+When targeting Grok models via Claude Code, include `"XAI_API_KEY": "your_xai_api_key"` in the `env` section (and optionally `"XAI_API_BASE_URL"`) to route requests through the xAI endpoint.
 
 ## Getting Started
 

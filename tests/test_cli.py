@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from yellhorn_mcp.cli import main
 
 
@@ -129,6 +131,33 @@ def test_main_missing_openai_api_key(mock_mcp_run, mock_getenv, mock_exit, caplo
     mock_mcp_run.assert_not_called()
 
 
+@patch("sys.argv", ["yellhorn-mcp", "--model", "grok-4"])
+@patch("sys.exit")
+@patch("os.getenv")
+@patch("yellhorn_mcp.server.mcp.run")
+def test_main_missing_xai_api_key(mock_mcp_run, mock_getenv, mock_exit, caplog):
+    """Test execution with missing xAI API key when using Grok model."""
+    mock_exit.side_effect = SystemExit
+
+    def getenv_side_effect(key, default=None):
+        env_vars = {
+            "REPO_PATH": "/mock/repo",
+            "GEMINI_API_KEY": "mock-gemini-key",
+            "YELLHORN_MCP_REASONING": "full",
+        }
+        return env_vars.get(key, default)
+
+    mock_getenv.side_effect = getenv_side_effect
+
+    with pytest.raises(SystemExit):
+        main()
+
+    error_msg = "XAI_API_KEY environment variable is not set"
+    assert any(error_msg in record.message for record in caplog.records)
+    mock_exit.assert_any_call(1)
+    mock_mcp_run.assert_not_called()
+
+
 @patch("sys.argv", ["yellhorn-mcp"])
 @patch("sys.exit")
 @patch("os.getenv")
@@ -163,6 +192,24 @@ def test_main_invalid_repo_path(mock_mcp_run, mock_exists, mock_getenv, mock_exi
     mock_exit.assert_any_call(1)
 
     # Ensure mcp.run was not called
+    mock_mcp_run.assert_not_called()
+
+
+@patch("yellhorn_mcp.server.mcp.run")
+def test_help_includes_grok_models(mock_mcp_run, capsys):
+    """Ensure CLI help text lists Grok models."""
+    test_argv = sys.argv
+    sys.argv = ["yellhorn-mcp", "--help"]
+
+    try:
+        with pytest.raises(SystemExit):
+            main()
+    finally:
+        sys.argv = test_argv
+
+    captured = capsys.readouterr()
+    assert "grok-4" in captured.out
+    assert "grok-4-fast" in captured.out
     mock_mcp_run.assert_not_called()
 
 

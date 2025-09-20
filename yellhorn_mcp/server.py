@@ -77,11 +77,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     # Get configuration from environment variables
     repo_path = os.getenv("REPO_PATH", ".")
     model = os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro")
+    is_grok_model = model.startswith("grok-")
     is_openai_model = model.startswith("gpt-") or model.startswith("o")
+    is_openai_compatible_model = is_openai_model or is_grok_model
 
     # Handle search grounding configuration (default to enabled for Gemini models only)
     use_search_grounding = False
-    if not is_openai_model:  # Only enable search grounding for Gemini models
+    if not is_openai_compatible_model:  # Only enable search grounding for Gemini models
         use_search_grounding = os.getenv("YELLHORN_MCP_SEARCH", "on").lower() != "off"
 
     reasoning_env = os.getenv("YELLHORN_MCP_REASONING_EFFORT")
@@ -103,23 +105,37 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     llm_manager = None
 
     # For Gemini models, require Gemini API key
-    if not is_openai_model:
+    if not is_openai_compatible_model:
         gemini_api_key = os.getenv("GEMINI_API_KEY")
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY is required for Gemini models")
         # Configure Gemini API
         gemini_client = genai.Client(api_key=gemini_api_key)
-    # For OpenAI models, require OpenAI API key
+    # For OpenAI-compatible models, require the appropriate API key
     else:
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required for OpenAI models")
         # Import here to avoid loading the module if not needed
         import httpx
 
-        # Configure OpenAI API with a custom httpx client to avoid proxy issues
         http_client = httpx.AsyncClient()
-        openai_client = AsyncOpenAI(api_key=openai_api_key, http_client=http_client)
+
+        if is_grok_model:
+            xai_api_key = os.getenv("XAI_API_KEY")
+            if not xai_api_key:
+                raise ValueError("XAI_API_KEY is required for Grok models")
+
+            xai_base_url = os.getenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+            openai_client = AsyncOpenAI(
+                api_key=xai_api_key,
+                http_client=http_client,
+                base_url=xai_base_url,
+            )
+            logging.info("Initializing Grok client against %s", xai_base_url)
+        else:
+            openai_api_key = os.getenv("OPENAI_API_KEY")
+            if not openai_api_key:
+                raise ValueError("OPENAI_API_KEY is required for OpenAI models")
+
+            openai_client = AsyncOpenAI(api_key=openai_api_key, http_client=http_client)
 
     # Initialize LLM Manager with available clients
     if gemini_client or openai_client:

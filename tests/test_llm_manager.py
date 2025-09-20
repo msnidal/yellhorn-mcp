@@ -78,6 +78,8 @@ class TestLLMManager:
         assert manager._is_openai_model("gpt-5-nano") is True
         assert manager._is_openai_model("o4-mini") is True
         assert manager._is_openai_model("o3") is True
+        assert manager._is_openai_model("grok-4") is True
+        assert manager._is_openai_model("grok-4-fast") is True
         assert manager._is_openai_model("gemini-2.5-pro-preview-05-06") is False
         assert manager._is_openai_model("unknown-model") is False
 

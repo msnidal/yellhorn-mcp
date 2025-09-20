@@ -30,7 +30,7 @@ A Model Context Protocol (MCP) server that provides functionality to create deta
 - **Automatic Chunking**: Handles large codebases that exceed model context limits by intelligently splitting prompts
 - **Rate Limit Handling**: Robust retry logic with exponential backoff for rate limits and transient failures
 - **Cost Tracking**: Real-time cost estimation and usage tracking for all API calls
-- **Multi-Model Support**: Unified interface supporting OpenAI (GPT-4o, GPT-5, o3, o4-mini) and Gemini (2.5-pro, 2.5-flash) models with reasoning mode support for GPT-5
+- **Multi-Model Support**: Unified interface supporting OpenAI (GPT-4o, GPT-5, o3, o4-mini), xAI Grok (Grok-4, Grok-4 Fast), and Gemini (2.5-pro, 2.5-flash) models with reasoning mode support for GPT-5
 
 ## Installation
 
@@ -50,13 +50,16 @@ The server requires the following environment variables:
 
 - `GEMINI_API_KEY`: Your Gemini API key (required for Gemini models)
 - `OPENAI_API_KEY`: Your OpenAI API key (required for OpenAI models)
+- `XAI_API_KEY`: Your xAI API key (required for Grok models)
 - `REPO_PATH`: Path to your repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL`: Model to use (defaults to "gemini-2.5-pro"). Available options:
   - **Gemini models**: "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"
   - **OpenAI models**: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "gpt-4.1"
   - **GPT-5 models**: "gpt-5", "gpt-5-mini", "gpt-5-nano" (support reasoning mode for gpt-5 and gpt-5-mini)
+  - **xAI Grok models**: "grok-4" (256K context) and "grok-4-fast" (2M context)
   - **Deep Research models**: "o3-deep-research", "o4-mini-deep-research"
   - Note: Deep Research models (including GPT-5) automatically enable `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
+- `XAI_API_BASE_URL`: Optional override for the xAI API endpoint (defaults to `https://api.x.ai/v1`)
 - `YELLHORN_MCP_REASONING_EFFORT`: Set reasoning effort level for GPT-5 models. Options: "low", "medium", "high". This provides enhanced reasoning capabilities at higher cost for supported models (gpt-5, gpt-5-mini). The effort level determines the amount of compute used for reasoning, with higher levels providing more thorough reasoning at increased cost. The server now forwards this value to every GPT-5 request and cost metrics automatically include the appropriate reasoning premium.
 - `YELLHORN_MCP_SEARCH`: Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models

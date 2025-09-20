@@ -131,7 +131,7 @@ class LLMManager:
         )
 
     def _is_openai_model(self, model: str) -> bool:
-        return any(model.startswith(prefix) for prefix in ("gpt-", "o3", "o4-"))
+        return any(model.startswith(prefix) for prefix in ("gpt-", "o3", "o4-", "grok-"))
 
     def _is_gemini_model(self, model: str) -> bool:
         return model.startswith("gemini-") or model.startswith("mock-")

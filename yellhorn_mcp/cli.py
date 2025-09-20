@@ -43,7 +43,7 @@ def main():
         default=os.getenv("YELLHORN_MCP_MODEL", "gemini-2.5-pro"),
         help="Model to use (e.g., gemini-2.5-pro, gemini-2.5-flash, "
         "gpt-4o, gpt-4o-mini, gpt-5, gpt-5-mini, gpt-5-nano, "
-        "o4-mini, o3, o3-deep-research, o4-mini-deep-research). "
+        "grok-4, grok-4-fast, o4-mini, o3, o3-deep-research, o4-mini-deep-research). "
         "Default: gemini-2.5-pro or YELLHORN_MCP_MODEL env var.",
     )
 
@@ -95,10 +95,12 @@ def main():
 
     # Validate API keys based on model
     model = args.model
+    is_grok_model = model.startswith("grok-")
     is_openai_model = model.startswith("gpt-") or model.startswith("o")
+    is_openai_compatible_model = is_openai_model or is_grok_model
 
     # For Gemini models
-    if not is_openai_model:
+    if not is_openai_compatible_model:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             logging.error("GEMINI_API_KEY environment variable is not set")
@@ -106,15 +108,24 @@ def main():
                 "Please set the GEMINI_API_KEY environment variable with your Gemini API key"
             )
             sys.exit(1)
-    # For OpenAI models
+    # For OpenAI-compatible models
     else:
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            logging.error("OPENAI_API_KEY environment variable is not set")
-            logging.error(
-                "Please set the OPENAI_API_KEY environment variable with your OpenAI API key"
-            )
-            sys.exit(1)
+        if is_grok_model:
+            api_key = os.getenv("XAI_API_KEY")
+            if not api_key:
+                logging.error("XAI_API_KEY environment variable is not set")
+                logging.error(
+                    "Please set the XAI_API_KEY environment variable with your xAI API key"
+                )
+                sys.exit(1)
+        else:
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                logging.error("OPENAI_API_KEY environment variable is not set")
+                logging.error(
+                    "Please set the OPENAI_API_KEY environment variable with your OpenAI API key"
+                )
+                sys.exit(1)
 
     # Set environment variables for the server
     os.environ["REPO_PATH"] = args.repo_path
@@ -145,8 +156,7 @@ def main():
     logging.info(f"Using model: {args.model}")
 
     # Show search grounding status if using Gemini model
-    is_openai_model = args.model.startswith("gpt-") or args.model.startswith("o")
-    if not is_openai_model:
+    if not is_openai_compatible_model:
         search_status = "disabled" if args.no_search_grounding else "enabled"
         logging.info(f"Google Search Grounding: {search_status}")
 
