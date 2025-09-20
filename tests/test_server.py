@@ -776,7 +776,11 @@ async def test_process_workplan_async(mock_request_context, mock_genai_client):
         usage = UsageMetadata(
             {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
         )
-        return {"content": "Mock workplan content", "usage_metadata": usage}
+        return {
+            "content": "Mock workplan content",
+            "usage_metadata": usage,
+            "reasoning_effort": None,
+        }
 
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
@@ -907,7 +911,11 @@ async def test_process_workplan_async_empty_response(mock_request_context, mock_
 
     # Mock call_llm_with_citations to return empty content
     async def mock_call_empty(**kwargs):
-        return {"content": "", "usage_metadata": UsageMetadata()}  # Empty content
+        return {
+            "content": "",
+            "usage_metadata": UsageMetadata(),
+            "reasoning_effort": None,
+        }  # Empty content
 
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_empty)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_empty)
@@ -1091,7 +1099,11 @@ async def test_judge_workplan(mock_request_context, mock_genai_client):
         usage = UsageMetadata(
             {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
         )
-        return {"content": "Mock judgement content", "usage_metadata": usage}
+        return {
+            "content": "Mock judgement content",
+            "usage_metadata": usage,
+            "reasoning_effort": None,
+        }
 
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
@@ -1179,7 +1191,11 @@ async def test_judge_workplan_with_different_issue(mock_request_context, mock_ge
         usage = UsageMetadata(
             {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
         )
-        return {"content": "Mock judgement content", "usage_metadata": usage}
+        return {
+            "content": "Mock judgement content",
+            "usage_metadata": usage,
+            "reasoning_effort": None,
+        }
 
     mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
     mock_llm_manager.call_llm_with_citations = AsyncMock(side_effect=mock_call_with_citations)
@@ -1426,6 +1442,7 @@ async def test_process_judgement_async_update_subissue(mock_request_context, moc
                                         return {
                                             "content": "## Judgement Summary\nImplementation looks good.",
                                             "usage_metadata": usage,
+                                            "reasoning_effort": None,
                                         }
 
                                     mock_llm_manager.call_llm_with_usage = AsyncMock(
@@ -1621,6 +1638,7 @@ This workplan implements feature X.
                 "content": "## Summary\\nThis workplan implements feature X.\\n\\n## Implementation Steps\\n1. Add new function\\n2. Update tests\\n\\n## Citations\\n1. https://docs.python.org/3/library/json.html\\n2. https://github.com/user/repo/issues/123",
                 "usage_metadata": usage,
                 "grounding_metadata": MagicMock(),
+                "reasoning_effort": None,
             }
 
         mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
@@ -1796,6 +1814,7 @@ async def test_process_workplan_async_search_grounding_enabled(
                 "content": "Generated workplan content with citations",
                 "usage_metadata": usage,
                 "grounding_metadata": MagicMock(),
+                "reasoning_effort": None,
             }
 
         mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)
@@ -1915,6 +1934,7 @@ async def test_process_judgement_async_search_grounding_enabled(
                 "content": "## Judgement Summary\nImplementation looks good.\n\n## Citations\n[1] Example citation",
                 "usage_metadata": usage,
                 "grounding_metadata": MagicMock(),
+                "reasoning_effort": None,
             }
 
         mock_llm_manager.call_llm_with_usage = AsyncMock(side_effect=mock_call_with_citations)

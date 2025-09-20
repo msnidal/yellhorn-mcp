@@ -8,7 +8,7 @@ import asyncio
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 
 from google import genai
 from google.genai.types import GenerateContentConfig, GroundingMetadata
@@ -27,7 +27,8 @@ from yellhorn_mcp.integrations.github_integration import (
     update_issue_with_workplan,
 )
 from yellhorn_mcp.llm import LLMManager
-from yellhorn_mcp.models.metadata_models import CompletionMetadata
+from yellhorn_mcp.llm.base import CitationResult, UsageResult
+from yellhorn_mcp.models.metadata_models import CompletionMetadata, UsageMetadata
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
@@ -137,16 +138,16 @@ async def _generate_and_update_issue(
         # Call LLM through the manager with citation support
         if is_openai_model:
             # OpenAI models don't support citations
-            response_data = await llm_manager.call_llm_with_usage(
+            usage_result: UsageResult = await llm_manager.call_llm_with_usage(
                 prompt=prompt,
                 model=model,
                 temperature=0.0,
                 ctx=ctx,
                 generation_config=generation_config,
             )
-            content_val = response_data["content"]
+            content_val = usage_result["content"]
             workplan_content = content_val if isinstance(content_val, str) else str(content_val)
-            usage_metadata = response_data["usage_metadata"]
+            usage_metadata: UsageMetadata = usage_result["usage_metadata"]
             completion_metadata = CompletionMetadata(
                 model_name=model,
                 status="✅ Workplan generated successfully",
@@ -158,7 +159,7 @@ async def _generate_and_update_issue(
             )
         else:
             # Gemini models - use citation-aware call
-            response_data = await llm_manager.call_llm_with_citations(
+            citation_result: CitationResult = await llm_manager.call_llm_with_citations(
                 prompt=prompt,
                 model=model,
                 temperature=0.0,
@@ -166,24 +167,24 @@ async def _generate_and_update_issue(
                 generation_config=generation_config,
             )
 
-            content_val = response_data["content"]
+            content_val = citation_result.get("content", "")
             workplan_content = content_val if isinstance(content_val, str) else str(content_val)
-            usage_metadata = response_data["usage_metadata"]
+            usage_metadata = citation_result.get("usage_metadata", UsageMetadata())
 
             # Process citations if available
-            if "grounding_metadata" in response_data and response_data["grounding_metadata"]:
+            grounding_metadata = citation_result.get("grounding_metadata")
+            if grounding_metadata is not None:
                 from yellhorn_mcp.utils.search_grounding_utils import add_citations_from_metadata
 
                 workplan_content = add_citations_from_metadata(
-                    workplan_content, response_data["grounding_metadata"]
+                    workplan_content, cast(GroundingMetadata, grounding_metadata)
                 )
 
             # Create completion metadata
-            if "grounding_metadata" in response_data:
-                gmeta2 = response_data["grounding_metadata"]
+            if isinstance(grounding_metadata, GroundingMetadata):
                 sr_used = (
-                    len(gmeta2.grounding_chunks)
-                    if isinstance(gmeta2, GroundingMetadata) and gmeta2.grounding_chunks is not None
+                    len(grounding_metadata.grounding_chunks)
+                    if grounding_metadata.grounding_chunks is not None
                     else None
                 )
             else:

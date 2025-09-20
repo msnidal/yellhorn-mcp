@@ -4,7 +4,8 @@ Coordinates token counting, chunking, provider dispatch, and aggregation.
 """
 
 import logging
-from typing import Dict, List, Optional, Union
+from dataclasses import replace
+from typing import Dict, List, Mapping, Optional, TypedDict, Union
 
 from google import genai
 from google.genai.types import GenerateContentConfig
@@ -14,19 +15,31 @@ from yellhorn_mcp.llm.base import (
     CitationResult,
     GenerateResult,
     LLMClient,
+    LLMRequest,
     LoggerContext,
     ResponseFormat,
     ReasoningEffort,
+    UsageResult,
 )
 from yellhorn_mcp.llm.chunking import ChunkingStrategy
 from yellhorn_mcp.llm.clients import GeminiClient, OpenAIClient
-from yellhorn_mcp.llm.config import LLMManagerConfig
+from yellhorn_mcp.llm.config import AggregationStrategy, ChunkStrategy, LLMManagerConfig
 from yellhorn_mcp.llm.errors import UnsupportedModelError
 from yellhorn_mcp.llm.retry import api_retry, is_retryable_error, log_retry_attempt
 from yellhorn_mcp.llm.usage import UsageMetadata
 from yellhorn_mcp.utils.token_utils import TokenCounter
 
 logger = logging.getLogger(__name__)
+
+
+ConfigValue = int | float | str | bool | None
+ConfigMapping = Mapping[str, ConfigValue]
+class LLMConfigKwargs(TypedDict, total=False):
+    safety_margin_tokens: int | None
+    safety_margin_ratio: float
+    overlap_ratio: float
+    aggregation_strategy: AggregationStrategy
+    chunk_strategy: ChunkStrategy
 
 
 class LLMManager:
@@ -36,7 +49,7 @@ class LLMManager:
         self,
         openai_client: Optional[AsyncOpenAI] = None,
         gemini_client: Optional[genai.Client] = None,
-        config: Optional[Dict[str, object]] = None,
+        config: ConfigMapping | LLMManagerConfig | None = None,
         client: Optional[LLMClient] = None,
     ) -> None:
         # Allow either a pre-built protocol client or raw SDK clients
@@ -50,17 +63,70 @@ class LLMManager:
         self.openai_client = openai_client
         self.gemini_client = gemini_client
 
-        cfg = LLMManagerConfig(**(config or {}))
-        self.token_counter = TokenCounter(config)
+        if isinstance(config, LLMManagerConfig):
+            cfg = config
+            config_dict: Dict[str, ConfigValue] = dict(cfg.model_dump())
+        else:
+            config_dict = dict(config) if isinstance(config, Mapping) else {}
+
+            llm_config_kwargs: LLMConfigKwargs = {}
+            tokens = config_dict.get("safety_margin_tokens")
+            if tokens is None or isinstance(tokens, int):
+                llm_config_kwargs["safety_margin_tokens"] = tokens
+
+            ratio = config_dict.get("safety_margin_ratio")
+            if isinstance(ratio, (int, float)):
+                llm_config_kwargs["safety_margin_ratio"] = float(ratio)
+
+            overlap = config_dict.get("overlap_ratio")
+            if isinstance(overlap, (int, float)):
+                llm_config_kwargs["overlap_ratio"] = float(overlap)
+
+            agg = config_dict.get("aggregation_strategy")
+            if isinstance(agg, AggregationStrategy):
+                llm_config_kwargs["aggregation_strategy"] = agg
+            elif isinstance(agg, str):
+                llm_config_kwargs["aggregation_strategy"] = AggregationStrategy.normalize(agg)
+
+            chunk = config_dict.get("chunk_strategy")
+            if isinstance(chunk, ChunkStrategy):
+                llm_config_kwargs["chunk_strategy"] = chunk
+            elif isinstance(chunk, str):
+                llm_config_kwargs["chunk_strategy"] = ChunkStrategy.normalize(chunk)
+
+            cfg = LLMManagerConfig(**llm_config_kwargs)
+
+        self.token_counter = TokenCounter(config_dict if config_dict else None)
         self.safety_margin = cfg.safety_margin_tokens or 1000
         self.safety_margin_ratio = cfg.safety_margin_ratio
         self.overlap_ratio = cfg.overlap_ratio
-        self.aggregation_strategy = str(cfg.aggregation_strategy)
-        self.chunk_strategy = str(cfg.chunk_strategy)
+        self.aggregation_strategy = cfg.aggregation_strategy
+        self.chunk_strategy = cfg.chunk_strategy
 
         self._last_usage_metadata: Optional[UsageMetadata] = None
-        self._last_reasoning_effort: Optional[str] = None
+        self._last_reasoning_effort: Optional[ReasoningEffort] = None
         self._last_extras: Dict[str, object] | None = None
+
+    @staticmethod
+    def _build_request(
+        *,
+        prompt: str,
+        model: str,
+        temperature: float,
+        system_message: Optional[str],
+        response_format: Optional[ResponseFormat],
+        generation_config: Optional[GenerateContentConfig],
+        reasoning_effort: Optional[ReasoningEffort],
+    ) -> LLMRequest:
+        return LLMRequest(
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+            system_message=system_message,
+            response_format=response_format,
+            generation_config=generation_config,
+            reasoning_effort=reasoning_effort,
+        )
 
     def _is_openai_model(self, model: str) -> bool:
         return any(model.startswith(prefix) for prefix in ("gpt-", "o3", "o4-"))
@@ -92,6 +158,11 @@ class LLMManager:
         reasoning_effort: Optional[ReasoningEffort] = None,
         ctx: Optional[LoggerContext] = None,
     ) -> Union[str, Dict[str, object]]:
+        if response_format is not None and not isinstance(response_format, ResponseFormat):
+            raise TypeError("response_format must be a ResponseFormat enum value")
+        if reasoning_effort is not None and not isinstance(reasoning_effort, ReasoningEffort):
+            raise TypeError("reasoning_effort must be a ReasoningEffort enum value")
+
         # Calculate token budget and whether chunking is needed
         prompt_tokens = self.token_counter.count_tokens(prompt, model)
         system_tokens = self.token_counter.count_tokens(system_message or "", model)
@@ -111,21 +182,7 @@ class LLMManager:
 
         needs_chunking = not self.token_counter.can_fit_in_context(prompt, model, safety_margin_tokens)
 
-        if needs_chunking:
-            available_tokens = model_limit - system_tokens - safety_margin_tokens
-            return await self._chunked_call(
-                prompt=prompt,
-                model=model,
-                temperature=temperature,
-                system_message=system_message,
-                response_format=response_format,
-                generation_config=generation_config,
-                reasoning_effort=reasoning_effort,
-                available_tokens=available_tokens,
-                ctx=ctx,
-            )
-
-        result = await self._single_call(
+        base_request = self._build_request(
             prompt=prompt,
             model=model,
             temperature=temperature,
@@ -133,22 +190,25 @@ class LLMManager:
             response_format=response_format,
             generation_config=generation_config,
             reasoning_effort=reasoning_effort,
-            ctx=ctx,
         )
-        return result
+
+        if needs_chunking:
+            available_tokens = model_limit - system_tokens - safety_margin_tokens
+            return await self._chunked_call(
+                base_request=base_request,
+                available_tokens=available_tokens,
+                ctx=ctx,
+            )
+
+        return await self._single_call(base_request, ctx=ctx)
 
     async def _single_call(
         self,
+        request: LLMRequest,
         *,
-        prompt: str,
-        model: str,
-        temperature: float,
-        system_message: Optional[str],
-        response_format: Optional[ResponseFormat],
-        generation_config: Optional[GenerateContentConfig],
-        reasoning_effort: Optional[ReasoningEffort],
         ctx: Optional[LoggerContext],
     ) -> Union[str, Dict[str, object]]:
+        model = request.model
         if self.client is None:
             # If not configured with a protocol client, pick by model prefix
             if self._is_openai_model(model) and self.openai_client:
@@ -163,25 +223,12 @@ class LLMManager:
                 raise UnsupportedModelError("No suitable LLM client is configured")
 
         # Track reasoning effort for supported models
-        if reasoning_effort and self._is_reasoning_model(model):
-            val = reasoning_effort
-            if val in ("low", "medium", "high"):
-                self._last_reasoning_effort = val  # expose for cost and result reporting
-            else:
-                self._last_reasoning_effort = None
+        if request.reasoning_effort and self._is_reasoning_model(model):
+            self._last_reasoning_effort = request.reasoning_effort
         else:
             self._last_reasoning_effort = None
 
-        gen: GenerateResult = await self.client.generate(
-            prompt=prompt,
-            model=model,
-            temperature=temperature,
-            system_message=system_message,
-            response_format=response_format,
-            generation_config=generation_config,
-            reasoning_effort=reasoning_effort,
-            ctx=ctx,
-        )
+        gen: GenerateResult = await self.client.generate(request, ctx=ctx)
         self._last_usage_metadata = gen.get("usage_metadata", UsageMetadata())
         self._last_extras = gen.get("extras")
         return gen.get("content", "")  # type: ignore[return-value]
@@ -189,16 +236,12 @@ class LLMManager:
     async def _chunked_call(
         self,
         *,
-        prompt: str,
-        model: str,
-        temperature: float,
-        system_message: Optional[str],
-        response_format: Optional[ResponseFormat],
-        generation_config: Optional[GenerateContentConfig],
-        reasoning_effort: Optional[ReasoningEffort],
+        base_request: LLMRequest,
         available_tokens: int,
         ctx: Optional[LoggerContext],
     ) -> Union[str, Dict[str, object]]:
+        prompt = base_request.prompt
+        model = base_request.model
         chunks = self._chunk_prompt(prompt, model, available_tokens)
         if ctx:
             await ctx.log(
@@ -217,16 +260,8 @@ class LLMManager:
                     chunk_prompt = f"[Continuing from previous chunk...]\n\n{chunk_prompt}"
 
             try:
-                result = await self._single_call(
-                    prompt=chunk_prompt,
-                    model=model,
-                    temperature=temperature,
-                    system_message=system_message,
-                    response_format=response_format,
-                    generation_config=generation_config,
-                    reasoning_effort=reasoning_effort,
-                    ctx=ctx,
-                )
+                chunk_request = replace(base_request, prompt=chunk_prompt)
+                result = await self._single_call(chunk_request, ctx=ctx)
                 responses.append(result)
                 # Accumulate usage if we have it
                 if self._last_usage_metadata:
@@ -242,11 +277,11 @@ class LLMManager:
                 raise
 
         # Aggregate
-        return self._aggregate_responses(responses, response_format)
+        return self._aggregate_responses(responses, base_request.response_format)
 
     def _chunk_prompt(self, text: str, model: str, available_tokens: int) -> List[str]:
         safety_margin_tokens = int(self.token_counter.get_model_limit(model) * self.safety_margin_ratio)
-        if self.chunk_strategy == "paragraph" or self.chunk_strategy == "paragraphs":
+        if self.chunk_strategy is ChunkStrategy.PARAGRAPHS:
             return ChunkingStrategy.split_by_paragraphs(
                 text,
                 available_tokens,
@@ -265,9 +300,9 @@ class LLMManager:
         )
 
     def _aggregate_responses(
-        self, responses: List[Union[str, Dict[str, object]]], response_format: Optional[str]
+        self, responses: List[Union[str, Dict[str, object]]], response_format: Optional[ResponseFormat]
     ) -> Union[str, Dict[str, object]]:
-        if response_format == "json":
+        if response_format is ResponseFormat.JSON:
             # Merge dicts conservatively
             result: Dict[str, object] = {}
             for r in responses:
@@ -301,7 +336,7 @@ class LLMManager:
         model: str,
         temperature: float = 0.7,
         system_message: Optional[str] = None,
-        response_format: Optional[str] = None,
+        response_format: Optional[ResponseFormat] = None,
         ctx: Optional[LoggerContext] = None,
         **kwargs,
     ) -> CitationResult:
@@ -337,10 +372,10 @@ class LLMManager:
         model: str,
         temperature: float = 0.7,
         system_message: Optional[str] = None,
-        response_format: Optional[str] = None,
+        response_format: Optional[ResponseFormat] = None,
         ctx: Optional[LoggerContext] = None,
         **kwargs,
-    ) -> Dict[str, object]:
+    ) -> UsageResult:
         self._last_usage_metadata = None
         content = await self.call_llm(
             prompt=prompt,
@@ -351,11 +386,11 @@ class LLMManager:
             ctx=ctx,
             **kwargs,
         )
-        return {
-            "content": content,
-            "usage_metadata": self._last_usage_metadata if self._last_usage_metadata else UsageMetadata(),
-            "reasoning_effort": self._last_reasoning_effort,
-        }
+        return UsageResult(
+            content=content,
+            usage_metadata=self._last_usage_metadata if self._last_usage_metadata else UsageMetadata(),
+            reasoning_effort=self._last_reasoning_effort,
+        )
 
     def get_last_usage_metadata(self) -> Optional[UsageMetadata]:
         return self._last_usage_metadata

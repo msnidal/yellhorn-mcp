@@ -16,6 +16,7 @@ from google.genai.types import GenerateContentResponse
 from yellhorn_mcp.llm.base import (
     GenerateResult,
     LLMClient,
+    LLMRequest,
     LoggerContext,
     ResponseFormat,
     has_text,
@@ -64,21 +65,18 @@ class GeminiClient(LLMClient):
     @api_retry
     async def generate(
         self,
+        request: LLMRequest,
         *,
-        prompt: str,
-        model: str,
-        temperature: float = 0.7,
-        system_message: Optional[str] = None,
-        response_format: Optional[ResponseFormat] = None,
-        generation_config: Optional[GenerateContentConfig] = None,
-        reasoning_effort: Optional[str] = None,
         ctx: Optional[LoggerContext] = None,
     ) -> GenerateResult:
-        full_prompt = f"{system_message}\n\n{prompt}" if system_message else prompt
+        full_prompt = f"{request.system_message}\n\n{request.prompt}" if request.system_message else request.prompt
 
-        response_mime_type: str = "application/json" if response_format == "json" else "text/plain"
+        response_mime_type: str = (
+            "application/json" if request.response_format is ResponseFormat.JSON else "text/plain"
+        )
 
         cfg_tools = None
+        generation_config = request.generation_config
         if isinstance(generation_config, GenerateContentConfig):
             try:
                 cfg_tools = generation_config.tools
@@ -86,19 +84,19 @@ class GeminiClient(LLMClient):
                 cfg_tools = None
 
         config = GenerateContentConfig(
-            temperature=temperature,
+            temperature=request.temperature,
             response_mime_type=response_mime_type,
             tools=cfg_tools,
         )
 
-        api_params = {"model": f"models/{model}", "contents": full_prompt, "config": config}
+        api_params = {"model": f"models/{request.model}", "contents": full_prompt, "config": config}
         response: GenerateContentResponse = await self._client.aio.models.generate_content(**api_params)
 
         content = response.text if has_text(response) else ""
         usage = self._extract_usage(response)
         extras = self._extract_grounding_metadata(response)
 
-        if response_format == "json":
+        if request.response_format is ResponseFormat.JSON:
             json_pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
             json_matches = re.findall(json_pattern, content, re.DOTALL)
             if json_matches:

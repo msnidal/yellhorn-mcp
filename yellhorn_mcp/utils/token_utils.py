@@ -156,12 +156,12 @@ class TokenCounter:
 
         if encoding_name not in self._encoding_cache:
             try:
-                self._encoding_cache[encoding_name] = cast(Encoding, tk.get_encoding(encoding_name))
+                self._encoding_cache[encoding_name] = cast(Encoding, tk.get_encoding(encoding_name))  # type: ignore
             except Exception:
                 # Fallback to default encoding if specified encoding not found
                 default_encoding = self.config.get("default_encoding", "cl100k_base")
                 self._encoding_cache[encoding_name] = cast(
-                    Encoding, tk.get_encoding(default_encoding)
+                    Encoding, tk.get_encoding(default_encoding)  # type: ignore
                 )
 
         return self._encoding_cache[encoding_name]

@@ -6,18 +6,27 @@ with test doubles, while providing clear, typed extraction helpers.
 
 import json
 import logging
-from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Dict, Optional, Sequence, Union
 
-from google.genai.types import GenerateContentConfig
 from openai import AsyncOpenAI
 from openai.types.responses import Response as OpenAIResponse
 from openai.types.responses import ResponseUsage as OpenAIResponseUsage
+from openai.types.responses.response_create_params import ResponseCreateParamsNonStreaming
+from openai.types.responses.response_text_config_param import ResponseTextConfigParam
+from openai.types.responses.tool_param import (
+    CodeInterpreter,
+    CodeInterpreterContainerCodeInterpreterToolAuto,
+    ToolParam,
+)
+from openai.types.responses.web_search_tool_param import WebSearchToolParam
+from openai.types.shared_params.reasoning import Reasoning as OpenAIReasoning
+from openai.types.shared_params.response_format_json_object import ResponseFormatJSONObject
 
 from yellhorn_mcp.llm.base import (
     GenerateResult,
     LLMClient,
+    LLMRequest,
     LoggerContext,
-    ReasoningEffort,
     ResponseFormat,
     has_openai_output_list,
     has_output_text,
@@ -75,41 +84,39 @@ class OpenAIClient(LLMClient):
     @api_retry
     async def generate(
         self,
+        request: LLMRequest,
         *,
-        prompt: str,
-        model: str,
-        temperature: float = 0.7,
-        system_message: Optional[str] = None,
-        response_format: Optional[ResponseFormat] = None,
-        generation_config: Optional[GenerateContentConfig] = None,
-        reasoning_effort: Optional[ReasoningEffort] = None,
         ctx: Optional[LoggerContext] = None,
     ) -> GenerateResult:
         # Drop provider-incompatible params if present
-        params: Dict[str, object] = {
-            "model": model,
-            "input": prompt,
+        params: ResponseCreateParamsNonStreaming = {
+            "model": request.model,
+            "input": request.prompt,
         }
 
-        if _supports_temperature(model):
-            params["temperature"] = temperature
-        if system_message:
-            params["instructions"] = system_message
+        if _supports_temperature(request.model):
+            params["temperature"] = request.temperature
 
-        if reasoning_effort and _is_reasoning_model(model):
-            if reasoning_effort in ("low", "medium", "high"):
-                params["reasoning_effort"] = reasoning_effort
-            else:
-                logger.warning("Invalid reasoning_effort: %s", reasoning_effort)
+        if request.system_message:
+            params["instructions"] = request.system_message
 
-        if _is_deep_research_model(model):
-            params["tools"] = [
-                {"type": "web_search_preview"},
-                {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}},
+        if request.reasoning_effort and _is_reasoning_model(request.model):
+            params["reasoning"] = OpenAIReasoning(effort=request.reasoning_effort.value)
+
+        if _is_deep_research_model(request.model):
+            tools: list[ToolParam] = [
+                WebSearchToolParam(type="web_search_preview"),
+                CodeInterpreter(
+                    type="code_interpreter",
+                    container=CodeInterpreterContainerCodeInterpreterToolAuto(type="auto", file_ids=[]),
+                ),
             ]
+            params["tools"] = tools
 
-        if response_format == "json":
-            params["response_format"] = {"type": "json_object"}
+        if request.response_format is ResponseFormat.JSON:
+            params["text"] = ResponseTextConfigParam(
+                format=ResponseFormatJSONObject(type="json_object")
+            )
 
         response = await self._client.responses.create(**params)
 
@@ -135,10 +142,14 @@ class OpenAIClient(LLMClient):
             content = str(response)
 
         usage_payload = getattr(response, "usage", None)
-        usage = UsageMetadata(usage_payload if usage_payload is not None else response)
-        if response_format == "json":
+        usage = UsageMetadata(usage_payload)
+        if request.response_format is ResponseFormat.JSON:
             try:
-                parsed: Union[dict, list] = json.loads(content)
+                parsed_raw: Any = json.loads(content)
+                if isinstance(parsed_raw, dict):
+                    parsed: Dict[str, object] = dict(parsed_raw)
+                else:
+                    parsed = {"content": parsed_raw}
                 return {"content": parsed, "usage_metadata": usage}
             except Exception:
                 return {"content": {"error": "Failed to parse JSON", "content": content}, "usage_metadata": usage}

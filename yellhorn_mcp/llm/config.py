@@ -1,15 +1,38 @@
 """Configuration model for LLMManager using Pydantic.
 
-Adds typed strategies (Literals) and normalizes synonyms.
+Adds typed strategies (Enums) and normalizes synonyms.
 """
 
-from typing import Literal
+from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 
-ChunkStrategy = Literal["sentences", "paragraph", "paragraphs"]
-AggregationStrategy = Literal["concatenate", "summarize"]
+class ChunkStrategy(str, Enum):
+    SENTENCES = "sentences"
+    PARAGRAPHS = "paragraphs"
+
+    @classmethod
+    def normalize(cls, value: str) -> "ChunkStrategy":
+        normalized = value.strip().lower()
+        if normalized in {"paragraph", "paragraphs"}:
+            return cls.PARAGRAPHS
+        return cls.SENTENCES
+
+
+class AggregationStrategy(str, Enum):
+    CONCATENATE = "concatenate"
+    SUMMARIZE = "summarize"
+
+    @classmethod
+    def normalize(cls, value: str) -> "AggregationStrategy":
+        normalized = value.strip().lower()
+        if normalized in {"summarize", "summary"}:
+            return cls.SUMMARIZE
+        if normalized in {"concatenate", "concat", "join"}:
+            return cls.CONCATENATE
+        return cls.CONCATENATE
 
 
 class LLMManagerConfig(BaseModel):
@@ -21,32 +44,29 @@ class LLMManagerConfig(BaseModel):
     )
     overlap_ratio: float = Field(default=0.1, ge=0.0, le=0.5, description="Chunk overlap ratio.")
     aggregation_strategy: AggregationStrategy = Field(
-        default="concatenate", description="Aggregation strategy for multi-chunk responses."
+        default=AggregationStrategy.CONCATENATE,
+        description="Aggregation strategy for multi-chunk responses.",
     )
     chunk_strategy: ChunkStrategy = Field(
-        default="sentences", description="Chunking algorithm: 'sentences' or 'paragraphs'."
+        default=ChunkStrategy.SENTENCES,
+        description="Chunking algorithm: 'sentences' or 'paragraphs'.",
     )
 
     @field_validator("chunk_strategy", mode="before")
     @classmethod
-    def _normalize_chunk_strategy(cls, v: object) -> ChunkStrategy:
-        if isinstance(v, str):
-            val = v.strip().lower()
-            if val in ("paragraph", "paragraphs"):
-                return "paragraphs"
-            if val == "sentences":
-                return "sentences"
+    def _normalize_chunk_strategy(cls, value: Any) -> ChunkStrategy:
+        if isinstance(value, ChunkStrategy):
+            return value
+        if isinstance(value, str) and value.strip():
+            return ChunkStrategy.normalize(value)
         # fallback to default when invalid
-        return "sentences"
+        return ChunkStrategy.SENTENCES
 
     @field_validator("aggregation_strategy", mode="before")
     @classmethod
-    def _normalize_agg_strategy(cls, v: object) -> AggregationStrategy:
-        if isinstance(v, str):
-            val = v.strip().lower()
-            if val in ("concatenate", "concat", "join"):
-                return "concatenate"
-            if val in ("summarize", "summary"):
-                return "summarize"
-        return "concatenate"
-
+    def _normalize_agg_strategy(cls, value: Any) -> AggregationStrategy:
+        if isinstance(value, AggregationStrategy):
+            return value
+        if isinstance(value, str) and value.strip():
+            return AggregationStrategy.normalize(value)
+        return AggregationStrategy.CONCATENATE

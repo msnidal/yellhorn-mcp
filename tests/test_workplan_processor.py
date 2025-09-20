@@ -346,6 +346,7 @@ class TestGenerateAndUpdateIssue:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "Generated workplan content",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         # Mock context
@@ -550,6 +551,7 @@ class TestGenerateAndUpdateIssue:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()
@@ -613,6 +615,7 @@ class TestGenerateAndUpdateIssue:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "Generated workplan content",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()

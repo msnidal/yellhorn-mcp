@@ -8,8 +8,10 @@ from google.api_core import exceptions as google_exceptions
 from openai import RateLimitError
 from tenacity import RetryCallState
 
+from yellhorn_mcp.llm.base import ReasoningEffort, ResponseFormat
 from yellhorn_mcp.llm.manager import LLMManager
 from yellhorn_mcp.llm.chunking import ChunkingStrategy
+from yellhorn_mcp.llm.config import AggregationStrategy, ChunkStrategy as ChunkStrategySetting
 from yellhorn_mcp.llm.retry import is_retryable_error, log_retry_attempt
 from yellhorn_mcp.models.metadata_models import UsageMetadata
 from yellhorn_mcp.utils.token_utils import TokenCounter
@@ -34,8 +36,8 @@ class TestLLMManager:
         assert manager.gemini_client is None
         assert manager.safety_margin == 1000
         assert manager.overlap_ratio == 0.1
-        assert manager.aggregation_strategy == "concatenate"
-        assert manager.chunk_strategy == "sentences"
+        assert manager.aggregation_strategy is AggregationStrategy.CONCATENATE
+        assert manager.chunk_strategy is ChunkStrategySetting.SENTENCES
         assert isinstance(manager.token_counter, TokenCounter)
 
     def test_init_with_clients(self):
@@ -61,8 +63,8 @@ class TestLLMManager:
 
         assert manager.safety_margin == 2000
         assert manager.overlap_ratio == 0.2
-        assert manager.aggregation_strategy == "summarize"
-        assert manager.chunk_strategy == "paragraphs"
+        assert manager.aggregation_strategy is AggregationStrategy.SUMMARIZE
+        assert manager.chunk_strategy is ChunkStrategySetting.PARAGRAPHS
 
     def test_is_openai_model(self):
         """Test OpenAI model detection."""
@@ -157,15 +159,16 @@ class TestLLMManager:
         manager = LLMManager(openai_client=mock_openai)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort="high"
+            prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort=ReasoningEffort.HIGH
         )
 
         assert result == "High reasoning response"
 
         # Check that reasoning_effort was set to high
         call_args = mock_openai.responses.create.call_args
-        assert call_args[1]["reasoning_effort"] == "high"
-        assert manager._last_reasoning_effort == "high"
+        assert "reasoning" in call_args[1]
+        assert call_args[1]["reasoning"]["effort"] == "high"
+        assert manager._last_reasoning_effort is ReasoningEffort.HIGH
 
     @pytest.mark.asyncio
     async def test_call_llm_gpt5_with_reasoning_low(self):
@@ -185,15 +188,16 @@ class TestLLMManager:
         manager = LLMManager(openai_client=mock_openai)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort="low"
+            prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort=ReasoningEffort.LOW
         )
 
         assert result == "Low reasoning response"
 
         # Check that reasoning_effort was set to low
         call_args = mock_openai.responses.create.call_args
-        assert call_args[1]["reasoning_effort"] == "low"
-        assert manager._last_reasoning_effort == "low"
+        assert "reasoning" in call_args[1]
+        assert call_args[1]["reasoning"]["effort"] == "low"
+        assert manager._last_reasoning_effort is ReasoningEffort.LOW
 
     @pytest.mark.asyncio
     async def test_call_llm_gpt5_mini_with_reasoning_medium(self):
@@ -214,11 +218,14 @@ class TestLLMManager:
 
         # Test with usage result to get reasoning effort
         result = await manager.call_llm_with_usage(
-            prompt="Test prompt", model="gpt-5-mini", temperature=0.7, reasoning_effort="medium"
+            prompt="Test prompt",
+            model="gpt-5-mini",
+            temperature=0.7,
+            reasoning_effort=ReasoningEffort.MEDIUM,
         )
 
         assert result["content"] == "Mini reasoning response"
-        assert result["reasoning_effort"] == "medium"
+        assert result["reasoning_effort"] is ReasoningEffort.MEDIUM
         assert result["usage_metadata"].prompt_tokens == 50
 
     @pytest.mark.asyncio
@@ -242,14 +249,14 @@ class TestLLMManager:
             prompt="Test prompt",
             model="gpt-5-nano",
             temperature=0.7,
-            reasoning_effort="high",  # Should be ignored for nano
+            reasoning_effort=ReasoningEffort.HIGH,  # Should be ignored for nano
         )
 
         assert result == "Nano response"
 
         # Check that reasoning_effort was NOT set (nano doesn't support it)
         call_args = mock_openai.responses.create.call_args
-        assert "reasoning_effort" not in call_args[1]
+        assert "reasoning" not in call_args[1]
         assert manager._last_reasoning_effort is None
 
     @pytest.mark.asyncio
@@ -269,16 +276,13 @@ class TestLLMManager:
 
         manager = LLMManager(openai_client=mock_openai)
 
-        # Test with invalid reasoning effort
-        result = await manager.call_llm(
-            prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort="extreme"
-        )
+        # Test with invalid reasoning effort (non-enum)
+        with pytest.raises(TypeError):
+            await manager.call_llm(
+                prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort="extreme"
+            )
 
-        assert result == "Response"
-
-        # Check that reasoning_effort was NOT set due to invalid value
-        call_args = mock_openai.responses.create.call_args
-        assert "reasoning_effort" not in call_args[1]
+        mock_openai.responses.create.assert_not_called()
         assert manager._last_reasoning_effort is None
 
     @pytest.mark.asyncio
@@ -362,7 +366,7 @@ class TestLLMManager:
         manager = LLMManager(openai_client=mock_openai)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gpt-4o", response_format="json"
+            prompt="Test prompt", model="gpt-4o", response_format=ResponseFormat.JSON
         )
 
         assert result == {"key": "value"}
@@ -441,7 +445,7 @@ class TestLLMManager:
             {"key3": "value3", "list": [1, 2]},
         ]
 
-        result = manager._aggregate_responses(responses, "json")
+        result = manager._aggregate_responses(responses, ResponseFormat.JSON)
 
         assert result["key1"] == "value1"
         assert result["key2"] == "value2"
@@ -455,7 +459,7 @@ class TestLLMManager:
 
         responses = [{"items": [1, 2, 3]}, {"items": [4, 5, 6]}]
 
-        result = manager._aggregate_responses(responses, "json")
+        result = manager._aggregate_responses(responses, ResponseFormat.JSON)
 
         assert result["items"] == [1, 2, 3, 4, 5, 6]
 
@@ -465,7 +469,7 @@ class TestLLMManager:
 
         responses = [{"key": "value1"}, {"key": "value2"}, "Invalid JSON"]
 
-        result = manager._aggregate_responses(responses, "json")
+        result = manager._aggregate_responses(responses, ResponseFormat.JSON)
 
         # Should fallback to chunks format
         assert "chunks" in result
@@ -899,7 +903,7 @@ class TestLLMManager:
         manager = LLMManager(gemini_client=mock_gemini)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gemini-2.5-pro", response_format="json"
+            prompt="Test prompt", model="gemini-2.5-pro", response_format=ResponseFormat.JSON
         )
 
         assert isinstance(result, dict)
@@ -918,7 +922,7 @@ class TestLLMManager:
         manager = LLMManager(gemini_client=mock_gemini)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gemini-2.5-pro", response_format="json"
+            prompt="Test prompt", model="gemini-2.5-pro", response_format=ResponseFormat.JSON
         )
 
         assert isinstance(result, dict)
@@ -949,7 +953,7 @@ class TestLLMManager:
         manager = LLMManager(openai_client=mock_openai)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gpt-4o", response_format="json"
+            prompt="Test prompt", model="gpt-4o", response_format=ResponseFormat.JSON
         )
 
         assert isinstance(result, dict)

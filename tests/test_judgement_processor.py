@@ -173,6 +173,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "## Judgement Summary\nAPPROVED - Implementation looks good",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()
@@ -306,6 +307,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "## Judgement Summary\nAPPROVED",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()
@@ -368,6 +370,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "## Judgement Summary\nAPPROVED",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()
@@ -441,6 +444,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "## Judgement Summary\nAPPROVED",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()
@@ -503,6 +507,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "",  # Empty content
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()
@@ -670,6 +675,7 @@ class TestProcessJudgementAsync:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "## Judgement Summary\nAPPROVED",
             "usage_metadata": mock_usage,
+            "reasoning_effort": None,
         }
 
         mock_ctx = MagicMock()

@@ -5,9 +5,10 @@ can be swapped behind a consistent, type-checked API with minimal runtime
 introspection.
 """
 
+from dataclasses import dataclass
+from enum import Enum
 from typing import (
     Dict,
-    Literal,
     Optional,
     Protocol,
     Sequence,
@@ -43,17 +44,35 @@ class CitationResult(TypedDict, total=False):
     grounding_metadata: object
 
 
+class ResponseFormat(str, Enum):
+    JSON = "json"
+    TEXT = "text"
+
+
+class ReasoningEffort(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+@dataclass(frozen=True, slots=True)
+class LLMRequest:
+    """Provider-agnostic request payload shared across LLM clients."""
+
+    prompt: str
+    model: str
+    temperature: float = 0.7
+    system_message: Optional[str] = None
+    response_format: Optional[ResponseFormat] = None
+    generation_config: Optional[GenerateContentConfig] = None
+    reasoning_effort: Optional[ReasoningEffort] = None
+
+
 class LLMClient(Protocol):
     async def generate(
         self,
+        request: LLMRequest,
         *,
-        prompt: str,
-        model: str,
-        temperature: float = 0.7,
-        system_message: Optional[str] = None,
-        response_format: Optional["ResponseFormat"] = None,
-        generation_config: Optional[GenerateContentConfig] = None,
-        reasoning_effort: Optional["ReasoningEffort"] = None,
         ctx: Optional[LoggerContext] = None,
     ) -> GenerateResult:
         """Generate a completion for the given prompt.
@@ -64,15 +83,15 @@ class LLMClient(Protocol):
         ...
 
 
+class UsageResult(TypedDict):
+    content: Union[str, Dict[str, object]]
+    usage_metadata: UsageMetadata
+    reasoning_effort: Optional[ReasoningEffort]
+
+
 # ----------------------------
 # Response typing + type guards
 # ----------------------------
-
-# Format specifier used across orchestrator and clients
-ResponseFormat = Literal["json", "text"]
-
-# Reasoning effort (OpenAI GPT-5 family)
-ReasoningEffort = Literal["low", "medium", "high"]
 
 
 # OpenAI Responses API shapes (structural)
