@@ -57,7 +57,7 @@ The server requires the following environment variables:
   - **GPT-5 models**: "gpt-5", "gpt-5-mini", "gpt-5-nano" (support reasoning mode for gpt-5 and gpt-5-mini)
   - **Deep Research models**: "o3-deep-research", "o4-mini-deep-research"
   - Note: Deep Research models (including GPT-5) automatically enable `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
-- `YELLHORN_MCP_REASONING_EFFORT`: Set reasoning effort level for GPT-5 models. Options: "low", "medium", "high". This provides enhanced reasoning capabilities at higher cost for supported models (gpt-5, gpt-5-mini). The effort level determines the amount of compute used for reasoning, with higher levels providing more thorough reasoning at increased cost
+- `YELLHORN_MCP_REASONING_EFFORT`: Set reasoning effort level for GPT-5 models. Options: "low", "medium", "high". This provides enhanced reasoning capabilities at higher cost for supported models (gpt-5, gpt-5-mini). The effort level determines the amount of compute used for reasoning, with higher levels providing more thorough reasoning at increased cost. The server now forwards this value to every GPT-5 request and cost metrics automatically include the appropriate reasoning premium.
 - `YELLHORN_MCP_SEARCH`: Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models

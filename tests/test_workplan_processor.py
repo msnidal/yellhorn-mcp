@@ -13,6 +13,7 @@ from yellhorn_mcp.formatters import (
     get_codebase_snapshot,
 )
 from yellhorn_mcp.llm import LLMManager
+from yellhorn_mcp.llm.base import ReasoningEffort
 from yellhorn_mcp.models.metadata_models import UsageMetadata
 from yellhorn_mcp.processors.workplan_processor import (
     _generate_and_update_issue,
@@ -346,7 +347,7 @@ class TestGenerateAndUpdateIssue:
         mock_llm_manager.call_llm_with_usage.return_value = {
             "content": "Generated workplan content",
             "usage_metadata": mock_usage,
-            "reasoning_effort": None,
+            "reasoning_effort": ReasoningEffort.HIGH,
         }
 
         # Mock context
@@ -373,28 +374,37 @@ class TestGenerateAndUpdateIssue:
 
         mock_github_command = AsyncMock(side_effect=capture_github_command)
 
-        await _generate_and_update_issue(
-            repo_path=repo_path,
-            llm_manager=mock_llm_manager,
-            model="gpt-4o",
-            prompt="Test prompt",
-            issue_number="123",
-            title="Test Title",
-            content_prefix="# Test Title\n\n",
-            disable_search_grounding=False,
-            debug=False,
-            codebase_reasoning="full",
-            _meta={
-                "start_time": __import__("datetime").datetime.now(
-                    __import__("datetime").timezone.utc
-                )
-            },
-            ctx=mock_ctx,
-            github_command_func=mock_github_command,
-        )
+        with patch(
+            "yellhorn_mcp.processors.workplan_processor.calculate_cost", return_value=0.123
+        ) as mock_cost:
+            await _generate_and_update_issue(
+                repo_path=repo_path,
+                llm_manager=mock_llm_manager,
+                model="gpt-5",
+                prompt="Test prompt",
+                issue_number="123",
+                title="Test Title",
+                content_prefix="# Test Title\n\n",
+                disable_search_grounding=False,
+                debug=False,
+                codebase_reasoning="full",
+                _meta={
+                    "start_time": __import__("datetime").datetime.now(
+                        __import__("datetime").timezone.utc
+                    )
+                },
+                ctx=mock_ctx,
+                github_command_func=mock_github_command,
+                reasoning_effort=ReasoningEffort.HIGH,
+            )
+
+        mock_cost.assert_called_once()
+        assert mock_cost.call_args.args[3] == ReasoningEffort.HIGH.value
 
         # Verify LLM was called
         mock_llm_manager.call_llm_with_usage.assert_called_once()
+        call_kwargs = mock_llm_manager.call_llm_with_usage.call_args.kwargs
+        assert call_kwargs["reasoning_effort"] is ReasoningEffort.HIGH
 
         # Verify GitHub commands were called (issue edit and completion comment)
         assert mock_github_command.call_count == 2

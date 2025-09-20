@@ -27,7 +27,7 @@ from yellhorn_mcp.integrations.github_integration import (
     update_issue_with_workplan,
 )
 from yellhorn_mcp.llm import LLMManager
-from yellhorn_mcp.llm.base import CitationResult, UsageResult
+from yellhorn_mcp.llm.base import CitationResult, ReasoningEffort, UsageResult
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, UsageMetadata
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
@@ -53,6 +53,7 @@ async def _generate_and_update_issue(
     ctx: Context | None,
     github_command_func: Callable | None = None,
     git_command_func: Callable | None = None,
+    reasoning_effort: ReasoningEffort | None = None,
 ) -> None:
     """Generate content with AI and update the GitHub issue.
 
@@ -71,6 +72,7 @@ async def _generate_and_update_issue(
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
         git_command_func: Optional Git command function (for mocking).
+        reasoning_effort: Optional reasoning effort to apply for supported models.
     """
     # Use LLM Manager for unified LLM calls
     if not llm_manager:
@@ -136,18 +138,30 @@ async def _generate_and_update_issue(
 
     try:
         # Call LLM through the manager with citation support
+        effective_reasoning: ReasoningEffort | None = None
         if is_openai_model:
             # OpenAI models don't support citations
-            usage_result: UsageResult = await llm_manager.call_llm_with_usage(
-                prompt=prompt,
-                model=model,
-                temperature=0.0,
-                ctx=ctx,
-                generation_config=generation_config,
-            )
+            if reasoning_effort is not None:
+                usage_result: UsageResult = await llm_manager.call_llm_with_usage(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                    reasoning_effort=reasoning_effort,
+                )
+            else:
+                usage_result = await llm_manager.call_llm_with_usage(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                )
             content_val = usage_result["content"]
             workplan_content = content_val if isinstance(content_val, str) else str(content_val)
             usage_metadata: UsageMetadata = usage_result["usage_metadata"]
+            effective_reasoning = usage_result.get("reasoning_effort")
             completion_metadata = CompletionMetadata(
                 model_name=model,
                 status="✅ Workplan generated successfully",
@@ -159,13 +173,23 @@ async def _generate_and_update_issue(
             )
         else:
             # Gemini models - use citation-aware call
-            citation_result: CitationResult = await llm_manager.call_llm_with_citations(
-                prompt=prompt,
-                model=model,
-                temperature=0.0,
-                ctx=ctx,
-                generation_config=generation_config,
-            )
+            if reasoning_effort is not None:
+                citation_result: CitationResult = await llm_manager.call_llm_with_citations(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                    reasoning_effort=reasoning_effort,
+                )
+            else:
+                citation_result = await llm_manager.call_llm_with_citations(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                )
 
             content_val = citation_result.get("content", "")
             workplan_content = content_val if isinstance(content_val, str) else str(content_val)
@@ -189,6 +213,7 @@ async def _generate_and_update_issue(
                 )
             else:
                 sr_used = None
+            effective_reasoning = None
 
             completion_metadata = CompletionMetadata(
                 model_name=model,
@@ -240,15 +265,18 @@ async def _generate_and_update_issue(
         completion_metadata.generation_time_seconds = generation_time
         completion_metadata.timestamp = datetime.now(timezone.utc)
 
-    # Calculate cost if we have token counts
-    if (
-        completion_metadata
-        and completion_metadata.input_tokens
-        and completion_metadata.output_tokens
-    ):
-        completion_metadata.estimated_cost = calculate_cost(
-            model, completion_metadata.input_tokens, completion_metadata.output_tokens
-        )
+        # Calculate cost if we have token counts
+        if (
+            completion_metadata
+            and completion_metadata.input_tokens
+            and completion_metadata.output_tokens
+        ):
+            completion_metadata.estimated_cost = calculate_cost(
+                model,
+                int(completion_metadata.input_tokens or 0),
+                int(completion_metadata.output_tokens or 0),
+                effective_reasoning.value if effective_reasoning else None,
+            )
 
     # Add context size
     if completion_metadata:
@@ -294,6 +322,7 @@ async def process_workplan_async(
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
     git_command_func: Callable | None = None,
+    reasoning_effort: ReasoningEffort | None = None,
 ) -> None:
     """Generate a workplan asynchronously and update the GitHub issue.
 
@@ -311,6 +340,7 @@ async def process_workplan_async(
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
         git_command_func: Optional Git command function (for mocking).
+        reasoning_effort: Optional reasoning effort to apply for supported models.
     """
     try:
         # Create a simple logging function that uses ctx if available
@@ -493,8 +523,9 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             codebase_reasoning,
             _meta,
             ctx,
-            github_command_func,
-            git_command_func,
+            github_command_func=github_command_func,
+            git_command_func=git_command_func,
+            reasoning_effort=reasoning_effort,
         )
 
     except Exception as e:
@@ -530,6 +561,7 @@ async def process_revision_async(
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
     git_command_func: Callable | None = None,
+    reasoning_effort: ReasoningEffort | None = None,
 ) -> None:
     """Revise an existing workplan asynchronously and update the GitHub issue.
 
@@ -547,6 +579,7 @@ async def process_revision_async(
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
         git_command_func: Optional Git command function (for mocking).
+        reasoning_effort: Optional reasoning effort to apply for supported models.
     """
     try:
         # Create a simple logging function that uses ctx if available
@@ -621,8 +654,9 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
             codebase_reasoning,
             _meta,
             ctx,
-            github_command_func,
-            git_command_func,
+            github_command_func=github_command_func,
+            git_command_func=git_command_func,
+            reasoning_effort=reasoning_effort,
         )
 
     except Exception as e:

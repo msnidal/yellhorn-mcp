@@ -23,7 +23,7 @@ from yellhorn_mcp.integrations.github_integration import (
     update_github_issue,
 )
 from yellhorn_mcp.llm import LLMManager
-from yellhorn_mcp.llm.base import CitationResult, UsageResult
+from yellhorn_mcp.llm.base import CitationResult, ReasoningEffort, UsageResult
 from yellhorn_mcp.models.metadata_models import (
     CompletionMetadata,
     SubmissionMetadata,
@@ -121,6 +121,7 @@ async def process_judgement_async(
     ctx: Context | None = None,
     github_command_func: Callable | None = None,
     git_command_func: Callable | None = None,
+    reasoning_effort: ReasoningEffort | None = None,
 ) -> None:
     """Judge a code diff against a workplan asynchronously.
 
@@ -143,6 +144,7 @@ async def process_judgement_async(
         ctx: Optional context for logging.
         github_command_func: Optional GitHub command function (for mocking).
         git_command_func: Optional Git command function (for mocking).
+        reasoning_effort: Optional reasoning effort to apply for supported models.
     """
     try:
 
@@ -229,20 +231,32 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                     )
 
         # Call LLM through the manager with citation support
+        effective_reasoning: ReasoningEffort | None = None
         if is_openai_model:
             # OpenAI models don't support citations
-            usage_result: UsageResult = await llm_manager.call_llm_with_usage(
-                prompt=prompt,
-                model=model,
-                temperature=0.0,
-                ctx=ctx,
-                generation_config=generation_config,
-            )
+            if reasoning_effort is not None:
+                usage_result: UsageResult = await llm_manager.call_llm_with_usage(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                    reasoning_effort=reasoning_effort,
+                )
+            else:
+                usage_result = await llm_manager.call_llm_with_usage(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                )
             usage_metadata: UsageMetadata = usage_result["usage_metadata"]
             content_value = usage_result["content"]
             judgement_content = (
                 content_value if isinstance(content_value, str) else str(content_value)
             )
+            effective_reasoning = usage_result.get("reasoning_effort")
             completion_metadata = CompletionMetadata(
                 model_name=model,
                 status="✅ Judgement generated successfully",
@@ -254,13 +268,23 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             )
         else:
             # Gemini models - use citation-aware call
-            citation_result: CitationResult = await llm_manager.call_llm_with_citations(
-                prompt=prompt,
-                model=model,
-                temperature=0.0,
-                ctx=ctx,
-                generation_config=generation_config,
-            )
+            if reasoning_effort is not None:
+                citation_result: CitationResult = await llm_manager.call_llm_with_citations(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                    reasoning_effort=reasoning_effort,
+                )
+            else:
+                citation_result = await llm_manager.call_llm_with_citations(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.0,
+                    ctx=ctx,
+                    generation_config=generation_config,
+                )
 
             content_val = citation_result.get("content", "")
             judgement_content = content_val if isinstance(content_val, str) else str(content_val)
@@ -284,6 +308,7 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
                 )
             else:
                 sr_used = None
+            effective_reasoning = None
 
             completion_metadata = CompletionMetadata(
                 model_name=model,
@@ -320,7 +345,10 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             and completion_metadata.output_tokens
         ):
             completion_metadata.estimated_cost = calculate_cost(
-                model, completion_metadata.input_tokens, completion_metadata.output_tokens
+                model,
+                int(completion_metadata.input_tokens or 0),
+                int(completion_metadata.output_tokens or 0),
+                effective_reasoning.value if effective_reasoning else None,
             )
 
         # Add context size

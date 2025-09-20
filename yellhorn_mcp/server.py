@@ -37,6 +37,7 @@ from yellhorn_mcp.integrations.github_integration import (
     get_issue_body,
 )
 from yellhorn_mcp.llm import LLMManager
+from yellhorn_mcp.llm.base import ReasoningEffort
 from yellhorn_mcp.models.metadata_models import SubmissionMetadata
 from yellhorn_mcp.processors.context_processor import process_context_curation_async
 from yellhorn_mcp.processors.judgement_processor import get_git_diff, process_judgement_async
@@ -82,6 +83,19 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     use_search_grounding = False
     if not is_openai_model:  # Only enable search grounding for Gemini models
         use_search_grounding = os.getenv("YELLHORN_MCP_SEARCH", "on").lower() != "off"
+
+    reasoning_env = os.getenv("YELLHORN_MCP_REASONING_EFFORT")
+    reasoning_effort: ReasoningEffort | None = None
+    if reasoning_env:
+        candidate = reasoning_env.strip().lower()
+        try:
+            reasoning_effort = ReasoningEffort(candidate)
+        except ValueError:
+            logging.warning(
+                "Ignoring unsupported reasoning effort value '%s'. Expected one of: %s.",
+                reasoning_env,
+                ", ".join(item.value for item in ReasoningEffort),
+            )
 
     # Initialize clients based on the model type
     gemini_client = None
@@ -134,6 +148,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         logging.info(
             f"Google Search Grounding: {'enabled' if use_search_grounding else 'disabled'}"
         )
+        if reasoning_effort is not None:
+            logging.info("Reasoning effort: %s", reasoning_effort.value)
+        else:
+            logging.info("Reasoning effort: disabled")
 
         yield {
             "repo_path": repo_path,
@@ -142,6 +160,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
             "llm_manager": llm_manager,
             "model": model,
             "use_search_grounding": use_search_grounding,
+            "reasoning_effort": reasoning_effort,
         }
     finally:
         # Cleanup if needed
@@ -256,11 +275,9 @@ async def create_workplan(
 
         # Skip AI workplan generation if codebase_reasoning is "none"
         if codebase_reasoning != "none":
-            # Get clients from context
-            gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
-            openai_client = ctx.request_context.lifespan_context.get("openai_client")
             llm_manager = ctx.request_context.lifespan_context.get("llm_manager")
             model = ctx.request_context.lifespan_context["model"]
+            reasoning_effort = ctx.request_context.lifespan_context.get("reasoning_effort")
 
             # Store codebase_reasoning in context for process_workplan_async
             ctx.request_context.lifespan_context["codebase_reasoning"] = codebase_reasoning
@@ -283,6 +300,7 @@ async def create_workplan(
                     detailed_description,
                     debug=debug,
                     disable_search_grounding=disable_search_grounding,
+                    reasoning_effort=reasoning_effort,
                     _meta={
                         "original_search_grounding": original_search_grounding,
                         "start_time": start_time,
@@ -411,11 +429,9 @@ async def revise_workplan(
         submission_comment = format_submission_comment(submission_metadata)
         await add_issue_comment(repo_path, issue_number, submission_comment)
 
-        # Get clients from context
-        gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
-        openai_client = ctx.request_context.lifespan_context.get("openai_client")
         llm_manager = ctx.request_context.lifespan_context.get("llm_manager")
         model = ctx.request_context.lifespan_context["model"]
+        reasoning_effort = ctx.request_context.lifespan_context.get("reasoning_effort")
 
         # Launch background task to process the revision
         await ctx.log(
@@ -435,6 +451,7 @@ async def revise_workplan(
                 codebase_reasoning,
                 debug=debug,
                 disable_search_grounding=disable_search_grounding,
+                reasoning_effort=reasoning_effort,
                 _meta={
                     "original_search_grounding": original_search_grounding,
                     "start_time": start_time,
@@ -627,9 +644,8 @@ async def judge_workplan(
     try:
         repo_path: Path = ctx.request_context.lifespan_context["repo_path"]
         model = ctx.request_context.lifespan_context["model"]
-        gemini_client = ctx.request_context.lifespan_context.get("gemini_client")
-        openai_client = ctx.request_context.lifespan_context.get("openai_client")
         llm_manager = ctx.request_context.lifespan_context.get("llm_manager")
+        reasoning_effort = ctx.request_context.lifespan_context.get("reasoning_effort")
 
         # Handle search grounding override if specified
         original_search_grounding = ctx.request_context.lifespan_context.get(
@@ -790,6 +806,7 @@ async def judge_workplan(
                 debug=debug,
                 codebase_reasoning=codebase_reasoning,
                 disable_search_grounding=disable_search_grounding,
+                reasoning_effort=reasoning_effort,
                 _meta={
                     "original_search_grounding": original_search_grounding,
                     "start_time": start_time,
