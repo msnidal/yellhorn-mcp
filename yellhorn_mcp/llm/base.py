@@ -1,10 +1,23 @@
 """Base interfaces and data contracts for LLM clients.
 
-Defines structural Protocols so provider implementations (OpenAI, Gemini, etc.)
-can be swapped behind a consistent API.
+Defines structural Protocols and type guards so provider implementations
+can be swapped behind a consistent, type-checked API with minimal runtime
+introspection.
 """
 
-from typing import Dict, Optional, Protocol, TypedDict, Union, runtime_checkable
+from typing import (
+    Dict,
+    Literal,
+    Optional,
+    Protocol,
+    Sequence,
+    TypedDict,
+    TypeGuard,
+    Union,
+    runtime_checkable,
+)
+
+from google.genai.types import GenerateContentConfig
 
 from yellhorn_mcp.models.metadata_models import UsageMetadata
 
@@ -38,9 +51,10 @@ class LLMClient(Protocol):
         model: str,
         temperature: float = 0.7,
         system_message: Optional[str] = None,
-        response_format: Optional[str] = None,
+        response_format: Optional["ResponseFormat"] = None,
+        generation_config: Optional[GenerateContentConfig] = None,
+        reasoning_effort: Optional["ReasoningEffort"] = None,
         ctx: Optional[LoggerContext] = None,
-        **kwargs,
     ) -> GenerateResult:
         """Generate a completion for the given prompt.
 
@@ -49,3 +63,74 @@ class LLMClient(Protocol):
         """
         ...
 
+
+# ----------------------------
+# Response typing + type guards
+# ----------------------------
+
+# Format specifier used across orchestrator and clients
+ResponseFormat = Literal["json", "text"]
+
+# Reasoning effort (OpenAI GPT-5 family)
+ReasoningEffort = Literal["low", "medium", "high"]
+
+
+# OpenAI Responses API shapes (structural)
+@runtime_checkable
+class _OAOutputPart(Protocol):
+    text: str
+
+
+@runtime_checkable
+class _OAOutputItem(Protocol):
+    content: Sequence[_OAOutputPart]
+
+
+@runtime_checkable
+class OpenAIWithOutputList(Protocol):
+    output: Sequence[_OAOutputItem]
+
+
+@runtime_checkable
+class WithOutputText(Protocol):
+    output_text: str
+
+
+@runtime_checkable
+class WithText(Protocol):
+    text: str
+
+
+def has_openai_output_list(obj: object) -> TypeGuard[OpenAIWithOutputList]:
+    try:
+        out = getattr(obj, "output")
+        return isinstance(out, Sequence) and len(out) > 0 and hasattr(out[0], "content")
+    except Exception:
+        return False
+
+
+def has_output_text(obj: object) -> TypeGuard[WithOutputText]:
+    return isinstance(getattr(obj, "output_text", None), str)
+
+
+def has_text(obj: object) -> TypeGuard[WithText]:
+    return isinstance(getattr(obj, "text", None), str)
+
+
+# Gemini-like shapes (minimal for our needs)
+@runtime_checkable
+class GeminiWithCandidates(Protocol):
+    candidates: Sequence[object]
+
+
+@runtime_checkable
+class HasGroundingMetadata(Protocol):
+    grounding_metadata: object
+
+
+def has_candidates(obj: object) -> TypeGuard[GeminiWithCandidates]:
+    return isinstance(getattr(obj, "candidates", None), Sequence)
+
+
+def has_grounding_metadata(obj: object) -> bool:
+    return getattr(obj, "grounding_metadata", None) is not None

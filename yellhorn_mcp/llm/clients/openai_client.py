@@ -1,12 +1,28 @@
-"""OpenAI provider client implementing the LLMClient protocol."""
+"""OpenAI provider client implementing the LLMClient protocol.
+
+This module keeps runtime checks minimal and explicit to remain robust
+with test doubles, while providing clear, typed extraction helpers.
+"""
 
 import json
 import logging
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
 
+from google.genai.types import GenerateContentConfig
 from openai import AsyncOpenAI
+from openai.types.responses import Response as OpenAIResponse
+from openai.types.responses import ResponseUsage as OpenAIResponseUsage
 
-from yellhorn_mcp.llm.base import GenerateResult, LLMClient, LoggerContext
+from yellhorn_mcp.llm.base import (
+    GenerateResult,
+    LLMClient,
+    LoggerContext,
+    ReasoningEffort,
+    ResponseFormat,
+    has_openai_output_list,
+    has_output_text,
+    has_text,
+)
 from yellhorn_mcp.llm.retry import api_retry
 from yellhorn_mcp.llm.usage import UsageMetadata
 
@@ -35,6 +51,27 @@ class OpenAIClient(LLMClient):
     def __init__(self, client: AsyncOpenAI):
         self._client = client
 
+    # ----------------------------
+    # Internal extraction helpers
+    # ----------------------------
+    @staticmethod
+    def _extract_text_from_output_list(output: object) -> Optional[str]:
+        """Extract text when the Responses API returns an `output` list.
+
+        Be strict about the list type to avoid MagicMock pitfalls in tests.
+        """
+        if not isinstance(output, list) or not output:
+            return None
+        first = output[0]
+        # Be defensive: content should be a sequence with items having `.text`
+        content = getattr(first, "content", None)
+        if isinstance(content, Sequence) and content:
+            first_part = content[0]
+            text = getattr(first_part, "text", None)
+            if isinstance(text, str):
+                return text
+        return None
+
     @api_retry
     async def generate(
         self,
@@ -43,17 +80,15 @@ class OpenAIClient(LLMClient):
         model: str,
         temperature: float = 0.7,
         system_message: Optional[str] = None,
-        response_format: Optional[str] = None,
+        response_format: Optional[ResponseFormat] = None,
+        generation_config: Optional[GenerateContentConfig] = None,
+        reasoning_effort: Optional[ReasoningEffort] = None,
         ctx: Optional[LoggerContext] = None,
-        reasoning_effort: Optional[str] = None,
-        **kwargs,
     ) -> GenerateResult:
         # Drop provider-incompatible params if present
-        kwargs.pop("generation_config", None)
         params: Dict[str, object] = {
             "model": model,
             "input": prompt,
-            **kwargs,
         }
 
         if _supports_temperature(model):
@@ -80,19 +115,26 @@ class OpenAIClient(LLMClient):
 
         # Extract content from multiple possible shapes
         content: str
-        out = getattr(response, "output", None)
-        if isinstance(out, list) and out:
-            first = response.output[0]
-            content = first.content[0].text if first.content else ""
-        elif isinstance(getattr(response, "output_text", None), str):
-            content = getattr(response, "output_text") or ""
-        elif isinstance(getattr(response, "text", None), str):
-            content = getattr(response, "text") or ""
+        # Prefer the structured `output` list when it exists and is well-formed
+        # Prefer the structured `output` list when detected by guard
+        if has_openai_output_list(response):
+            out = response.output  # type: ignore[attr-defined]
+            first = out[0]
+            content_seq = getattr(first, "content", [])
+            if isinstance(content_seq, Sequence) and content_seq:
+                part = content_seq[0]
+                text = getattr(part, "text", None)
+                content = text if isinstance(text, str) else ""
+            else:
+                content = ""
+        elif has_output_text(response):
+            content = response.output_text  # type: ignore[attr-defined]
+        elif has_text(response):
+            content = response.text  # type: ignore[attr-defined]
         else:
             content = str(response)
 
-        usage = UsageMetadata(getattr(response, "usage", None))
-
+        usage = UsageMetadata(response)
         if response_format == "json":
             try:
                 parsed: Union[dict, list] = json.loads(content)

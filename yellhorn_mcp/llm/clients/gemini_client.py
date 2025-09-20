@@ -1,4 +1,8 @@
-"""Gemini provider client implementing the LLMClient protocol."""
+"""Gemini provider client implementing the LLMClient protocol.
+
+Minimal, explicit runtime guards to remain resilient with mocks, paired
+with typed extraction helpers and clear return shapes.
+"""
 
 import json
 import logging
@@ -7,8 +11,17 @@ from typing import Dict, Optional
 
 from google import genai
 from google.genai.types import GenerateContentConfig
+from google.genai.types import GenerateContentResponse
 
-from yellhorn_mcp.llm.base import GenerateResult, LLMClient, LoggerContext
+from yellhorn_mcp.llm.base import (
+    GenerateResult,
+    LLMClient,
+    LoggerContext,
+    ResponseFormat,
+    has_text,
+    has_candidates,
+    has_grounding_metadata,
+)
 from yellhorn_mcp.llm.retry import api_retry
 from yellhorn_mcp.llm.usage import UsageMetadata
 
@@ -19,6 +32,35 @@ class GeminiClient(LLMClient):
     def __init__(self, client: genai.Client):
         self._client = client
 
+    # ----------------------------
+    # Internal extraction helpers
+    # ----------------------------
+    @staticmethod
+    def _extract_content_text(response: object) -> str:
+        text = getattr(response, "text", None)
+        return text if isinstance(text, str) else ""
+
+    @staticmethod
+    def _extract_usage(response: object) -> UsageMetadata:
+        usage_md = getattr(response, "usage_metadata", None)
+        return UsageMetadata(usage_md)
+
+    @staticmethod
+    def _extract_grounding_metadata(response: object) -> Dict[str, object]:
+        extras: Dict[str, object] = {}
+        # Candidate-level grounding metadata
+        candidates = getattr(response, "candidates", None)
+        if isinstance(candidates, list) and candidates:
+            cand0 = candidates[0]
+            gmeta = getattr(cand0, "grounding_metadata", None)
+            if gmeta is not None:
+                extras["grounding_metadata"] = gmeta
+        # Root-level grounding metadata (seen in some mocks)
+        gmeta_root = getattr(response, "grounding_metadata", None)
+        if gmeta_root is not None:
+            extras["grounding_metadata"] = gmeta_root
+        return extras
+
     @api_retry
     async def generate(
         self,
@@ -27,13 +69,13 @@ class GeminiClient(LLMClient):
         model: str,
         temperature: float = 0.7,
         system_message: Optional[str] = None,
-        response_format: Optional[str] = None,
+        response_format: Optional[ResponseFormat] = None,
+        generation_config: Optional[GenerateContentConfig] = None,
+        reasoning_effort: Optional[str] = None,
         ctx: Optional[LoggerContext] = None,
-        **kwargs,
     ) -> GenerateResult:
         full_prompt = f"{system_message}\n\n{prompt}" if system_message else prompt
 
-        generation_config = kwargs.pop("generation_config", None)
         response_mime_type: str = "application/json" if response_format == "json" else "text/plain"
 
         cfg_tools = None
@@ -50,19 +92,11 @@ class GeminiClient(LLMClient):
         )
 
         api_params = {"model": f"models/{model}", "contents": full_prompt, "config": config}
-        response = await self._client.aio.models.generate_content(**api_params)
+        response: GenerateContentResponse = await self._client.aio.models.generate_content(**api_params)
 
-        content = response.text or ""
-        usage = UsageMetadata(response.usage_metadata)
-
-        extras: Dict[str, object] = {}
-        if getattr(response, "candidates", None):
-            cand0 = response.candidates[0]
-            if getattr(cand0, "grounding_metadata", None) is not None:
-                extras["grounding_metadata"] = cand0.grounding_metadata
-        # Some responses include grounding_metadata at the root
-        if getattr(response, "grounding_metadata", None) is not None:
-            extras["grounding_metadata"] = response.grounding_metadata
+        content = response.text if has_text(response) else ""
+        usage = self._extract_usage(response)
+        extras = self._extract_grounding_metadata(response)
 
         if response_format == "json":
             json_pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
@@ -81,4 +115,3 @@ class GeminiClient(LLMClient):
                 return {"content": {"error": "No JSON content found in response"}, "usage_metadata": usage, "extras": extras}
 
         return {"content": content, "usage_metadata": usage, "extras": extras}
-

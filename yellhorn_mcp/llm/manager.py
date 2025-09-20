@@ -7,9 +7,17 @@ import logging
 from typing import Dict, List, Optional, Union
 
 from google import genai
+from google.genai.types import GenerateContentConfig
 from openai import AsyncOpenAI
 
-from yellhorn_mcp.llm.base import CitationResult, GenerateResult, LLMClient, LoggerContext
+from yellhorn_mcp.llm.base import (
+    CitationResult,
+    GenerateResult,
+    LLMClient,
+    LoggerContext,
+    ResponseFormat,
+    ReasoningEffort,
+)
 from yellhorn_mcp.llm.chunking import ChunkingStrategy
 from yellhorn_mcp.llm.clients import GeminiClient, OpenAIClient
 from yellhorn_mcp.llm.config import LLMManagerConfig
@@ -47,8 +55,8 @@ class LLMManager:
         self.safety_margin = cfg.safety_margin_tokens or 1000
         self.safety_margin_ratio = cfg.safety_margin_ratio
         self.overlap_ratio = cfg.overlap_ratio
-        self.aggregation_strategy = cfg.aggregation_strategy
-        self.chunk_strategy = cfg.chunk_strategy
+        self.aggregation_strategy = str(cfg.aggregation_strategy)
+        self.chunk_strategy = str(cfg.chunk_strategy)
 
         self._last_usage_metadata: Optional[UsageMetadata] = None
         self._last_reasoning_effort: Optional[str] = None
@@ -79,9 +87,10 @@ class LLMManager:
         model: str,
         temperature: float = 0.7,
         system_message: Optional[str] = None,
-        response_format: Optional[str] = None,
+        response_format: Optional[ResponseFormat] = None,
+        generation_config: Optional[GenerateContentConfig] = None,
+        reasoning_effort: Optional[ReasoningEffort] = None,
         ctx: Optional[LoggerContext] = None,
-        **kwargs,
     ) -> Union[str, Dict[str, object]]:
         # Calculate token budget and whether chunking is needed
         prompt_tokens = self.token_counter.count_tokens(prompt, model)
@@ -110,9 +119,10 @@ class LLMManager:
                 temperature=temperature,
                 system_message=system_message,
                 response_format=response_format,
+                generation_config=generation_config,
+                reasoning_effort=reasoning_effort,
                 available_tokens=available_tokens,
                 ctx=ctx,
-                **kwargs,
             )
 
         result = await self._single_call(
@@ -121,8 +131,9 @@ class LLMManager:
             temperature=temperature,
             system_message=system_message,
             response_format=response_format,
+            generation_config=generation_config,
+            reasoning_effort=reasoning_effort,
             ctx=ctx,
-            **kwargs,
         )
         return result
 
@@ -133,9 +144,10 @@ class LLMManager:
         model: str,
         temperature: float,
         system_message: Optional[str],
-        response_format: Optional[str],
+        response_format: Optional[ResponseFormat],
+        generation_config: Optional[GenerateContentConfig],
+        reasoning_effort: Optional[ReasoningEffort],
         ctx: Optional[LoggerContext],
-        **kwargs,
     ) -> Union[str, Dict[str, object]]:
         if self.client is None:
             # If not configured with a protocol client, pick by model prefix
@@ -151,8 +163,8 @@ class LLMManager:
                 raise UnsupportedModelError("No suitable LLM client is configured")
 
         # Track reasoning effort for supported models
-        if "reasoning_effort" in kwargs and self._is_reasoning_model(model):
-            val = kwargs.get("reasoning_effort")
+        if reasoning_effort and self._is_reasoning_model(model):
+            val = reasoning_effort
             if val in ("low", "medium", "high"):
                 self._last_reasoning_effort = val  # expose for cost and result reporting
             else:
@@ -166,8 +178,9 @@ class LLMManager:
             temperature=temperature,
             system_message=system_message,
             response_format=response_format,
+            generation_config=generation_config,
+            reasoning_effort=reasoning_effort,
             ctx=ctx,
-            **kwargs,
         )
         self._last_usage_metadata = gen.get("usage_metadata", UsageMetadata())
         self._last_extras = gen.get("extras")
@@ -180,10 +193,11 @@ class LLMManager:
         model: str,
         temperature: float,
         system_message: Optional[str],
-        response_format: Optional[str],
+        response_format: Optional[ResponseFormat],
+        generation_config: Optional[GenerateContentConfig],
+        reasoning_effort: Optional[ReasoningEffort],
         available_tokens: int,
         ctx: Optional[LoggerContext],
-        **kwargs,
     ) -> Union[str, Dict[str, object]]:
         chunks = self._chunk_prompt(prompt, model, available_tokens)
         if ctx:
@@ -209,8 +223,9 @@ class LLMManager:
                     temperature=temperature,
                     system_message=system_message,
                     response_format=response_format,
+                    generation_config=generation_config,
+                    reasoning_effort=reasoning_effort,
                     ctx=ctx,
-                    **kwargs,
                 )
                 responses.append(result)
                 # Accumulate usage if we have it
