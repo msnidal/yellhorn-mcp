@@ -134,7 +134,8 @@ class OpenAIClient(LLMClient):
         else:
             content = str(response)
 
-        usage = UsageMetadata(response)
+        usage_payload = getattr(response, "usage", None)
+        usage = UsageMetadata(usage_payload if usage_payload is not None else response)
         if response_format == "json":
             try:
                 parsed: Union[dict, list] = json.loads(content)
