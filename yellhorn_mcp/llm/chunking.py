@@ -84,7 +84,10 @@ class ChunkingStrategy:
                 for i, c in enumerate(remaining_text):
                     if c in ".!?":
                         next_sentence_start = i + 1
-                        if next_sentence_start < len(remaining_text) and remaining_text[next_sentence_start] == " ":
+                        if (
+                            next_sentence_start < len(remaining_text)
+                            and remaining_text[next_sentence_start] == " "
+                        ):
                             next_sentence_start += 1
                         break
                 if 0 < next_sentence_start < len(remaining_text):

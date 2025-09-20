@@ -10,8 +10,7 @@ import re
 from typing import Dict, Optional
 
 from google import genai
-from google.genai.types import GenerateContentConfig
-from google.genai.types import GenerateContentResponse
+from google.genai.types import GenerateContentConfig, GenerateContentResponse
 
 from yellhorn_mcp.llm.base import (
     GenerateResult,
@@ -19,9 +18,9 @@ from yellhorn_mcp.llm.base import (
     LLMRequest,
     LoggerContext,
     ResponseFormat,
-    has_text,
     has_candidates,
     has_grounding_metadata,
+    has_text,
 )
 from yellhorn_mcp.llm.retry import api_retry
 from yellhorn_mcp.llm.usage import UsageMetadata
@@ -69,7 +68,11 @@ class GeminiClient(LLMClient):
         *,
         ctx: Optional[LoggerContext] = None,
     ) -> GenerateResult:
-        full_prompt = f"{request.system_message}\n\n{request.prompt}" if request.system_message else request.prompt
+        full_prompt = (
+            f"{request.system_message}\n\n{request.prompt}"
+            if request.system_message
+            else request.prompt
+        )
 
         response_mime_type: str = (
             "application/json" if request.response_format is ResponseFormat.JSON else "text/plain"
@@ -90,7 +93,9 @@ class GeminiClient(LLMClient):
         )
 
         api_params = {"model": f"models/{request.model}", "contents": full_prompt, "config": config}
-        response: GenerateContentResponse = await self._client.aio.models.generate_content(**api_params)
+        response: GenerateContentResponse = await self._client.aio.models.generate_content(
+            **api_params
+        )
 
         content = response.text if has_text(response) else ""
         usage = self._extract_usage(response)
@@ -110,6 +115,10 @@ class GeminiClient(LLMClient):
                         "extras": extras,
                     }
             else:
-                return {"content": {"error": "No JSON content found in response"}, "usage_metadata": usage, "extras": extras}
+                return {
+                    "content": {"error": "No JSON content found in response"},
+                    "usage_metadata": usage,
+                    "extras": extras,
+                }
 
         return {"content": content, "usage_metadata": usage, "extras": extras}

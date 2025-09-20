@@ -24,7 +24,11 @@ from yellhorn_mcp.integrations.github_integration import (
 )
 from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.llm.base import CitationResult, UsageResult
-from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata, UsageMetadata
+from yellhorn_mcp.models.metadata_models import (
+    CompletionMetadata,
+    SubmissionMetadata,
+    UsageMetadata,
+)
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
     format_completion_comment,
@@ -236,7 +240,9 @@ IMPORTANT: Respond *only* with the Markdown content for the judgement. Do *not* 
             )
             usage_metadata: UsageMetadata = usage_result["usage_metadata"]
             content_value = usage_result["content"]
-            judgement_content = content_value if isinstance(content_value, str) else str(content_value)
+            judgement_content = (
+                content_value if isinstance(content_value, str) else str(content_value)
+            )
             completion_metadata = CompletionMetadata(
                 model_name=model,
                 status="✅ Judgement generated successfully",

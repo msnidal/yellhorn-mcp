@@ -7,14 +7,13 @@ code and tests importing `yellhorn_mcp.llm_manager` continue to work.
 import warnings
 
 from yellhorn_mcp.llm.manager import (
-    LLMManager,
     ChunkingStrategy,
+    LLMManager,
     api_retry,
     is_retryable_error,
     log_retry_attempt,
 )
 from yellhorn_mcp.models.metadata_models import UsageMetadata
-
 
 warnings.warn(
     "yellhorn_mcp.llm_manager is deprecated; use yellhorn_mcp.llm.* modules.",
@@ -30,4 +29,3 @@ __all__ = [
     "log_retry_attempt",
     "UsageMetadata",
 ]
-

@@ -9,9 +9,10 @@ from openai import RateLimitError
 from tenacity import RetryCallState
 
 from yellhorn_mcp.llm.base import ReasoningEffort, ResponseFormat
-from yellhorn_mcp.llm.manager import LLMManager
 from yellhorn_mcp.llm.chunking import ChunkingStrategy
-from yellhorn_mcp.llm.config import AggregationStrategy, ChunkStrategy as ChunkStrategySetting
+from yellhorn_mcp.llm.config import AggregationStrategy
+from yellhorn_mcp.llm.config import ChunkStrategy as ChunkStrategySetting
+from yellhorn_mcp.llm.manager import LLMManager
 from yellhorn_mcp.llm.retry import is_retryable_error, log_retry_attempt
 from yellhorn_mcp.models.metadata_models import UsageMetadata
 from yellhorn_mcp.utils.token_utils import TokenCounter
@@ -159,7 +160,10 @@ class TestLLMManager:
         manager = LLMManager(openai_client=mock_openai)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort=ReasoningEffort.HIGH
+            prompt="Test prompt",
+            model="gpt-5",
+            temperature=0.7,
+            reasoning_effort=ReasoningEffort.HIGH,
         )
 
         assert result == "High reasoning response"
@@ -188,7 +192,10 @@ class TestLLMManager:
         manager = LLMManager(openai_client=mock_openai)
 
         result = await manager.call_llm(
-            prompt="Test prompt", model="gpt-5", temperature=0.7, reasoning_effort=ReasoningEffort.LOW
+            prompt="Test prompt",
+            model="gpt-5",
+            temperature=0.7,
+            reasoning_effort=ReasoningEffort.LOW,
         )
 
         assert result == "Low reasoning response"

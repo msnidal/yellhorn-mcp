@@ -8,4 +8,3 @@ call sites that import from yellhorn_mcp.llm.usage.
 from yellhorn_mcp.models.metadata_models import UsageMetadata
 
 __all__ = ["UsageMetadata"]
-

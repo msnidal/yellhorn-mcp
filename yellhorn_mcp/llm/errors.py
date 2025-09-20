@@ -7,4 +7,3 @@ class LLMAPIError(RuntimeError):
 
 class UnsupportedModelError(ValueError):
     """Raised when a model name cannot be routed to a supported client."""
-

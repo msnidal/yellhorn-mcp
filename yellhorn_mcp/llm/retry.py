@@ -37,13 +37,19 @@ def log_retry_attempt(retry_state: RetryCallState) -> None:
     try:
         wt = retry_state.outcome_timestamp
         st = retry_state.start_time
-        wait_time = float(wt - st) if isinstance(wt, (int, float)) and isinstance(st, (int, float)) else 0.0
+        wait_time = (
+            float(wt - st) if isinstance(wt, (int, float)) and isinstance(st, (int, float)) else 0.0
+        )
     except Exception:
         wait_time = 0.0
 
     fn_name = "<unknown>"
     if retry_state.fn is not None:
-        fn_name = retry_state.fn.__name__ if isinstance(retry_state.fn, HasName) else type(retry_state.fn).__name__
+        fn_name = (
+            retry_state.fn.__name__
+            if isinstance(retry_state.fn, HasName)
+            else type(retry_state.fn).__name__
+        )
 
     exc_text = ""
     try:
@@ -52,7 +58,9 @@ def log_retry_attempt(retry_state: RetryCallState) -> None:
     except Exception:
         exc_text = ""
 
-    logger.warning(f"Retrying {fn_name} after {wait_time:.1f} seconds (attempt {attempt}): {exc_text}")
+    logger.warning(
+        f"Retrying {fn_name} after {wait_time:.1f} seconds (attempt {attempt}): {exc_text}"
+    )
 
 
 def is_retryable_error(exception: BaseException) -> bool:
@@ -63,12 +71,23 @@ def is_retryable_error(exception: BaseException) -> bool:
             return True
 
     # Standard retryable classes
-    if isinstance(exception, (RateLimitError, google_exceptions.ResourceExhausted, google_exceptions.TooManyRequests, ConnectionError, asyncio.TimeoutError)):
+    if isinstance(
+        exception,
+        (
+            RateLimitError,
+            google_exceptions.ResourceExhausted,
+            google_exceptions.TooManyRequests,
+            ConnectionError,
+            asyncio.TimeoutError,
+        ),
+    ):
         return True
 
     # Message matching
     msg = str(exception).lower()
-    if any(term in msg for term in ("resource_exhausted", "quota", "rate limit", "too many requests")):
+    if any(
+        term in msg for term in ("resource_exhausted", "quota", "rate limit", "too many requests")
+    ):
         return True
 
     return False
@@ -81,4 +100,3 @@ api_retry = retry(
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-

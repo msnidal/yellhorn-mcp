@@ -108,7 +108,9 @@ class OpenAIClient(LLMClient):
                 WebSearchToolParam(type="web_search_preview"),
                 CodeInterpreter(
                     type="code_interpreter",
-                    container=CodeInterpreterContainerCodeInterpreterToolAuto(type="auto", file_ids=[]),
+                    container=CodeInterpreterContainerCodeInterpreterToolAuto(
+                        type="auto", file_ids=[]
+                    ),
                 ),
             ]
             params["tools"] = tools
@@ -152,6 +154,9 @@ class OpenAIClient(LLMClient):
                     parsed = {"content": parsed_raw}
                 return {"content": parsed, "usage_metadata": usage}
             except Exception:
-                return {"content": {"error": "Failed to parse JSON", "content": content}, "usage_metadata": usage}
+                return {
+                    "content": {"error": "Failed to parse JSON", "content": content},
+                    "usage_metadata": usage,
+                }
 
         return {"content": content, "usage_metadata": usage}

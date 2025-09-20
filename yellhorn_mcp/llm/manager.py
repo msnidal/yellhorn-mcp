@@ -17,8 +17,8 @@ from yellhorn_mcp.llm.base import (
     LLMClient,
     LLMRequest,
     LoggerContext,
-    ResponseFormat,
     ReasoningEffort,
+    ResponseFormat,
     UsageResult,
 )
 from yellhorn_mcp.llm.chunking import ChunkingStrategy
@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 ConfigValue = int | float | str | bool | None
 ConfigMapping = Mapping[str, ConfigValue]
+
+
 class LLMConfigKwargs(TypedDict, total=False):
     safety_margin_tokens: int | None
     safety_margin_ratio: float
@@ -180,7 +182,9 @@ class LLMManager:
                 ),
             )
 
-        needs_chunking = not self.token_counter.can_fit_in_context(prompt, model, safety_margin_tokens)
+        needs_chunking = not self.token_counter.can_fit_in_context(
+            prompt, model, safety_margin_tokens
+        )
 
         base_request = self._build_request(
             prompt=prompt,
@@ -268,7 +272,9 @@ class LLMManager:
                     tu = total_usage
                     lu = self._last_usage_metadata
                     tu.prompt_tokens = int(tu.prompt_tokens or 0) + int(lu.prompt_tokens or 0)
-                    tu.completion_tokens = int(tu.completion_tokens or 0) + int(lu.completion_tokens or 0)
+                    tu.completion_tokens = int(tu.completion_tokens or 0) + int(
+                        lu.completion_tokens or 0
+                    )
                     tu.total_tokens = int(tu.total_tokens or 0) + int(lu.total_tokens or 0)
             except Exception as e:
                 # Best-effort continue on non-retryable failures across chunks
@@ -280,7 +286,9 @@ class LLMManager:
         return self._aggregate_responses(responses, base_request.response_format)
 
     def _chunk_prompt(self, text: str, model: str, available_tokens: int) -> List[str]:
-        safety_margin_tokens = int(self.token_counter.get_model_limit(model) * self.safety_margin_ratio)
+        safety_margin_tokens = int(
+            self.token_counter.get_model_limit(model) * self.safety_margin_ratio
+        )
         if self.chunk_strategy is ChunkStrategy.PARAGRAPHS:
             return ChunkingStrategy.split_by_paragraphs(
                 text,
@@ -300,7 +308,9 @@ class LLMManager:
         )
 
     def _aggregate_responses(
-        self, responses: List[Union[str, Dict[str, object]]], response_format: Optional[ResponseFormat]
+        self,
+        responses: List[Union[str, Dict[str, object]]],
+        response_format: Optional[ResponseFormat],
     ) -> Union[str, Dict[str, object]]:
         if response_format is ResponseFormat.JSON:
             # Merge dicts conservatively
@@ -356,11 +366,17 @@ class LLMManager:
 
         result: CitationResult = {
             "content": content,
-            "usage_metadata": self._last_usage_metadata if self._last_usage_metadata else UsageMetadata(),
+            "usage_metadata": (
+                self._last_usage_metadata if self._last_usage_metadata else UsageMetadata()
+            ),
         }
 
         # Surface grounding metadata from extras for Gemini-like clients
-        if self._is_gemini_model(model) and self._last_extras and "grounding_metadata" in self._last_extras:
+        if (
+            self._is_gemini_model(model)
+            and self._last_extras
+            and "grounding_metadata" in self._last_extras
+        ):
             result["grounding_metadata"] = self._last_extras["grounding_metadata"]
 
         return result
@@ -388,12 +404,15 @@ class LLMManager:
         )
         return UsageResult(
             content=content,
-            usage_metadata=self._last_usage_metadata if self._last_usage_metadata else UsageMetadata(),
+            usage_metadata=(
+                self._last_usage_metadata if self._last_usage_metadata else UsageMetadata()
+            ),
             reasoning_effort=self._last_reasoning_effort,
         )
 
     def get_last_usage_metadata(self) -> Optional[UsageMetadata]:
         return self._last_usage_metadata
+
 
 # Re-export retry helpers for compatibility/testing
 __all__ = [
