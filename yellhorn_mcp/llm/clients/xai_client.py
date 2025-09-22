@@ -134,7 +134,11 @@ class XAIClient(LLMClient):
             response: Response = await chat.sample()
         except Exception as exc:  # pragma: no cover - converted to unified error
             logger.exception("xAI chat request failed")
-            raise LLMAPIError("xAI chat request failed") from exc
+            message = "xAI chat request failed"
+            detail = str(exc).strip()
+            if detail:
+                message = f"{message}: {detail}"
+            raise LLMAPIError(message) from exc
 
         usage = UsageMetadata(response.usage)
         content = _parse_content(response, request.response_format)

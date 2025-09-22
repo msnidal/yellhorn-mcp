@@ -28,6 +28,11 @@ from yellhorn_mcp.integrations.github_integration import (
 )
 from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.llm.base import CitationResult, ReasoningEffort, UsageResult
+from yellhorn_mcp.llm.model_families import (
+    ModelFamily,
+    detect_model_family,
+    supports_reasoning_effort,
+)
 from yellhorn_mcp.models.metadata_models import CompletionMetadata, UsageMetadata
 from yellhorn_mcp.utils.comment_utils import (
     extract_urls,
@@ -36,6 +41,19 @@ from yellhorn_mcp.utils.comment_utils import (
 )
 from yellhorn_mcp.utils.cost_tracker_utils import calculate_cost, format_metrics_section
 from yellhorn_mcp.utils.token_utils import TokenCounter
+
+
+def _format_exception_message(exc: Exception) -> str:
+    messages: list[str] = []
+    seen_ids: set[int] = set()
+    current: BaseException | None = exc
+    while current and id(current) not in seen_ids:
+        seen_ids.add(id(current))
+        text = str(current).strip()
+        if text:
+            messages.append(text)
+        current = current.__cause__ or current.__context__
+    return " <- ".join(messages) if messages else exc.__class__.__name__
 
 
 async def _generate_and_update_issue(
@@ -107,13 +125,33 @@ async def _generate_and_update_issue(
     if _meta and "original_search_grounding" in _meta:
         use_search_grounding = _meta["original_search_grounding"] and not disable_search_grounding
 
+    try:
+        model_family: ModelFamily = detect_model_family(model)
+    except ValueError:
+        model_family = "openai"
+
+    is_openai_model = model_family == "openai"
+    is_xai_model = model_family == "xai"
+    is_gemini_model = model_family == "gemini"
+
+    allowed_reasoning: ReasoningEffort | None
+    if reasoning_effort and supports_reasoning_effort(model):
+        allowed_reasoning = reasoning_effort
+    else:
+        allowed_reasoning = None
+        if reasoning_effort and ctx:
+            await ctx.log(
+                level="info",
+                message=(
+                    f"Model {model} does not support reasoning effort; ignoring request for {reasoning_effort.value}."
+                ),
+            )
+
     # Prepare additional kwargs for the LLM call
     generation_config: GenerateContentConfig | None = None
-    is_openai_model = llm_manager._is_openai_model(model)
 
-    # Handle search grounding for Gemini models
-    search_tools = None
-    if not is_openai_model and use_search_grounding:
+    # Handle search grounding for Gemini models only
+    if is_gemini_model and use_search_grounding:
         if ctx:
             await ctx.log(
                 level="info", message=f"Attempting to enable search grounding for model {model}"
@@ -127,7 +165,6 @@ async def _generate_and_update_issue(
                     await ctx.log(
                         level="info", message=f"Search grounding enabled for model {model}"
                     )
-                # Prefer passing via generation_config to keep types precise
                 generation_config = GenerateContentConfig(tools=search_tools)
         except ImportError:
             if ctx:
@@ -139,16 +176,15 @@ async def _generate_and_update_issue(
     try:
         # Call LLM through the manager with citation support
         effective_reasoning: ReasoningEffort | None = None
-        if is_openai_model:
+        if is_openai_model or is_xai_model:
             # OpenAI models don't support citations
-            if reasoning_effort is not None:
+            if allowed_reasoning is not None:
                 usage_result: UsageResult = await llm_manager.call_llm_with_usage(
                     prompt=prompt,
                     model=model,
                     temperature=0.0,
                     ctx=ctx,
-                    generation_config=generation_config,
-                    reasoning_effort=reasoning_effort,
+                    reasoning_effort=allowed_reasoning,
                 )
             else:
                 usage_result = await llm_manager.call_llm_with_usage(
@@ -156,7 +192,6 @@ async def _generate_and_update_issue(
                     model=model,
                     temperature=0.0,
                     ctx=ctx,
-                    generation_config=generation_config,
                 )
             content_val = usage_result["content"]
             workplan_content = content_val if isinstance(content_val, str) else str(content_val)
@@ -173,14 +208,14 @@ async def _generate_and_update_issue(
             )
         else:
             # Gemini models - use citation-aware call
-            if reasoning_effort is not None:
+            if allowed_reasoning is not None:
                 citation_result: CitationResult = await llm_manager.call_llm_with_citations(
                     prompt=prompt,
                     model=model,
                     temperature=0.0,
                     ctx=ctx,
                     generation_config=generation_config,
-                    reasoning_effort=reasoning_effort,
+                    reasoning_effort=allowed_reasoning,
                 )
             else:
                 citation_result = await llm_manager.call_llm_with_citations(
@@ -227,19 +262,25 @@ async def _generate_and_update_issue(
             )
 
     except Exception as e:
-        error_message = f"Failed to generate workplan: {str(e)}"
+        detail = _format_exception_message(e)
+        error_message = f"Failed to generate workplan: {detail}" if detail else "Failed to generate workplan"
         if ctx:
             await ctx.log(level="error", message=error_message)
         await add_issue_comment(
             repo_path,
             issue_number,
-            f"❌ **Error generating workplan** – {str(e)}",
+            f"❌ **Error generating workplan** – {detail if detail else str(e)}",
             github_command_func=github_command_func,
         )
         return
 
     if not workplan_content:
-        api_name = "OpenAI" if is_openai_model else "Gemini"
+        if is_openai_model:
+            api_name = "OpenAI"
+        elif is_xai_model:
+            api_name = "xAI"
+        else:
+            api_name = "Gemini"
         error_message = (
             f"Failed to generate workplan: Received an empty response from {api_name} API."
         )
@@ -529,13 +570,14 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
         )
 
     except Exception as e:
-        error_msg = f"Error processing workplan: {str(e)}"
+        detail = _format_exception_message(e)
+        error_msg = f"Error processing workplan: {detail}" if detail else "Error processing workplan"
         if ctx:
             await ctx.log(level="error", message=error_msg)
 
         # Try to add error comment to issue
         try:
-            error_comment = f"❌ **Error generating workplan**\n\n{str(e)}"
+            error_comment = f"❌ **Error generating workplan**\n\n{detail if detail else str(e)}"
             await add_issue_comment(
                 repo_path, issue_number, error_comment, github_command_func=github_command_func
             )

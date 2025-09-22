@@ -14,7 +14,11 @@ from pathlib import Path
 
 import uvicorn
 
-from yellhorn_mcp.llm.model_families import ModelFamily, detect_model_family
+from yellhorn_mcp.llm.model_families import (
+    ModelFamily,
+    detect_model_family,
+    supports_reasoning_effort,
+)
 from yellhorn_mcp.server import AsyncXAI, is_git_repository, mcp
 
 logging.basicConfig(
@@ -101,6 +105,13 @@ def main():
     except ValueError as exc:
         logging.error(str(exc))
         sys.exit(1)
+
+    if args.reasoning_effort and not supports_reasoning_effort(model):
+        logging.info(
+            "Model %s does not support reasoning effort overrides; ignoring --reasoning-effort.",
+            model,
+        )
+        args.reasoning_effort = None
 
     # For Gemini models
     if model_family == "gemini":

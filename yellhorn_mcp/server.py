@@ -43,7 +43,11 @@ from yellhorn_mcp.integrations.github_integration import (
 )
 from yellhorn_mcp.llm import LLMManager
 from yellhorn_mcp.llm.base import ReasoningEffort
-from yellhorn_mcp.llm.model_families import ModelFamily, detect_model_family
+from yellhorn_mcp.llm.model_families import (
+    ModelFamily,
+    detect_model_family,
+    supports_reasoning_effort,
+)
 from yellhorn_mcp.models.metadata_models import SubmissionMetadata
 from yellhorn_mcp.processors.context_processor import process_context_curation_async
 from yellhorn_mcp.processors.judgement_processor import get_git_diff, process_judgement_async
@@ -117,6 +121,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
                 reasoning_env,
                 ", ".join(item.value for item in ReasoningEffort),
             )
+
+    if reasoning_effort and not supports_reasoning_effort(model):
+        logging.info(
+            "Model %s does not support reasoning effort overrides; disabling reasoning efforts.",
+            model,
+        )
+        reasoning_effort = None
 
     # Initialize clients based on the model type
     gemini_client = None

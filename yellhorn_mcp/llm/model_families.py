@@ -41,3 +41,9 @@ def detect_model_family(model: str) -> ModelFamily:
         return "xai"
     raise ValueError(f"Unsupported model '{model}'")
 
+
+def supports_reasoning_effort(model: str) -> bool:
+    normalized = _normalize(model)
+    if normalized == "gpt-5-nano":
+        return False
+    return normalized.startswith("gpt-5")
