@@ -56,7 +56,7 @@ async def test_generate_parses_json_content():
     """JSON response format should be parsed into dictionaries."""
     payload = {"summary": "ok"}
     mock_response = MagicMock()
-    mock_response.content = "{\"summary\": \"ok\"}"
+    mock_response.content = '{"summary": "ok"}'
     mock_response.usage = None
     mock_response.finish_reason = "stop"
     mock_response.system_fingerprint = ""

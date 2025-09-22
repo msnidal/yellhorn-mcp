@@ -263,7 +263,9 @@ async def _generate_and_update_issue(
 
     except Exception as e:
         detail = _format_exception_message(e)
-        error_message = f"Failed to generate workplan: {detail}" if detail else "Failed to generate workplan"
+        error_message = (
+            f"Failed to generate workplan: {detail}" if detail else "Failed to generate workplan"
+        )
         if ctx:
             await ctx.log(level="error", message=error_message)
         await add_issue_comment(
@@ -571,7 +573,9 @@ IMPORTANT: Respond *only* with the Markdown content for the GitHub issue body. D
 
     except Exception as e:
         detail = _format_exception_message(e)
-        error_msg = f"Error processing workplan: {detail}" if detail else "Error processing workplan"
+        error_msg = (
+            f"Error processing workplan: {detail}" if detail else "Error processing workplan"
+        )
         if ctx:
             await ctx.log(level="error", message=error_msg)
 

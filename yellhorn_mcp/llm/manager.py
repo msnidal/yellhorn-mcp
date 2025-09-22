@@ -22,6 +22,7 @@ from yellhorn_mcp.llm.base import (
     ResponseFormat,
     UsageResult,
 )
+from yellhorn_mcp.llm.chunking import ChunkingStrategy
 from yellhorn_mcp.llm.clients import GeminiClient, OpenAIClient, XAIClient
 from yellhorn_mcp.llm.config import AggregationStrategy, ChunkStrategy, LLMManagerConfig
 from yellhorn_mcp.llm.errors import UnsupportedModelError
@@ -30,7 +31,6 @@ from yellhorn_mcp.llm.model_families import (
     is_openai_model,
     is_xai_model,
 )
-from yellhorn_mcp.llm.chunking import ChunkingStrategy
 from yellhorn_mcp.llm.retry import api_retry, is_retryable_error, log_retry_attempt
 from yellhorn_mcp.llm.usage import UsageMetadata
 from yellhorn_mcp.utils.token_utils import TokenCounter

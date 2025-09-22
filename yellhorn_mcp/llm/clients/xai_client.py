@@ -6,12 +6,10 @@ from typing import Dict, Final, Optional, Union
 
 from xai_sdk import AsyncClient as AsyncXAI
 from xai_sdk.aio.chat import Chat, Response
-from xai_sdk.chat import (
-    ReasoningEffort as XAIReasoningEffort,
-    ResponseFormat as XAIResponseFormat,
-    system as system_message,
-    user as user_message,
-)
+from xai_sdk.chat import ReasoningEffort as XAIReasoningEffort
+from xai_sdk.chat import ResponseFormat as XAIResponseFormat
+from xai_sdk.chat import system as system_message
+from xai_sdk.chat import user as user_message
 from xai_sdk.proto import chat_pb2
 
 from yellhorn_mcp.llm.base import (
@@ -53,7 +51,9 @@ def _map_reasoning_effort(
     if effort is ReasoningEffort.HIGH:
         return HIGH_EFFORT
     if effort is ReasoningEffort.MEDIUM:
-        logger.debug("xAI does not support medium reasoning effort; falling back to provider default")
+        logger.debug(
+            "xAI does not support medium reasoning effort; falling back to provider default"
+        )
     return None
 
 

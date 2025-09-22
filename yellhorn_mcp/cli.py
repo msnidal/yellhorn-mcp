@@ -126,9 +126,7 @@ def main():
         api_key = os.getenv("XAI_API_KEY")
         if not api_key:
             logging.error("XAI_API_KEY environment variable is not set")
-            logging.error(
-                "Please set the XAI_API_KEY environment variable with your xAI API key"
-            )
+            logging.error("Please set the XAI_API_KEY environment variable with your xAI API key")
             sys.exit(1)
         if AsyncXAI is None:
             logging.error("xai-sdk is required for Grok models but is not installed")

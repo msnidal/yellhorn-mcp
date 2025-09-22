@@ -160,7 +160,9 @@ class TestLLMManager:
 
         xai_generate_result = {
             "content": "Grok reply",
-            "usage_metadata": UsageMetadata({"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}),
+            "usage_metadata": UsageMetadata(
+                {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+            ),
         }
 
         with patch("yellhorn_mcp.llm.manager.XAIClient") as mock_xai_client_cls:

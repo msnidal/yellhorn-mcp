@@ -450,9 +450,7 @@ class TestGenerateAndUpdateIssue:
 
         mock_github_command = AsyncMock(side_effect=capture_github_command)
 
-        with patch(
-            "yellhorn_mcp.processors.workplan_processor.calculate_cost", return_value=0.05
-        ):
+        with patch("yellhorn_mcp.processors.workplan_processor.calculate_cost", return_value=0.05):
             await _generate_and_update_issue(
                 repo_path=repo_path,
                 llm_manager=mock_llm_manager,
