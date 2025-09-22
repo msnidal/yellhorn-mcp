@@ -4,21 +4,6 @@
 
 A Model Context Protocol (MCP) server that provides functionality to create detailed workplans to implement a task or feature. These workplans are generated with a large, powerful model (such as gemini 2.5 pro or even the o3 deep research API), insert your entire codebase into the context window by default, and can also access URL context and do web search depending on the model used. This pattern of creating workplans using a powerful reasoning model is highly useful for defining work to be done by code assistants like Claude Code or other MCP compatible coding agents, as well as providing a reference to reviewing the output of such coding models and ensure they meet the exactly specified original requirements.
 
-## What's New in v0.7.1
-
-- **📁 Advanced File Filtering**: Multi-layer file filtering system with `.gitignore`, `.yellhornignore`, and `.yellhorncontext` support
-- **🎯 Smart Context Curation**: Improved context curation with directory consolidation and better LLM integration
-- **🔒 Token Safety**: Enhanced token limit enforcement with 10% safety margins and clear truncation notices
-- **🛠️ Better Organization**: Refactored codebase with cleaner module separation (formatters, utils, processors)
-- **✅ Test Reliability**: Fixed 54+ test failures and improved test infrastructure
-- **🔄 Git Integration**: Consolidated git command handling with dependency injection for better testability
-
-### Previous Release (v0.7.0)
-- **🔄 Unified LLM Manager**: Centralized LLM management with automatic retry logic
-- **🧩 Smart Chunking**: Automatic prompt chunking for large codebases
-- **📊 Enhanced Token Counting**: Support for latest models (o3, o4-mini, gemini-2.5-pro)
-- **💰 Cost Tracking**: Comprehensive cost estimation and usage tracking
-
 ## Features
 
 - **Create Workplans**: Creates detailed implementation plans based on a prompt and taking into consideration your entire codebase, posting them as GitHub issues and exposing them as MCP resources for your coding agent
@@ -30,18 +15,34 @@ A Model Context Protocol (MCP) server that provides functionality to create deta
 - **Automatic Chunking**: Handles large codebases that exceed model context limits by intelligently splitting prompts
 - **Rate Limit Handling**: Robust retry logic with exponential backoff for rate limits and transient failures
 - **Cost Tracking**: Real-time cost estimation and usage tracking for all API calls
-- **Multi-Model Support**: Unified interface supporting OpenAI (GPT-4o, GPT-5, o3, o4-mini) and Gemini (2.5-pro, 2.5-flash) models with reasoning mode support for GPT-5
+- **Multi-Model Support**: Unified interface supporting OpenAI (GPT-4o, GPT-5, o3, o4-mini), xAI Grok (Grok-4, Grok-4 Fast), and Gemini (2.5-pro, 2.5-flash) models with reasoning mode support for GPT-5
 
 ## Installation
 
-```bash
-# Install from PyPI
-pip install yellhorn-mcp
+### Project bootstrap (uv)
 
+```bash
 # Install from source
 git clone https://github.com/msnidal/yellhorn-mcp.git
 cd yellhorn-mcp
-pip install -e .
+
+# Provision the environment and install all dependency groups
+uv sync --group dev
+
+# Optional: activate the environment for direct shell usage
+source .venv/bin/activate
+
+# Verify the CLI entrypoint
+uv run yellhorn-mcp --help
+```
+
+`uv sync` provisions `.venv`, installs the package in editable mode, and applies the `dev`
+dependency group defined in `pyproject.toml`.
+
+### Install from PyPI
+
+```bash
+uv pip install yellhorn-mcp
 ```
 
 ## Configuration
@@ -50,17 +51,21 @@ The server requires the following environment variables:
 
 - `GEMINI_API_KEY`: Your Gemini API key (required for Gemini models)
 - `OPENAI_API_KEY`: Your OpenAI API key (required for OpenAI models)
+- `XAI_API_KEY`: Your xAI API key (required for Grok models)
 - `REPO_PATH`: Path to your repository (defaults to current directory)
 - `YELLHORN_MCP_MODEL`: Model to use (defaults to "gemini-2.5-pro"). Available options:
   - **Gemini models**: "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"
   - **OpenAI models**: "gpt-4o", "gpt-4o-mini", "o4-mini", "o3", "gpt-4.1"
   - **GPT-5 models**: "gpt-5", "gpt-5-mini", "gpt-5-nano" (support reasoning mode for gpt-5 and gpt-5-mini)
+  - **xAI Grok models**: "grok-4" (256K context) and "grok-4-fast" (2M context)
   - **Deep Research models**: "o3-deep-research", "o4-mini-deep-research"
   - Note: Deep Research models (including GPT-5) automatically enable `web_search_preview` and `code_interpreter` tools for enhanced research capabilities
 - `YELLHORN_MCP_REASONING_EFFORT`: Set reasoning effort level for GPT-5 models. Options: "low", "medium", "high". This provides enhanced reasoning capabilities at higher cost for supported models (gpt-5, gpt-5-mini). The effort level determines the amount of compute used for reasoning, with higher levels providing more thorough reasoning at increased cost. The server now forwards this value to every GPT-5 request and cost metrics automatically include the appropriate reasoning premium.
 - `YELLHORN_MCP_SEARCH`: Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models
+
+> ℹ️ Grok models now use the official `xai-sdk`; ensure it is installed in the environment (it is included in the project dependencies, but custom deployments should add it explicitly).
 
 The server also requires the GitHub CLI (`gh`) to be installed and authenticated.
 
@@ -84,8 +89,8 @@ To configure Yellhorn MCP in VSCode or Cursor, create a `.vscode/mcp.json` file 
   "servers": {
     "yellhorn-mcp": {
       "type": "stdio",
-      "command": "/Users/msnidal/.pyenv/shims/yellhorn-mcp",
-      "args": [],
+      "command": "uv",
+      "args": ["run", "yellhorn-mcp"],
       "env": {
         "GEMINI_API_KEY": "${input:gemini-api-key}",
         "REPO_PATH": "${workspaceFolder}"
@@ -104,8 +109,8 @@ To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json
   "mcpServers": {
     "yellhorn-mcp": {
       "type": "stdio",
-      "command": "yellhorn-mcp",
-      "args": ["--model", "o3"],
+      "command": "uv",
+      "args": ["run", "yellhorn-mcp", "--model", "o3"],
       "env": {
         "YELLHORN_MCP_SEARCH": "on"
       }
@@ -143,6 +148,7 @@ Analyzes the codebase and creates a `.yellhorncontext` file listing directories 
 The `.yellhorncontext` file acts as a whitelist - only files matching the patterns will be included in subsequent workplan/judgement calls. This significantly reduces token usage and improves AI focus on relevant code.
 
 **Example `.yellhorncontext` output**:
+
 ```
 src/api/
 src/models/
@@ -247,6 +253,7 @@ Yellhorn MCP provides a sophisticated multi-layer file filtering system to contr
 ### Always Ignored Patterns
 
 The following patterns are always ignored regardless of other settings:
+
 - `.git/` - Git metadata
 - `__pycache__/` - Python cache files
 - `node_modules/` - Node.js dependencies
@@ -256,6 +263,7 @@ The following patterns are always ignored regardless of other settings:
 ### File Format
 
 Both `.yellhornignore` and `.yellhorncontext` files follow a gitignore-like syntax:
+
 - One pattern per line
 - Lines starting with `#` are comments
 - Empty lines are ignored
@@ -309,14 +317,21 @@ mcp get-resource yellhorn-mcp 123
 ## Development
 
 ```bash
-# Install development dependencies
-pip install -e ".[dev]"
+# Ensure the environment is up to date
+uv sync --group dev
 
 # Run tests
-pytest
+uv run --group dev pytest
 
 # Run tests with coverage report
-pytest --cov=yellhorn_mcp --cov-report term-missing
+uv run --group dev pytest -- --cov=yellhorn_mcp --cov-report term-missing
+
+# Add or remove dependencies
+uv add some-package
+uv remove some-package
+
+# Regenerate the lockfile (commit the result)
+uv lock
 ```
 
 ### CI/CD

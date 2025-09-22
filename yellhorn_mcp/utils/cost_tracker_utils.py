@@ -78,6 +78,15 @@ MODEL_PRICING = {
         "input": {"default": 10.0},  # $10 per 1M input tokens
         "output": {"default": 40.0},  # $40 per 1M output tokens
     },
+    # xAI Grok models (OpenAI-compatible)
+    "grok-4": {
+        "input": {"default": 3.00},  # $3.00 per 1M input tokens
+        "output": {"default": 15.00},  # $15.00 per 1M output tokens
+    },
+    "grok-4-fast": {
+        "input": {"default": 0.20},  # $0.20 per 1M input tokens
+        "output": {"default": 0.50},  # $0.50 per 1M output tokens
+    },
     # Deep Research Models
     "o3-deep-research": {
         "input": {"default": 10.00},

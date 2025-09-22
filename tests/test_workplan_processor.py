@@ -419,6 +419,67 @@ class TestGenerateAndUpdateIssue:
         assert "Generated workplan content" in captured_content[0]
 
     @pytest.mark.asyncio
+    async def test_generate_and_update_issue_skips_reasoning_for_xai(self, tmp_path):
+        """Ensure reasoning effort is ignored for Grok models."""
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+
+        mock_llm_manager = MagicMock(spec=LLMManager)
+        mock_usage = UsageMetadata(
+            {"prompt_tokens": 25, "completion_tokens": 10, "total_tokens": 35}
+        )
+        mock_llm_manager.call_llm_with_usage.return_value = {
+            "content": "Grok workplan",
+            "usage_metadata": mock_usage,
+            "reasoning_effort": None,
+        }
+
+        mock_ctx = MagicMock()
+        mock_ctx.log = AsyncMock()
+
+        captured_content: list[str] = []
+
+        async def capture_github_command(repo_path, args):
+            if len(args) >= 5 and args[3] == "--body-file":
+                try:
+                    with open(args[4], "r") as handle:
+                        captured_content.append(handle.read())
+                except FileNotFoundError:
+                    captured_content.append("")
+            return ""
+
+        mock_github_command = AsyncMock(side_effect=capture_github_command)
+
+        with patch("yellhorn_mcp.processors.workplan_processor.calculate_cost", return_value=0.05):
+            await _generate_and_update_issue(
+                repo_path=repo_path,
+                llm_manager=mock_llm_manager,
+                model="grok-4",
+                prompt="Test prompt",
+                issue_number="321",
+                title="Test Title",
+                content_prefix="# Test Title\n\n",
+                disable_search_grounding=True,
+                debug=False,
+                codebase_reasoning="full",
+                _meta={
+                    "start_time": __import__("datetime").datetime.now(
+                        __import__("datetime").timezone.utc
+                    )
+                },
+                ctx=mock_ctx,
+                github_command_func=mock_github_command,
+                reasoning_effort=ReasoningEffort.HIGH,
+            )
+
+        mock_llm_manager.call_llm_with_usage.assert_called_once()
+        call_kwargs = mock_llm_manager.call_llm_with_usage.call_args.kwargs
+        assert "reasoning_effort" not in call_kwargs
+
+        assert mock_github_command.await_count >= 1
+        assert captured_content and "Grok workplan" in captured_content[0]
+
+    @pytest.mark.asyncio
     async def test_generate_and_update_issue_success_gemini(self, tmp_path):
         """Test successful issue generation and update with Gemini."""
         repo_path = tmp_path / "repo"

@@ -121,6 +121,21 @@ def test_calculate_cost_deep_research_models():
     assert round(cost, 2) == 0.33
 
 
+def test_calculate_cost_grok_models():
+    """Test calculate_cost with Grok models."""
+    # grok-4 pricing
+    cost = calculate_cost("grok-4", 100_000, 50_000)
+    # Expected: (100_000 / 1M) * 3.00 + (50_000 / 1M) * 15.00
+    # = 0.3 + 0.75 = 1.05
+    assert abs(cost - 1.05) < 0.0001
+
+    # grok-4-fast pricing
+    cost = calculate_cost("grok-4-fast", 100_000, 50_000)
+    # Expected: (100_000 / 1M) * 0.20 + (50_000 / 1M) * 0.50
+    # = 0.02 + 0.025 = 0.045
+    assert abs(cost - 0.045) < 0.0001
+
+
 def test_calculate_cost_zero_tokens():
     """Test calculate_cost with zero tokens."""
     cost = calculate_cost("gpt-4o", 0, 0)

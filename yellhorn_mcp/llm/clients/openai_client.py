@@ -104,8 +104,8 @@ class OpenAIClient(LLMClient):
             params["reasoning"] = OpenAIReasoning(effort=request.reasoning_effort.value)
 
         if _is_deep_research_model(request.model):
-            tools: list[ToolParam] = [
-                WebSearchToolParam(type="web_search_preview"),
+            tools: Sequence[ToolParam] = [
+                WebSearchToolParam(type="web_search"),
                 CodeInterpreter(
                     type="code_interpreter",
                     container=CodeInterpreterContainerCodeInterpreterToolAuto(

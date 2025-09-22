@@ -112,6 +112,15 @@ class UsageMetadata:
             pt = data.get("prompt_tokens")
             ct = data.get("completion_tokens")
             tt = data.get("total_tokens")
+            if pt is None:
+                pt = data.get("input_tokens")
+            if ct is None:
+                ct = data.get("output_tokens")
+            if tt is None and pt is not None and ct is not None:
+                try:
+                    tt = int(pt) + int(ct)
+                except Exception:
+                    tt = None
             mdl = data.get("model")
             self.prompt_tokens = pt if isinstance(pt, int) or pt is None else 0
             self.completion_tokens = ct if isinstance(ct, int) or ct is None else 0
@@ -122,11 +131,17 @@ class UsageMetadata:
             self.prompt_tokens = data.input_tokens
             self.completion_tokens = data.output_tokens
             self.total_tokens = data.total_tokens
+            mdl = getattr(data, "model", None)
+            if isinstance(mdl, str):
+                self.model = mdl
         elif isinstance(data, _OpenAICompat):
             # OpenAI CompletionUsage-like format
             self.prompt_tokens = data.prompt_tokens
             self.completion_tokens = data.completion_tokens
             self.total_tokens = data.total_tokens
+            mdl = getattr(data, "model", None)
+            if isinstance(mdl, str):
+                self.model = mdl
         else:
             # Final attempt: handle objects with Gemini-like attributes
             try:
@@ -134,7 +149,33 @@ class UsageMetadata:
                 self.completion_tokens = data.candidates_token_count  # type: ignore[attr-defined]
                 self.total_tokens = data.total_token_count  # type: ignore[attr-defined]
             except Exception:
-                pass
+                prompt = getattr(data, "prompt_tokens", None)
+                completion = getattr(data, "completion_tokens", None)
+                total = getattr(data, "total_tokens", None)
+                input_tokens = getattr(data, "input_tokens", None)
+                output_tokens = getattr(data, "output_tokens", None)
+                model_name = getattr(data, "model", None)
+
+                if prompt is None and input_tokens is not None:
+                    prompt = input_tokens
+                if completion is None and output_tokens is not None:
+                    completion = output_tokens
+                if total is None and prompt is not None and completion is not None:
+                    try:
+                        total = int(prompt) + int(completion)
+                    except Exception:
+                        total = None
+
+                if any(value is not None for value in (prompt, completion, total)):
+                    self.prompt_tokens = int(prompt or 0)
+                    self.completion_tokens = int(completion or 0)
+                    self.total_tokens = int(total or 0)
+                    if isinstance(model_name, str):
+                        self.model = model_name
+                else:
+                    raw_dict = getattr(data, "__dict__", None)
+                    if isinstance(raw_dict, dict) and raw_dict:
+                        self.__init__(raw_dict)
 
     @property
     def prompt_token_count(self) -> int:

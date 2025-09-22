@@ -2123,7 +2123,49 @@ async def test_app_lifespan_openai_model():
             assert lifespan_context["use_search_grounding"] is False  # Disabled for OpenAI
             assert lifespan_context["gemini_client"] is None
             assert lifespan_context["openai_client"] is not None
+            assert lifespan_context["xai_client"] is None
             assert lifespan_context["llm_manager"] is not None
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_grok_model(caplog):
+    """Test app_lifespan initializes Grok models with xAI credentials."""
+    from mcp.server.fastmcp import FastMCP
+
+    from yellhorn_mcp.server import app_lifespan
+
+    mock_server = MagicMock(spec=FastMCP)
+
+    caplog.set_level("INFO")
+
+    with (
+        patch("os.getenv") as mock_getenv,
+        patch("pathlib.Path.resolve") as mock_resolve,
+        patch("yellhorn_mcp.server.is_git_repository", return_value=True),
+        patch("yellhorn_mcp.server.AsyncXAI") as mock_async_xai,
+    ):
+
+        def getenv_side_effect(key, default=None):
+            env_vars = {
+                "REPO_PATH": "/test/repo",
+                "YELLHORN_MCP_MODEL": "grok-4",
+                "XAI_API_KEY": "test-xai-key",
+                "XAI_API_BASE_URL": "https://mock.x.ai/v1",
+            }
+            return env_vars.get(key, default)
+
+        mock_getenv.side_effect = getenv_side_effect
+        mock_resolve.return_value = Path("/test/repo")
+
+        async with app_lifespan(mock_server) as lifespan_context:
+            assert lifespan_context["model"] == "grok-4"
+            assert lifespan_context["use_search_grounding"] is False
+            assert lifespan_context["gemini_client"] is None
+            assert lifespan_context["openai_client"] is None
+            assert lifespan_context["xai_client"] is not None
+
+        mock_async_xai.assert_called_once_with(api_key="test-xai-key", api_host="mock.x.ai")
+        assert any("Initializing Grok client" in record.message for record in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -2174,6 +2216,35 @@ async def test_app_lifespan_missing_openai_api_key():
         mock_getenv.side_effect = getenv_side_effect
 
         with pytest.raises(ValueError, match="OPENAI_API_KEY is required for OpenAI models"):
+            async with app_lifespan(mock_server) as _:
+                pass
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_grok_missing_sdk():
+    """Grok models should raise if xai-sdk is unavailable."""
+    from mcp.server.fastmcp import FastMCP
+
+    from yellhorn_mcp.server import app_lifespan
+
+    mock_server = MagicMock(spec=FastMCP)
+
+    with (
+        patch("os.getenv") as mock_getenv,
+        patch("yellhorn_mcp.server.AsyncXAI", None),
+    ):
+
+        def getenv_side_effect(key, default=None):
+            env_vars = {
+                "REPO_PATH": "/test/repo",
+                "YELLHORN_MCP_MODEL": "grok-4",
+                "XAI_API_KEY": "test-xai-key",
+            }
+            return env_vars.get(key, default)
+
+        mock_getenv.side_effect = getenv_side_effect
+
+        with pytest.raises(ValueError, match="xai-sdk is required for Grok models"):
             async with app_lifespan(mock_server) as _:
                 pass
 

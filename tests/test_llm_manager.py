@@ -78,8 +78,19 @@ class TestLLMManager:
         assert manager._is_openai_model("gpt-5-nano") is True
         assert manager._is_openai_model("o4-mini") is True
         assert manager._is_openai_model("o3") is True
+        assert manager._is_openai_model("grok-4") is False
+        assert manager._is_openai_model("grok-4-fast") is False
         assert manager._is_openai_model("gemini-2.5-pro-preview-05-06") is False
         assert manager._is_openai_model("unknown-model") is False
+
+    def test_is_grok_model(self):
+        """Test Grok model detection."""
+        manager = LLMManager()
+
+        assert manager._is_grok_model("grok-4") is True
+        assert manager._is_grok_model("grok-4-fast") is True
+        assert manager._is_grok_model("gpt-4o") is False
+        assert manager._is_grok_model("gemini-2.5-pro") is False
 
     def test_is_gemini_model(self):
         """Test Gemini model detection."""
@@ -141,6 +152,39 @@ class TestLLMManager:
 
         assert result == "Test response"
         mock_openai.responses.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_call_llm_grok_uses_xai_client(self):
+        """Ensure Grok requests are routed through the xAI client adapter."""
+        mock_xai_sdk = MagicMock()
+
+        xai_generate_result = {
+            "content": "Grok reply",
+            "usage_metadata": UsageMetadata(
+                {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+            ),
+        }
+
+        with patch("yellhorn_mcp.llm.manager.XAIClient") as mock_xai_client_cls:
+            mock_adapter = MagicMock()
+            mock_adapter.generate = AsyncMock(return_value=xai_generate_result)
+            mock_xai_client_cls.return_value = mock_adapter
+
+            manager = LLMManager(xai_client=mock_xai_sdk)
+
+            result = await manager.call_llm(prompt="Hi", model="grok-4", temperature=0.0)
+
+            assert result == "Grok reply"
+            mock_xai_client_cls.assert_called_once_with(mock_xai_sdk)
+            mock_adapter.generate.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_call_llm_grok_without_client_raises(self):
+        """Missing xAI client should trigger configuration error."""
+        manager = LLMManager()
+
+        with pytest.raises(ValueError, match="xAI client not initialized"):
+            await manager.call_llm(prompt="Hi", model="grok-4")
 
     @pytest.mark.asyncio
     async def test_call_llm_gpt5_with_reasoning_high(self):
@@ -589,7 +633,7 @@ class TestLLMManager:
         call_args = mock_openai.responses.create.call_args[1]
         assert "tools" in call_args
         assert len(call_args["tools"]) == 2
-        assert call_args["tools"][0]["type"] == "web_search_preview"
+        assert call_args["tools"][0]["type"] == "web_search"
         assert call_args["tools"][1]["type"] == "code_interpreter"
         assert call_args["tools"][1]["container"]["type"] == "auto"
 

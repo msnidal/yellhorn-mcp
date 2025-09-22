@@ -64,6 +64,7 @@ ALWAYS_IGNORE_PATTERNS = {
     "yarn.lock",
     "pnpm-lock.yaml",
     "poetry.lock",
+    "uv.lock",
     "Pipfile.lock",
     "composer.lock",
     "Gemfile.lock",

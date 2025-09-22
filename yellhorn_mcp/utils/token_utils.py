@@ -49,6 +49,8 @@ class TokenCounter:
         "gpt-5": 2_000_000,  # GPT-5 with 2M context window
         "gpt-5-mini": 1_000_000,  # GPT-5 mini variant with 1M context
         "gpt-5-nano": 500_000,  # GPT-5 nano variant with 500K context
+        "grok-4": 256_000,  # Grok-4 with 256K context window
+        "grok-4-fast": 2_000_000,  # Grok-4 Fast with 2M context window
         # Google models
         "gemini-2.0-flash-exp": 1_048_576,
         "gemini-1.5-flash": 1_048_576,
@@ -68,6 +70,8 @@ class TokenCounter:
         "gpt-5": "o200k_base",  # GPT-5 uses the same encoding as GPT-4o
         "gpt-5-mini": "o200k_base",
         "gpt-5-nano": "o200k_base",
+        "grok-4": "o200k_base",  # Grok models follow OpenAI-compatible encoding
+        "grok-4-fast": "o200k_base",
         # Gemini models - we'll use cl100k_base as approximation
         "gemini-2.0-flash-exp": "cl100k_base",
         "gemini-1.5-flash": "cl100k_base",
@@ -123,6 +127,8 @@ class TokenCounter:
                 "gpt-5": "cl100k_base",
                 "gpt-5-mini": "cl100k_base",
                 "gpt-5-nano": "cl100k_base",
+                "grok-4": "cl100k_base",
+                "grok-4-fast": "cl100k_base",
             }
             self.MODEL_TO_ENCODING = {**self.MODEL_TO_ENCODING, **fast_overrides}
 

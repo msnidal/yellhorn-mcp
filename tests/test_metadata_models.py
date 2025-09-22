@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from yellhorn_mcp.models.metadata_models import CompletionMetadata, SubmissionMetadata
+from yellhorn_mcp.models.metadata_models import (
+    CompletionMetadata,
+    SubmissionMetadata,
+    UsageMetadata,
+)
 
 
 class TestSubmissionMetadata:
@@ -402,3 +406,23 @@ class TestCompletionMetadata:
         assert "Completion status" in completion_fields["status"].description
         assert "Time taken" in completion_fields["generation_time_seconds"].description
         assert "input tokens" in completion_fields["input_tokens"].description
+
+
+class DummyXAIUsage:
+    """Simple object mimicking xAI usage payload."""
+
+    def __init__(self, prompt=12, completion=7, total=19, model="grok-4") -> None:
+        self.prompt_tokens = prompt
+        self.completion_tokens = completion
+        self.total_tokens = total
+        self.model = model
+
+
+def test_usage_metadata_handles_xai_object():
+    """UsageMetadata should parse objects exposing xAI-style attributes."""
+    usage = UsageMetadata(DummyXAIUsage())
+
+    assert usage.prompt_tokens == 12
+    assert usage.completion_tokens == 7
+    assert usage.total_tokens == 19
+    assert usage.model == "grok-4"
