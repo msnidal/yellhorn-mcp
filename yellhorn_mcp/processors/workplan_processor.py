@@ -414,7 +414,7 @@ MANDATORY CONTENT PER SECTION
 • Languages, frameworks, min versions.  
 • “External Dependencies” sub-section:  
   – List every new third-party package AND specify how it will be introduced (e.g., `pyproject.toml` stanza, Dockerfile line).  
-• Dependency management & pinning strategy (poetry, npm, go-mods, etc.).  
+• Dependency management & pinning strategy (uv, npm, go-mods, etc.).  
 • Build, lint, formatting, type-checking commands.  
 • Logging & observability – logger names, redaction strategy, trace IDs, dashboards.  
 • Analytics/KPIs – event names, schema, when they fire.  

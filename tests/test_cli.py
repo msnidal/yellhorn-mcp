@@ -158,6 +158,34 @@ def test_main_missing_xai_api_key(mock_mcp_run, mock_getenv, mock_exit, caplog):
     mock_mcp_run.assert_not_called()
 
 
+@patch("sys.argv", ["yellhorn-mcp", "--model", "grok-4"])
+@patch("sys.exit")
+@patch("os.getenv")
+@patch("yellhorn_mcp.server.mcp.run")
+def test_main_missing_xai_sdk(mock_mcp_run, mock_getenv, mock_exit, caplog):
+    """Ensure CLI errors if Grok model is requested without xai-sdk installed."""
+    mock_exit.side_effect = SystemExit
+
+    def getenv_side_effect(key, default=None):
+        env_vars = {
+            "REPO_PATH": "/mock/repo",
+            "XAI_API_KEY": "test-xai-key",
+            "YELLHORN_MCP_REASONING": "full",
+        }
+        return env_vars.get(key, default)
+
+    mock_getenv.side_effect = getenv_side_effect
+
+    with patch("yellhorn_mcp.cli.AsyncXAI", None):
+        with pytest.raises(SystemExit):
+            main()
+
+    error_msg = "xai-sdk is required for Grok models but is not installed"
+    assert any(error_msg in record.message for record in caplog.records)
+    mock_exit.assert_any_call(1)
+    mock_mcp_run.assert_not_called()
+
+
 @patch("sys.argv", ["yellhorn-mcp"])
 @patch("sys.exit")
 @patch("os.getenv")

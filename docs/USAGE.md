@@ -22,14 +22,27 @@ Yellhorn MCP is a Model Context Protocol (MCP) server that allows Claude Code to
 
 ## Installation
 
-```bash
-# Install from PyPI
-pip install yellhorn-mcp
+### Project bootstrap (uv)
 
+```bash
 # Install from source
 git clone https://github.com/msnidal/yellhorn-mcp.git
 cd yellhorn-mcp
-pip install -e .
+
+# Provision the environment and install dependencies
+uv sync --group dev
+
+# Optional: activate the environment for direct shell usage
+source .venv/bin/activate
+
+# Verify the CLI entrypoint
+uv run yellhorn-mcp --help
+```
+
+### Install from PyPI
+
+```bash
+uv pip install yellhorn-mcp
 ```
 
 ## Configuration
@@ -51,7 +64,8 @@ The server requires the following environment variables:
 - `YELLHORN_MCP_SEARCH` (optional): Enable/disable Google Search Grounding (defaults to "on" for Gemini models). Options:
   - "on" - Search grounding enabled for Gemini models
   - "off" - Search grounding disabled for all models
-- `XAI_API_BASE_URL` (optional): Override the default xAI endpoint (`https://api.x.ai/v1`) if needed
+
+> **Note:** Grok models now use the official `xai-sdk`. Ensure the dependency is installed in the environment where the server runs (it's already listed in `pyproject.toml`).
 
 ### File Filtering with .yellhorncontext and .yellhornignore
 
@@ -188,8 +202,8 @@ To configure Yellhorn MCP in VSCode or Cursor, create a `.vscode/mcp.json` file 
   "servers": {
     "yellhorn-mcp": {
       "type": "stdio",
-      "command": "/Users/msnidal/.pyenv/shims/yellhorn-mcp",
-      "args": [],
+      "command": "uv",
+      "args": ["run", "yellhorn-mcp"],
       "env": {
         "GEMINI_API_KEY": "${input:gemini-api-key}",
         "REPO_PATH": "${workspaceFolder}",
@@ -211,8 +225,8 @@ To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json
   "mcpServers": {
     "yellhorn-mcp": {
       "type": "stdio",
-      "command": "yellhorn-mcp",
-      "args": ["--model","o3"],
+      "command": "uv",
+      "args": ["run","yellhorn-mcp","--model","o3"],
       "env": {
         "YELLHORN_MCP_SEARCH": "on"
       }
@@ -221,7 +235,7 @@ To configure Yellhorn MCP with Claude Code directly, add a root-level `.mcp.json
 }
 ```
 
-When targeting Grok models via Claude Code, include `"XAI_API_KEY": "your_xai_api_key"` in the `env` section (and optionally `"XAI_API_BASE_URL"`) to route requests through the xAI endpoint.
+When targeting Grok models via Claude Code, include `"XAI_API_KEY": "your_xai_api_key"` in the `env` section to enable the integration via the native xAI SDK.
 
 ## Getting Started
 

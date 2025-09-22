@@ -30,6 +30,11 @@ from google import genai
 from mcp.server.fastmcp import Context, FastMCP
 from openai import AsyncOpenAI
 
+try:  # pragma: no cover - runtime import guarded for optional dependency
+    from xai_sdk import AsyncClient as AsyncXAI
+except ImportError:  # pragma: no cover - fallback for environments without xai-sdk installed
+    AsyncXAI = None  # type: ignore[assignment]
+
 from yellhorn_mcp import __version__
 from yellhorn_mcp.integrations.github_integration import (
     add_issue_comment,
@@ -59,6 +64,17 @@ from yellhorn_mcp.utils.git_utils import (
 logging.basicConfig(
     stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
 )
+
+
+def _sanitize_host(raw_host: str | None) -> str:
+    if not raw_host:
+        return "api.x.ai"
+    host = raw_host.strip()
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    if "/" in host:
+        host = host.split("/", 1)[0]
+    return host or "api.x.ai"
 
 
 @asynccontextmanager
@@ -102,6 +118,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     # Initialize clients based on the model type
     gemini_client = None
     openai_client = None
+    xai_client = None
     llm_manager = None
 
     # For Gemini models, require Gemini API key
@@ -114,34 +131,40 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
     # For OpenAI-compatible models, require the appropriate API key
     else:
         # Import here to avoid loading the module if not needed
-        import httpx
-
-        http_client = httpx.AsyncClient()
-
         if is_grok_model:
             xai_api_key = os.getenv("XAI_API_KEY")
             if not xai_api_key:
                 raise ValueError("XAI_API_KEY is required for Grok models")
 
-            xai_base_url = os.getenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
-            openai_client = AsyncOpenAI(
-                api_key=xai_api_key,
-                http_client=http_client,
-                base_url=xai_base_url,
-            )
-            logging.info("Initializing Grok client against %s", xai_base_url)
+            if AsyncXAI is None:
+                raise ValueError(
+                    "xai-sdk is required for Grok models but is not installed in this environment"
+                )
+
+            xai_host_env = os.getenv("XAI_API_HOST") or os.getenv("XAI_API_BASE_URL")
+            api_host = _sanitize_host(xai_host_env) if xai_host_env else "api.x.ai"
+
+            xai_client = AsyncXAI(api_key=xai_api_key, api_host=api_host)
+            if xai_host_env:
+                logging.info("Initializing Grok client against %s", api_host)
+            else:
+                logging.info("Initializing Grok client with default endpoint")
         else:
             openai_api_key = os.getenv("OPENAI_API_KEY")
             if not openai_api_key:
                 raise ValueError("OPENAI_API_KEY is required for OpenAI models")
 
+            import httpx
+
+            http_client = httpx.AsyncClient()
             openai_client = AsyncOpenAI(api_key=openai_api_key, http_client=http_client)
 
     # Initialize LLM Manager with available clients
-    if gemini_client or openai_client:
+    if gemini_client or openai_client or xai_client:
         llm_manager = LLMManager(
             openai_client=openai_client,
             gemini_client=gemini_client,
+            xai_client=xai_client,
             config={
                 "safety_margin_tokens": 2000,  # Reserve tokens for system prompts and responses
                 "overlap_ratio": 0.1,  # 10% overlap between chunks
@@ -173,6 +196,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
             "repo_path": repo_path,
             "gemini_client": gemini_client,
             "openai_client": openai_client,
+            "xai_client": xai_client,
             "llm_manager": llm_manager,
             "model": model,
             "use_search_grounding": use_search_grounding,
@@ -186,7 +210,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
 # Initialize MCP server
 mcp = FastMCP(
     name="yellhorn-mcp",
-    dependencies=["google-genai~=1.8.0", "aiohttp~=3.11.14", "pydantic~=2.11.1", "openai~=1.23.6"],
+    dependencies=[
+        "google-genai~=1.8.0",
+        "aiohttp~=3.11.14",
+        "pydantic~=2.11.1",
+        "openai~=1.23.6",
+        "xai-sdk~=1.2.0",
+    ],
     lifespan=app_lifespan,
 )
 

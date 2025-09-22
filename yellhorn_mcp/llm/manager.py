@@ -5,11 +5,12 @@ Coordinates token counting, chunking, provider dispatch, and aggregation.
 
 import logging
 from dataclasses import replace
-from typing import Dict, List, Mapping, Optional, TypedDict, Union
+from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, TypedDict, Union
 
 from google import genai
 from google.genai.types import GenerateContentConfig
 from openai import AsyncOpenAI
+from xai_sdk import AsyncClient as AsyncXAI
 
 from yellhorn_mcp.llm.base import (
     CitationResult,
@@ -22,10 +23,10 @@ from yellhorn_mcp.llm.base import (
     UsageResult,
 )
 from yellhorn_mcp.llm.chunking import ChunkingStrategy
-from yellhorn_mcp.llm.clients import GeminiClient, OpenAIClient
+from yellhorn_mcp.llm.clients import GeminiClient, OpenAIClient, XAIClient
 from yellhorn_mcp.llm.config import AggregationStrategy, ChunkStrategy, LLMManagerConfig
 from yellhorn_mcp.llm.errors import UnsupportedModelError
-from yellhorn_mcp.llm.retry import api_retry, is_retryable_error, log_retry_attempt
+from yellhorn_mcp.llm.retry import is_retryable_error, log_retry_attempt
 from yellhorn_mcp.llm.usage import UsageMetadata
 from yellhorn_mcp.utils.token_utils import TokenCounter
 
@@ -51,19 +52,40 @@ class LLMManager:
         self,
         openai_client: Optional[AsyncOpenAI] = None,
         gemini_client: Optional[genai.Client] = None,
+        xai_client: Optional["AsyncXAI"] = None,
         config: ConfigMapping | LLMManagerConfig | None = None,
         client: Optional[LLMClient] = None,
     ) -> None:
         # Allow either a pre-built protocol client or raw SDK clients
         self.client: Optional[LLMClient] = client
-        if self.client is None:
-            if openai_client:
-                self.client = OpenAIClient(openai_client)
-            elif gemini_client:
-                self.client = GeminiClient(gemini_client)
-
         self.openai_client = openai_client
         self.gemini_client = gemini_client
+        self.xai_client = xai_client
+
+        self._openai_adapter: Optional[LLMClient] = None
+        self._gemini_adapter: Optional[LLMClient] = None
+        self._xai_adapter: Optional[LLMClient] = None
+
+        if self.client is None:
+            if openai_client and not gemini_client and not xai_client:
+                self._openai_adapter = OpenAIClient(openai_client)
+                self.client = self._openai_adapter
+            elif gemini_client and not openai_client and not xai_client:
+                self._gemini_adapter = GeminiClient(gemini_client)
+                self.client = self._gemini_adapter
+            elif xai_client and not openai_client and not gemini_client:
+                self._xai_adapter = XAIClient(xai_client)
+                self.client = self._xai_adapter
+
+        try:
+            if isinstance(self.client, OpenAIClient):  # pragma: no cover - defensive
+                self._openai_adapter = self.client
+            elif isinstance(self.client, GeminiClient):  # pragma: no cover - defensive
+                self._gemini_adapter = self.client
+            elif isinstance(self.client, XAIClient):  # pragma: no cover - defensive
+                self._xai_adapter = self.client
+        except TypeError:  # pragma: no cover - occurs when test doubles replace adapters
+            pass
 
         if isinstance(config, LLMManagerConfig):
             cfg = config
@@ -131,7 +153,10 @@ class LLMManager:
         )
 
     def _is_openai_model(self, model: str) -> bool:
-        return any(model.startswith(prefix) for prefix in ("gpt-", "o3", "o4-", "grok-"))
+        return any(model.startswith(prefix) for prefix in ("gpt-", "o3", "o4-"))
+
+    def _is_grok_model(self, model: str) -> bool:
+        return model.startswith("grok-")
 
     def _is_gemini_model(self, model: str) -> bool:
         return model.startswith("gemini-") or model.startswith("mock-")
@@ -147,6 +172,33 @@ class LLMManager:
         Kept for compatibility with previous behavior/tests.
         """
         return any(model.startswith(prefix) for prefix in ("o3", "o4-", "gpt-5"))
+
+    def _resolve_client(self, model: str) -> LLMClient:
+        if self.client is not None:
+            return self.client
+
+        if self._is_grok_model(model):
+            if self.xai_client is None:
+                raise ValueError("xAI client not initialized")
+            if self._xai_adapter is None:
+                self._xai_adapter = XAIClient(self.xai_client)
+            return self._xai_adapter
+
+        if self._is_openai_model(model):
+            if self.openai_client is None:
+                raise ValueError("OpenAI client not initialized")
+            if self._openai_adapter is None:
+                self._openai_adapter = OpenAIClient(self.openai_client)
+            return self._openai_adapter
+
+        if self._is_gemini_model(model):
+            if self.gemini_client is None:
+                raise ValueError("Gemini client not configured")
+            if self._gemini_adapter is None:
+                self._gemini_adapter = GeminiClient(self.gemini_client)
+            return self._gemini_adapter
+
+        raise UnsupportedModelError("No suitable LLM client is configured")
 
     async def call_llm(
         self,
@@ -213,18 +265,7 @@ class LLMManager:
         ctx: Optional[LoggerContext],
     ) -> Union[str, Dict[str, object]]:
         model = request.model
-        if self.client is None:
-            # If not configured with a protocol client, pick by model prefix
-            if self._is_openai_model(model) and self.openai_client:
-                self.client = OpenAIClient(self.openai_client)
-            elif self._is_gemini_model(model) and self.gemini_client:
-                self.client = GeminiClient(self.gemini_client)
-            else:
-                if self._is_openai_model(model):
-                    raise ValueError("OpenAI client not initialized")
-                if self._is_gemini_model(model):
-                    raise ValueError("Gemini client not configured")
-                raise UnsupportedModelError("No suitable LLM client is configured")
+        client = self._resolve_client(model)
 
         # Track reasoning effort for supported models
         if request.reasoning_effort and self._is_reasoning_model(model):
@@ -232,7 +273,7 @@ class LLMManager:
         else:
             self._last_reasoning_effort = None
 
-        gen: GenerateResult = await self.client.generate(request, ctx=ctx)
+        gen: GenerateResult = await client.generate(request, ctx=ctx)
         self._last_usage_metadata = gen.get("usage_metadata", UsageMetadata())
         self._last_extras = gen.get("extras")
         return gen.get("content", "")  # type: ignore[return-value]

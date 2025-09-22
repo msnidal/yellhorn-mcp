@@ -14,7 +14,7 @@ from pathlib import Path
 
 import uvicorn
 
-from yellhorn_mcp.server import is_git_repository, mcp
+from yellhorn_mcp.server import AsyncXAI, is_git_repository, mcp
 
 logging.basicConfig(
     stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
@@ -116,6 +116,12 @@ def main():
                 logging.error("XAI_API_KEY environment variable is not set")
                 logging.error(
                     "Please set the XAI_API_KEY environment variable with your xAI API key"
+                )
+                sys.exit(1)
+            if AsyncXAI is None:
+                logging.error("xai-sdk is required for Grok models but is not installed")
+                logging.error(
+                    "Install the xai-sdk package (e.g., 'uv pip install xai-sdk' or rerun 'uv sync') to use Grok models"
                 )
                 sys.exit(1)
         else:
