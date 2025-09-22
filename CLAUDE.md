@@ -38,24 +38,6 @@ python -m isort yellhorn_mcp tests
 
 Remember to run these commands automatically when making changes to ensure consistent code style.
 
-## LLM Manager Usage
-
-When working with LLM calls, always use the unified `LLMManager`:
-
-```python
-# Good - using LLM Manager
-llm_manager = LLMManager(openai_client=openai_client, gemini_client=gemini_client)
-response = await llm_manager.call_llm(prompt=prompt, model=model, temperature=0.7)
-
-# Good - with usage tracking
-result = await llm_manager.call_llm_with_usage(prompt=prompt, model=model)
-content = result["content"]
-usage = result["usage_metadata"]
-
-# Bad - direct client calls
-response = await openai_client.chat.completions.create(...)
-```
-
 ## Retry Logic
 
 Use the built-in retry decorator for external API calls:
@@ -76,6 +58,7 @@ Before submitting a PR to the yellhorn-mcp repository, ensure your code meets al
 ### Pre-submission Checklist
 
 1. **Code Formatting** (Required)
+
    ```bash
    # Format code with black
    python -m black yellhorn_mcp tests
@@ -85,6 +68,7 @@ Before submitting a PR to the yellhorn-mcp repository, ensure your code meets al
    ```
 
 2. **Run Tests Locally**
+
    ```bash
    # Run tests with coverage report
    pytest --cov=yellhorn_mcp --cov-report term-missing
@@ -118,7 +102,7 @@ When you submit a PR, GitHub Actions will automatically verify:
 
 ### Repository Information
 
-- **Main Repository**: https://github.com/msnidal/yellhorn-mcp
+- **Main Repository**: <https://github.com/msnidal/yellhorn-mcp>
 - **Repository Owner**: msnidal
 - **Required Coverage**: ≥70% line coverage
 - **Python Versions**: 3.10, 3.11

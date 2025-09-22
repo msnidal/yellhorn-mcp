@@ -631,7 +631,7 @@ class TestLLMManager:
         call_args = mock_openai.responses.create.call_args[1]
         assert "tools" in call_args
         assert len(call_args["tools"]) == 2
-        assert call_args["tools"][0]["type"] == "web_search_preview"
+        assert call_args["tools"][0]["type"] == "web_search"
         assert call_args["tools"][1]["type"] == "code_interpreter"
         assert call_args["tools"][1]["container"]["type"] == "auto"
 

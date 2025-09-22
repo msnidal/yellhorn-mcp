@@ -22,11 +22,16 @@ from yellhorn_mcp.llm.base import (
     ResponseFormat,
     UsageResult,
 )
-from yellhorn_mcp.llm.chunking import ChunkingStrategy
 from yellhorn_mcp.llm.clients import GeminiClient, OpenAIClient, XAIClient
 from yellhorn_mcp.llm.config import AggregationStrategy, ChunkStrategy, LLMManagerConfig
 from yellhorn_mcp.llm.errors import UnsupportedModelError
-from yellhorn_mcp.llm.retry import is_retryable_error, log_retry_attempt
+from yellhorn_mcp.llm.model_families import (
+    is_gemini_model,
+    is_openai_model,
+    is_xai_model,
+)
+from yellhorn_mcp.llm.chunking import ChunkingStrategy
+from yellhorn_mcp.llm.retry import api_retry, is_retryable_error, log_retry_attempt
 from yellhorn_mcp.llm.usage import UsageMetadata
 from yellhorn_mcp.utils.token_utils import TokenCounter
 
@@ -153,13 +158,13 @@ class LLMManager:
         )
 
     def _is_openai_model(self, model: str) -> bool:
-        return any(model.startswith(prefix) for prefix in ("gpt-", "o3", "o4-"))
+        return is_openai_model(model)
 
     def _is_grok_model(self, model: str) -> bool:
-        return model.startswith("grok-")
+        return is_xai_model(model)
 
     def _is_gemini_model(self, model: str) -> bool:
-        return model.startswith("gemini-") or model.startswith("mock-")
+        return is_gemini_model(model)
 
     def _is_reasoning_model(self, model: str) -> bool:
         if model == "gpt-5-nano":

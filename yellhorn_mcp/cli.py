@@ -14,6 +14,7 @@ from pathlib import Path
 
 import uvicorn
 
+from yellhorn_mcp.llm.model_families import ModelFamily, detect_model_family
 from yellhorn_mcp.server import AsyncXAI, is_git_repository, mcp
 
 logging.basicConfig(
@@ -95,12 +96,14 @@ def main():
 
     # Validate API keys based on model
     model = args.model
-    is_grok_model = model.startswith("grok-")
-    is_openai_model = model.startswith("gpt-") or model.startswith("o")
-    is_openai_compatible_model = is_openai_model or is_grok_model
+    try:
+        model_family: ModelFamily = detect_model_family(model)
+    except ValueError as exc:
+        logging.error(str(exc))
+        sys.exit(1)
 
     # For Gemini models
-    if not is_openai_compatible_model:
+    if model_family == "gemini":
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             logging.error("GEMINI_API_KEY environment variable is not set")
@@ -108,30 +111,28 @@ def main():
                 "Please set the GEMINI_API_KEY environment variable with your Gemini API key"
             )
             sys.exit(1)
-    # For OpenAI-compatible models
-    else:
-        if is_grok_model:
-            api_key = os.getenv("XAI_API_KEY")
-            if not api_key:
-                logging.error("XAI_API_KEY environment variable is not set")
-                logging.error(
-                    "Please set the XAI_API_KEY environment variable with your xAI API key"
-                )
-                sys.exit(1)
-            if AsyncXAI is None:
-                logging.error("xai-sdk is required for Grok models but is not installed")
-                logging.error(
-                    "Install the xai-sdk package (e.g., 'uv pip install xai-sdk' or rerun 'uv sync') to use Grok models"
-                )
-                sys.exit(1)
-        else:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                logging.error("OPENAI_API_KEY environment variable is not set")
-                logging.error(
-                    "Please set the OPENAI_API_KEY environment variable with your OpenAI API key"
-                )
-                sys.exit(1)
+    elif model_family == "xai":
+        api_key = os.getenv("XAI_API_KEY")
+        if not api_key:
+            logging.error("XAI_API_KEY environment variable is not set")
+            logging.error(
+                "Please set the XAI_API_KEY environment variable with your xAI API key"
+            )
+            sys.exit(1)
+        if AsyncXAI is None:
+            logging.error("xai-sdk is required for Grok models but is not installed")
+            logging.error(
+                "Install the xai-sdk package (e.g., 'uv pip install xai-sdk' or rerun 'uv sync') to use Grok models"
+            )
+            sys.exit(1)
+    else:  # OpenAI
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logging.error("OPENAI_API_KEY environment variable is not set")
+            logging.error(
+                "Please set the OPENAI_API_KEY environment variable with your OpenAI API key"
+            )
+            sys.exit(1)
 
     # Set environment variables for the server
     os.environ["REPO_PATH"] = args.repo_path
@@ -162,7 +163,7 @@ def main():
     logging.info(f"Using model: {args.model}")
 
     # Show search grounding status if using Gemini model
-    if not is_openai_compatible_model:
+    if model_family == "gemini":
         search_status = "disabled" if args.no_search_grounding else "enabled"
         logging.info(f"Google Search Grounding: {search_status}")
 
