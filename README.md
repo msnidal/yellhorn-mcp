@@ -73,6 +73,19 @@ The server also requires the GitHub CLI (`gh`) to be installed and authenticated
 
 ### Getting Started
 
+#### Codex CLI Setup
+
+Add the server configuration below to your Codex CLI `config.toml` (`~/.config/codex/config.toml` by default). Update the `GEMINI_API_KEY` (or swap in `OPENAI_API_KEY`/`XAI_API_KEY` and adjust the model) and `REPO_PATH` values to match your environment.
+
+```toml
+[mcp_servers.yellhorn-mcp]
+command = "uv"
+args = ["run", "yellhorn-mcp"]
+env = { "GEMINI_API_KEY" = "your-api-key", "REPO_PATH" = "/path/to/your/repo" }
+```
+
+Restart Codex after updating the configuration so it picks up the new MCP server.
+
 #### VSCode/Cursor Setup
 
 To configure Yellhorn MCP in VSCode or Cursor, create a `.vscode/mcp.json` file at the root of your workspace with the following content:
